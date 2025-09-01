@@ -2649,7 +2649,8 @@ def update_mom_weight(idx):
         st.session_state.mom_windows[idx]['weight'] = st.session_state[key] / 100.0
 
 def update_start_with():
-    st.session_state.start_with_radio_key = st.session_state.start_with_radio_key
+    # Session state automatically updates via the radio button key
+    pass
 
 def update_first_rebalance_strategy():
     st.session_state.first_rebalance_strategy = st.session_state.first_rebalance_strategy_radio_key
@@ -3241,11 +3242,11 @@ with st.sidebar:
     if "added_frequency_widget" not in st.session_state:
         st.session_state["added_frequency_widget"] = st.session_state.added_frequency
     if "start_with_radio_key" not in st.session_state:
-        st.session_state["start_with_radio_key"] = st.session_state.start_with_radio_key
+        st.session_state["start_with_radio_key"] = "oldest"
     if "momentum_strategy_radio" not in st.session_state:
-        st.session_state["momentum_strategy_radio"] = st.session_state.momentum_strategy
+        st.session_state["momentum_strategy_radio"] = st.session_state.get("momentum_strategy", "Classic momentum")
     if "negative_momentum_strategy_radio" not in st.session_state:
-        st.session_state["negative_momentum_strategy_radio"] = st.session_state.negative_momentum_strategy
+        st.session_state["negative_momentum_strategy_radio"] = st.session_state.get("negative_momentum_strategy", "Go to cash")
     if "use_momentum_checkbox" not in st.session_state:
         st.session_state["use_momentum_checkbox"] = st.session_state.use_momentum
     # Removed use_decimals_checkbox initialization
@@ -3372,11 +3373,10 @@ with st.sidebar:
     # 5. How to handle assets with different start dates?
     start_with_options = ["all", "oldest"]
     if "start_with_radio_key" not in st.session_state:
-        st.session_state["start_with_radio_key"] = st.session_state.get("start_with_radio_key", "oldest")
+        st.session_state["start_with_radio_key"] = "oldest"
     start_with = st.radio(
         "How to handle assets with different start dates?",
         start_with_options,
-        index=0 if st.session_state["start_with_radio_key"] == "all" else 1,
         format_func=lambda x: "Start when ALL assets are available" if x == "all" else "Start with OLDEST asset",
         help="""
         **All:** Starts the backtest when all selected assets are available.
@@ -3394,7 +3394,6 @@ with st.sidebar:
     first_rebalance_strategy = st.radio(
         "When should the first rebalancing occur?",
         first_rebalance_options,
-        index=0 if st.session_state["first_rebalance_strategy_radio_key"] == "rebalancing_date" else 1,
         format_func=lambda x: "First rebalance on rebalancing date" if x == "rebalancing_date" else "First rebalance when momentum window complete",
         help="""
         **First rebalance on rebalancing date:** Start rebalancing immediately when possible.
@@ -3434,7 +3433,6 @@ with st.sidebar:
         selected_momentum = st.radio(
             "Momentum Strategy (when not all assets have negative):",
             ["Classic momentum", "Relative momentum"],
-            index=0 if st.session_state["momentum_strategy_radio"] == "Classic momentum" else 1,
             key="momentum_strategy_radio",
             help="Choose how to allocate when at least one asset has positive momentum.",
             on_change=update_momentum_strategy
@@ -3461,7 +3459,6 @@ with st.sidebar:
         selected_negative = st.radio(
             "If all assets have negative momentum:",
             ["Go to cash", "Equal weight", "Relative momentum"],
-            index=0 if st.session_state["negative_momentum_strategy_radio"] == "Go to cash" else (1 if st.session_state["negative_momentum_strategy_radio"] == "Equal weight" else 2),
             key="negative_momentum_strategy_radio",
             help="Choose what to do when all assets have negative momentum.",
             on_change=update_negative_momentum_strategy
