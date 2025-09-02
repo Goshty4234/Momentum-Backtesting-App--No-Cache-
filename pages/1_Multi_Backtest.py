@@ -15,16 +15,17 @@ import plotly.io as pio
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# PERFORMANCE OPTIMIZATION: NO CACHING VERSION
+# PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
 # =============================================================================
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data without caching (NO_CACHE version)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol
-        period: Data period
-        auto_adjust: Auto-adjust setting
+        period: Data period (used in cache key to prevent conflicts)
+        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
     """
     try:
         ticker = yf.Ticker(ticker_symbol)
@@ -3452,7 +3453,76 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         else:
             # All validations passed - show generate button
             if st.button(f"✨ Generate {total_variants} Portfolio Variants", type="primary"):
-                from Backtest_Engine import generate_portfolio_variants
+                # Define the function locally to avoid import issues
+                def generate_portfolio_variants(base_portfolio, variant_params):
+                    """
+                    Generate multiple portfolio variants based on the base portfolio and variant parameters.
+                    
+                    Args:
+                        base_portfolio (dict): The base portfolio configuration
+                        variant_params (dict): Dictionary containing variant parameters and their possible values
+                        
+                    Returns:
+                        list: List of portfolio variant configurations
+                    """
+                    variants = []
+                    
+                    # Get all possible values for each parameter
+                    param_values = {}
+                    for param, values in variant_params.items():
+                        if isinstance(values, list):
+                            param_values[param] = values
+                        else:
+                            param_values[param] = [values]
+                    
+                    # Generate all combinations
+                    from itertools import product
+                    
+                    # Get the parameter names and their possible values
+                    param_names = list(param_values.keys())
+                    param_value_lists = [param_values[param] for param in param_names]
+                    
+                    # Generate all combinations
+                    combinations = list(product(*param_value_lists))
+                    
+                    # Create a variant for each combination
+                    for i, combination in enumerate(combinations):
+                        # Create a deep copy of the base portfolio
+                        variant = base_portfolio.copy()
+                        
+                        # Update the variant with the new parameter values
+                        for j, param in enumerate(param_names):
+                            variant[param] = combination[j]
+                        
+                        # Generate a unique name for the variant
+                        variant_name_parts = []
+                        for param in param_names:
+                            if param in variant:
+                                value = variant[param]
+                                if isinstance(value, bool):
+                                    variant_name_parts.append(f"{param}_{'ON' if value else 'OFF'}")
+                                elif isinstance(value, (int, float)):
+                                    variant_name_parts.append(f"{param}_{value}")
+                                else:
+                                    variant_name_parts.append(f"{param}_{str(value)}")
+                        
+                        # Create variant name
+                        if variant_name_parts:
+                            variant['name'] = f"{base_portfolio.get('name', 'Portfolio')}_Variant_{i+1}_{'_'.join(variant_name_parts)}"
+                        else:
+                            variant['name'] = f"{base_portfolio.get('name', 'Portfolio')}_Variant_{i+1}"
+                        
+                        # Ensure unique name by adding suffix if needed
+                        base_name = variant['name']
+                        counter = 1
+                        while any(v.get('name') == variant['name'] for v in variants):
+                            variant['name'] = f"{base_name}_{counter}"
+                            counter += 1
+                        
+                        variants.append(variant)
+                    
+                    return variants
+                
                 import copy
                 
                 base_portfolio = copy.deepcopy(active_portfolio)
