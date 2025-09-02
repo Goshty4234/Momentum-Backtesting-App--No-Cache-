@@ -3491,7 +3491,22 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         
                         # Update the variant with the new parameter values
                         for j, param in enumerate(param_names):
-                            variant[param] = combination[j]
+                            value = combination[j]
+                            
+                            # Map UI parameter names to actual portfolio configuration fields
+                            if param == "rebalance_frequency":
+                                variant["rebalancing_frequency"] = value
+                            elif param == "momentum_strategy":
+                                variant["momentum_strategy"] = value
+                            elif param == "negative_strategy":
+                                variant["negative_momentum_strategy"] = value
+                            elif param == "include_beta":
+                                variant["calc_beta"] = value
+                            elif param == "include_volatility":
+                                variant["calc_volatility"] = value
+                            else:
+                                # For any other parameters, use the original name
+                                variant[param] = value
                         
                         # Generate a unique name for the variant
                         variant_name_parts = []
