@@ -14,6 +14,25 @@ import os
 import plotly.io as pio
 warnings.filterwarnings('ignore')
 
+# =============================================================================
+# PERFORMANCE OPTIMIZATION: NO CACHING VERSION
+# =============================================================================
+
+def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
+    """Get ticker data without caching (NO_CACHE version)
+    
+    Args:
+        ticker_symbol: Stock ticker symbol
+        period: Data period
+        auto_adjust: Auto-adjust setting
+    """
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+        return hist
+    except Exception:
+        return pd.DataFrame()
+
 # Matplotlib configuration for high-quality PDF generation
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -202,7 +221,7 @@ def create_matplotlib_table(data, headers, title="", width_inches=10, height_inc
                 ha='center', va='center', transform=ax.transAxes)
         return fig
 
-def generate_simple_pdf_report():
+def generate_simple_pdf_report(custom_name=""):
     """
     Generate a simple PDF report with exactly 4 sections using existing Streamlit data
     """
@@ -213,7 +232,23 @@ def generate_simple_pdf_report():
         
         # Create PDF buffer
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        
+        # Add proper PDF metadata
+        if custom_name.strip():
+            title = f"Multi Backtest Report - {custom_name.strip()}"
+            subject = f"Portfolio Analysis Report: {custom_name.strip()}"
+        else:
+            title = "Multi Backtest Report"
+            subject = "Portfolio Analysis and Performance Report"
+        
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=letter,
+            title=title,
+            author="Portfolio Backtest System",
+            subject=subject,
+            creator="Multi Backtest Application"
+        )
         story = []
         
         # Update progress
@@ -260,14 +295,18 @@ def generate_simple_pdf_report():
             alignment=1  # Center alignment
         )
         
-        # Main title
-        story.append(Paragraph("Multi-Portfolio Backtest Report", title_style))
-        story.append(Paragraph("Comprehensive Investment Portfolio Analysis", subtitle_style))
+        # Main title - use custom name if provided
+        if custom_name.strip():
+            main_title = f"Multi Backtest Report - {custom_name.strip()}"
+            subtitle = f"Investment Portfolio Analysis: {custom_name.strip()}"
+        else:
+            main_title = "Multi-Portfolio Backtest Report"
+            subtitle = "Comprehensive Investment Portfolio Analysis"
         
-        # Set document title for PDF viewer
-        doc.title = "Multi-Portfolio Backtest Report"
-        doc.author = "Momentum Backtest System"
-        doc.subject = "Investment Portfolio Analysis Report"
+        story.append(Paragraph(main_title, title_style))
+        story.append(Paragraph(subtitle, subtitle_style))
+        
+        # Document metadata is set in SimpleDocTemplate creation above
         
         # Report metadata
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2206,15 +2245,102 @@ if 'multi_backtest_portfolio_configs' not in st.session_state:
     st.session_state.multi_backtest_portfolio_configs = default_configs
 if 'multi_backtest_active_portfolio_index' not in st.session_state:
     st.session_state.multi_backtest_active_portfolio_index = 0
+
 if 'multi_backtest_paste_json_text' not in st.session_state:
     st.session_state.multi_backtest_paste_json_text = ""
 if 'multi_backtest_rerun_flag' not in st.session_state:
     st.session_state.multi_backtest_rerun_flag = False
 
+def ensure_unique_portfolio_name(proposed_name, existing_portfolios):
+    """
+    Ensures a portfolio name is unique by adding (1), (2), etc. if needed.
+    This happens BEFORE the portfolio is added to prevent crashes.
+    """
+    existing_names = [p.get('name', '') for p in existing_portfolios]
+    
+    # If name is unique, return as-is
+    if proposed_name not in existing_names:
+        return proposed_name
+    
+    # Find the next available number
+    counter = 1
+    while f"{proposed_name} ({counter})" in existing_names:
+        counter += 1
+    
+    return f"{proposed_name} ({counter})"
+
+def add_portfolio_to_configs(portfolio):
+    """
+    CENTRAL function to add ANY portfolio to the configs.
+    ALL portfolio additions MUST go through this function.
+    Automatically ensures unique names no matter the source.
+    """
+    # Ensure unique name IMMEDIATELY
+    unique_name = ensure_unique_portfolio_name(
+        portfolio.get('name', 'Unnamed Portfolio'), 
+        st.session_state.multi_backtest_portfolio_configs
+    )
+    portfolio['name'] = unique_name
+    
+    # Add to configs
+    st.session_state.multi_backtest_portfolio_configs.append(portfolio)
+    return portfolio
+
+def ensure_all_portfolio_names_unique():
+    """
+    NUCLEAR OPTION: Ensures ALL existing portfolios have unique names.
+    Call this at startup or after any bulk operations.
+    """
+    if 'multi_backtest_portfolio_configs' not in st.session_state:
+        return
+    
+    configs = st.session_state.multi_backtest_portfolio_configs
+    seen_names = set()
+    
+    for i, portfolio in enumerate(configs):
+        original_name = portfolio.get('name', f'Unnamed Portfolio {i+1}')
+        
+        # If this name is already seen, make it unique
+        if original_name in seen_names:
+            counter = 1
+            while f"{original_name} ({counter})" in seen_names:
+                counter += 1
+            portfolio['name'] = f"{original_name} ({counter})"
+        
+        seen_names.add(portfolio['name'])
+
+# NUCLEAR OPTION: Ensure all portfolio names are unique at startup
+# Called AFTER all functions are defined
+ensure_all_portfolio_names_unique()
+
+# CONTINUOUS MONITORING: Check for duplicates on every UI render
+# This catches ANY duplicate that appears through ANY unknown method
+def continuous_duplicate_check():
+    """
+    GOD-PROOF duplicate checking - runs on every UI render.
+    Even if GOD spawns a duplicate portfolio, this catches it.
+    """
+    if 'multi_backtest_portfolio_configs' not in st.session_state:
+        return
+    
+    configs = st.session_state.multi_backtest_portfolio_configs
+    names = [p.get('name', '') for p in configs]
+    
+    # Check if there are any duplicates
+    if len(names) != len(set(names)):
+        # Duplicates found! Fix them immediately
+        ensure_all_portfolio_names_unique()
+
+# Call continuous check on every render
+continuous_duplicate_check()
+
 def add_portfolio_callback():
     new_portfolio = default_configs[1].copy()
-    new_portfolio['name'] = f"New Portfolio {len(st.session_state.multi_backtest_portfolio_configs) + 1}"
-    st.session_state.multi_backtest_portfolio_configs.append(new_portfolio)
+    proposed_name = f"New Portfolio {len(st.session_state.multi_backtest_portfolio_configs) + 1}"
+    new_portfolio['name'] = proposed_name
+    
+    # Use central function - automatically ensures unique name
+    add_portfolio_to_configs(new_portfolio)
     st.session_state.multi_backtest_active_portfolio_index = len(st.session_state.multi_backtest_portfolio_configs) - 1
     st.session_state.multi_backtest_rerun_flag = True
 
@@ -2463,7 +2589,47 @@ def normalize_momentum_weights_callback():
 
 def paste_json_callback():
     try:
-        json_data = json.loads(st.session_state.multi_backtest_paste_json_text)
+        # Use the SAME parsing logic as successful PDF extraction
+        raw_text = st.session_state.multi_backtest_paste_json_text
+        
+        # STEP 1: Try the exact same approach as PDF extraction (simple strip + parse)
+        try:
+            cleaned_text = raw_text.strip()
+            json_data = json.loads(cleaned_text)
+            st.success("✅ JSON parsed successfully using PDF-style parsing!")
+        except json.JSONDecodeError:
+            # STEP 2: If that fails, apply our advanced cleaning (fallback)
+            st.info("🔧 Simple parsing failed, applying advanced PDF extraction fixes...")
+            
+            json_text = raw_text
+            import re
+            
+            # Fix common PDF extraction issues
+            # Pattern to find broken portfolio name lines like: "name": "Some Name "stocks":
+            broken_pattern = r'"name":\s*"([^"]*?)"\s*"stocks":'
+            # Replace with proper JSON structure: "name": "Some Name", "stocks":
+            json_text = re.sub(broken_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix truncated names that end abruptly without closing quote
+            # Pattern: "name": "Some text without closing quote "stocks":
+            truncated_pattern = r'"name":\s*"([^"]*?)\s+"stocks":'
+            json_text = re.sub(truncated_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix missing opening brace for portfolio objects
+            # Pattern: }, "name": should be }, { "name":
+            missing_brace_pattern = r'(},)\s*("name":)'
+            json_text = re.sub(missing_brace_pattern, r'\1 {\n \2', json_text)
+            
+            json_data = json.loads(json_text)
+            st.success("✅ JSON parsed successfully using advanced cleaning!")
+        
+        # Add missing fields for compatibility if they don't exist
+        if 'collect_dividends_as_cash' not in json_data:
+            json_data['collect_dividends_as_cash'] = False
+        if 'exclude_from_cashflow_sync' not in json_data:
+            json_data['exclude_from_cashflow_sync'] = False
+        if 'exclude_from_rebalancing_sync' not in json_data:
+            json_data['exclude_from_rebalancing_sync'] = False
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -2644,6 +2810,53 @@ def update_active_portfolio_index():
     
     # Sync date widgets with the new portfolio
     sync_date_widgets_with_portfolio()
+    
+    # NUCLEAR SYNC: FORCE momentum widgets to sync with the new portfolio
+    if portfolio_configs and st.session_state.multi_backtest_active_portfolio_index is not None:
+        active_portfolio = portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+        
+        # NUCLEAR APPROACH: FORCE all momentum session state widgets to sync
+        st.session_state['multi_backtest_active_use_momentum'] = active_portfolio.get('use_momentum', False)
+        st.session_state['multi_backtest_active_momentum_strategy'] = active_portfolio.get('momentum_strategy', 'Classic')
+        st.session_state['multi_backtest_active_negative_momentum_strategy'] = active_portfolio.get('negative_momentum_strategy', 'Cash')
+        st.session_state['multi_backtest_active_calc_beta'] = active_portfolio.get('calc_beta', True)
+        st.session_state['multi_backtest_active_calc_vol'] = active_portfolio.get('calc_volatility', True)
+        st.session_state['multi_backtest_active_beta_window'] = active_portfolio.get('beta_window_days', 365)
+        st.session_state['multi_backtest_active_beta_exclude'] = active_portfolio.get('exclude_days_beta', 30)
+        st.session_state['multi_backtest_active_vol_window'] = active_portfolio.get('vol_window_days', 365)
+        st.session_state['multi_backtest_active_vol_exclude'] = active_portfolio.get('exclude_days_vol', 30)
+        
+        # Sync expander state (same pattern as other portfolio parameters)
+        st.session_state['multi_backtest_active_variant_expanded'] = active_portfolio.get('variant_expander_expanded', False)
+        
+        # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
+        if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
+            active_portfolio['momentum_windows'] = [
+                {"lookback": 365, "exclude": 30, "weight": 0.5},
+                {"lookback": 180, "exclude": 30, "weight": 0.3},
+                {"lookback": 120, "exclude": 30, "weight": 0.2},
+            ]
+            print(f"NUCLEAR: FORCED momentum windows for portfolio {active_portfolio.get('name', 'Unknown')}")
+        
+        print(f"NUCLEAR: Synced momentum widgets for portfolio {active_portfolio.get('name', 'Unknown')}, use_momentum={active_portfolio.get('use_momentum', False)}, windows_count={len(active_portfolio.get('momentum_windows', []))}")
+        
+        # RESET variant generator checkboxes when switching portfolios
+        # This prevents stale checkbox states from previous portfolio selections
+        variant_generator_keys = [
+            "multi_use_momentum_vary",
+            # Rebalance frequency checkboxes
+            "multi_rebalance_never", "multi_rebalance_buyhold", "multi_rebalance_buyhold_target",
+            "multi_rebalance_weekly", "multi_rebalance_biweekly", "multi_rebalance_monthly",
+            "multi_rebalance_quarterly", "multi_rebalance_semiannually", "multi_rebalance_annually",
+            # Momentum variant checkboxes
+            "multi_momentum_classic", "multi_momentum_relative",
+            "multi_negative_cash", "multi_negative_equal", "multi_negative_relative", 
+            "multi_beta_yes", "multi_beta_no", "multi_vol_yes", "multi_vol_no"
+        ]
+        for key in variant_generator_keys:
+            if key in st.session_state:
+                del st.session_state[key]
+    
     st.session_state.multi_backtest_rerun_flag = True
 
 def update_name():
@@ -2704,12 +2917,21 @@ def update_use_momentum():
                 st.session_state['multi_backtest_active_vol_window'] = portfolio['vol_window_days']
                 st.session_state['multi_backtest_active_vol_exclude'] = portfolio['exclude_days_vol']
             else:
-                # No saved settings, use defaults
-                portfolio['momentum_windows'] = [
-                    {"lookback": 365, "exclude": 30, "weight": 0.5},
-                    {"lookback": 180, "exclude": 30, "weight": 0.3},
-                    {"lookback": 120, "exclude": 30, "weight": 0.2},
-                ]
+                # SMART NUCLEAR: No saved settings, create defaults only if no windows exist
+                if not portfolio.get('momentum_windows'):
+                    portfolio['momentum_windows'] = [
+                        {"lookback": 365, "exclude": 30, "weight": 0.5},
+                        {"lookback": 180, "exclude": 30, "weight": 0.3},
+                        {"lookback": 120, "exclude": 30, "weight": 0.2},
+                    ]
+                    print("SMART NUCLEAR: Added default momentum windows (had none)")
+                else:
+                    print(f"SMART NUCLEAR: Preserved existing momentum windows (had {len(portfolio['momentum_windows'])} windows)")
+                # Set default momentum settings only if not already set
+                portfolio['momentum_strategy'] = portfolio.get('momentum_strategy', 'Classic')
+                portfolio['negative_momentum_strategy'] = portfolio.get('negative_momentum_strategy', 'Cash')
+                portfolio['calc_beta'] = portfolio.get('calc_beta', True)
+                portfolio['calc_volatility'] = portfolio.get('calc_volatility', True)
         else:
             # Disabling momentum - save current settings before clearing
             saved_settings = {
@@ -2724,7 +2946,7 @@ def update_use_momentum():
                 'exclude_days_vol': portfolio.get('exclude_days_vol', 30),
             }
             portfolio['saved_momentum_settings'] = saved_settings
-            portfolio['momentum_windows'] = []
+            # Don't clear momentum_windows - preserve them for variant generation
         
         portfolio['use_momentum'] = new_val
         st.session_state.multi_backtest_rerun_flag = True
@@ -2732,7 +2954,49 @@ def update_use_momentum():
 
 
 def update_calc_beta():
-    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['calc_beta'] = st.session_state.multi_backtest_active_calc_beta
+    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+    active_portfolio = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
+    current_val = active_portfolio.get('calc_beta', False)
+    new_val = st.session_state.multi_backtest_active_calc_beta
+    
+    if current_val != new_val:
+        if new_val:
+            # Enabling beta - restore saved settings or use defaults
+            if 'saved_beta_settings' in active_portfolio:
+                # Restore previously saved beta settings
+                saved_settings = active_portfolio['saved_beta_settings']
+                active_portfolio['beta_window_days'] = saved_settings.get('beta_window_days', 365)
+                active_portfolio['exclude_days_beta'] = saved_settings.get('exclude_days_beta', 30)
+                
+                # Update UI widgets to reflect restored values
+                st.session_state['multi_backtest_active_beta_window'] = active_portfolio['beta_window_days']
+                st.session_state['multi_backtest_active_beta_exclude'] = active_portfolio['exclude_days_beta']
+            else:
+                # No saved settings, use current portfolio values or defaults
+                beta_window = active_portfolio.get('beta_window_days', 365)
+                beta_exclude = active_portfolio.get('exclude_days_beta', 30)
+                active_portfolio['beta_window_days'] = beta_window
+                active_portfolio['exclude_days_beta'] = beta_exclude
+                st.session_state['multi_backtest_active_beta_window'] = beta_window
+                st.session_state['multi_backtest_active_beta_exclude'] = beta_exclude
+        else:
+            # Disabling beta - save current values to BOTH saved settings AND main portfolio
+            beta_window = st.session_state.get('multi_backtest_active_beta_window', active_portfolio.get('beta_window_days', 365))
+            beta_exclude = st.session_state.get('multi_backtest_active_beta_exclude', active_portfolio.get('exclude_days_beta', 30))
+            
+            # Save to main portfolio keys (so variants inherit them)
+            active_portfolio['beta_window_days'] = beta_window
+            active_portfolio['exclude_days_beta'] = beta_exclude
+            
+            # Also save to saved_settings (for restore later)
+            saved_settings = {
+                'beta_window_days': beta_window,
+                'exclude_days_beta': beta_exclude,
+            }
+            active_portfolio['saved_beta_settings'] = saved_settings
+        
+        active_portfolio['calc_beta'] = new_val
+        st.session_state.multi_backtest_rerun_flag = True
 
 def update_beta_window():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['beta_window_days'] = st.session_state.multi_backtest_active_beta_window
@@ -2741,7 +3005,49 @@ def update_beta_exclude():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['exclude_days_beta'] = st.session_state.multi_backtest_active_beta_exclude
 
 def update_calc_vol():
-    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['calc_volatility'] = st.session_state.multi_backtest_active_calc_vol
+    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+    active_portfolio = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
+    current_val = active_portfolio.get('calc_volatility', False)
+    new_val = st.session_state.multi_backtest_active_calc_vol
+    
+    if current_val != new_val:
+        if new_val:
+            # Enabling volatility - restore saved settings or use defaults
+            if 'saved_vol_settings' in active_portfolio:
+                # Restore previously saved volatility settings
+                saved_settings = active_portfolio['saved_vol_settings']
+                active_portfolio['vol_window_days'] = saved_settings.get('vol_window_days', 365)
+                active_portfolio['exclude_days_vol'] = saved_settings.get('exclude_days_vol', 30)
+                
+                # Update UI widgets to reflect restored values
+                st.session_state['multi_backtest_active_vol_window'] = active_portfolio['vol_window_days']
+                st.session_state['multi_backtest_active_vol_exclude'] = active_portfolio['exclude_days_vol']
+            else:
+                # No saved settings, use current portfolio values or defaults
+                vol_window = active_portfolio.get('vol_window_days', 365)
+                vol_exclude = active_portfolio.get('exclude_days_vol', 30)
+                active_portfolio['vol_window_days'] = vol_window
+                active_portfolio['exclude_days_vol'] = vol_exclude
+                st.session_state['multi_backtest_active_vol_window'] = vol_window
+                st.session_state['multi_backtest_active_vol_exclude'] = vol_exclude
+        else:
+            # Disabling volatility - save current values to BOTH saved settings AND main portfolio
+            vol_window = st.session_state.get('multi_backtest_active_vol_window', active_portfolio.get('vol_window_days', 365))
+            vol_exclude = st.session_state.get('multi_backtest_active_vol_exclude', active_portfolio.get('exclude_days_vol', 30))
+            
+            # Save to main portfolio keys (so variants inherit them)
+            active_portfolio['vol_window_days'] = vol_window
+            active_portfolio['exclude_days_vol'] = vol_exclude
+            
+            # Also save to saved_settings (for restore later)
+            saved_settings = {
+                'vol_window_days': vol_window,
+                'exclude_days_vol': vol_exclude,
+            }
+            active_portfolio['saved_vol_settings'] = saved_settings
+        
+        active_portfolio['calc_volatility'] = new_val
+        st.session_state.multi_backtest_rerun_flag = True
 
 def update_vol_window():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['vol_window_days'] = st.session_state.multi_backtest_active_vol_window
@@ -2921,6 +3227,322 @@ st.header(f"Editing Portfolio: {active_portfolio['name']}")
 if "multi_backtest_active_name" not in st.session_state:
     st.session_state["multi_backtest_active_name"] = active_portfolio['name']
 active_portfolio['name'] = st.text_input("Portfolio Name", key="multi_backtest_active_name", on_change=update_name)
+
+# Portfolio Variant Generator - Multi-Select with Custom Options
+st.markdown("---")  # Add separator
+
+# NUCLEAR APPROACH: Portfolio-specific expander with forced refresh
+portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+
+# Store expander state in portfolio config  
+if 'variant_expander_expanded' not in active_portfolio:
+    active_portfolio['variant_expander_expanded'] = False
+
+# NUCLEAR: Force expander to refresh by clearing its widget state when portfolio changes
+last_portfolio_key = "multi_backtest_last_portfolio_for_variants"
+if st.session_state.get(last_portfolio_key) != portfolio_index:
+    # Portfolio changed - clear all variant-related widget states
+    keys_to_clear = [k for k in st.session_state.keys() if 'variant' in k.lower() and 'multi' in k]
+    for key in keys_to_clear:
+        if key != last_portfolio_key:  # Don't clear the tracker itself
+            del st.session_state[key]
+    st.session_state[last_portfolio_key] = portfolio_index
+
+# Use the beautiful expander with portfolio state
+current_state = active_portfolio.get('variant_expander_expanded', False)
+
+# NUCLEAR: Use a unique key that includes portfolio info to force recreation
+unique_expander_key = f"variants_exp_p{portfolio_index}_v{hash(str(active_portfolio.get('name', '')))}"
+
+with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
+    # Show current pin status and provide pin/unpin controls
+    col_status, col_pin, col_unpin = st.columns([2, 1, 1])
+    
+    with col_status:
+        if current_state:
+            st.info("📌 **Status: EXPANDED & PINNED** for this portfolio")
+        else:
+            st.info("📌 **Status: COLLAPSED** for this portfolio")
+    
+    with col_pin:
+        if not current_state:
+            if st.button("📌 Pin Expanded", key=f"pin_expanded_{portfolio_index}", type="primary"):
+                active_portfolio['variant_expander_expanded'] = True
+                st.success("✅ Expander state PINNED for this portfolio!")
+                st.rerun()
+    
+    with col_unpin:
+        if current_state:
+            if st.button("🔓 Unpin", key=f"unpin_expanded_{portfolio_index}", type="secondary"):
+                active_portfolio['variant_expander_expanded'] = False
+                st.success("🔓 Expander state UNPINNED for this portfolio!")
+                st.rerun()
+
+    st.markdown("**Select parameters to vary and customize their values:**")
+    
+    # Add explanatory text about how it works and naming
+    st.info("""
+    **📚 How Portfolio Variants Work:**
+    
+    This tool generates multiple portfolio variants by combining your selected options. Each variant will be a complete copy of your current portfolio with the specified changes.
+    
+    **🏷️ Portfolio Naming Convention:**
+    - **Format**: `Portfolio Name (Rebalancing Frequency - Momentum Strategy : When momentum not all negative and When momentum all negative - Include Beta in weighting - Include Volatility in weighting)`
+    - **Examples**:
+      - `My Portfolio (Quarterly - Momentum : Classic and Cash - Beta - Volatility)`
+      - `My Portfolio (Monthly - Momentum : Relative and Equal Weight - Beta)`
+      - `My Portfolio (Quarterly - No Momentum)`
+    
+    **💡 Tips**: 
+    - Select at least one rebalancing frequency
+    - If "Use Momentum" is unchecked, momentum options are hidden
+    - Beta and Volatility only appear when enabled
+    """)
+
+    variant_params = {}
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Rebalance Frequency (section title - not a checkbox!)
+        st.markdown("**Rebalance Frequency:**")
+        rebalance_options = []
+        if st.checkbox("Never", key="multi_rebalance_never"):
+            rebalance_options.append("Never")
+        if st.checkbox("Buy & Hold", key="multi_rebalance_buyhold"):
+            rebalance_options.append("Buy & Hold")
+        if st.checkbox("Buy & Hold (Target)", key="multi_rebalance_buyhold_target"):
+            rebalance_options.append("Buy & Hold (Target)")
+        if st.checkbox("Weekly", key="multi_rebalance_weekly"):
+            rebalance_options.append("Weekly")
+        if st.checkbox("Biweekly", key="multi_rebalance_biweekly"):
+            rebalance_options.append("Biweekly")
+        if st.checkbox("Monthly", key="multi_rebalance_monthly"):
+            rebalance_options.append("Monthly")
+        if st.checkbox("Quarterly", value=True, key="multi_rebalance_quarterly"):
+            rebalance_options.append("Quarterly")
+        if st.checkbox("Semiannually", key="multi_rebalance_semiannually"):
+            rebalance_options.append("Semiannually")
+        if st.checkbox("Annually", key="multi_rebalance_annually"):
+            rebalance_options.append("Annually")
+        
+        # Validation: At least one rebalance frequency must be selected
+        if rebalance_options:
+            variant_params["rebalance_frequency"] = rebalance_options
+        else:
+            st.error("⚠️ **At least one Rebalance Frequency must be selected!**")
+    
+    with col2:
+        # Use Momentum (simple checkbox - just enables momentum options, doesn't create variants)
+        # Reset checkbox to default if it doesn't exist in session state (fresh portfolio selection)
+        if "multi_use_momentum_vary" not in st.session_state:
+            st.session_state["multi_use_momentum_vary"] = False
+        use_momentum_vary = st.checkbox("Use Momentum", key="multi_use_momentum_vary")
+    
+    # Show momentum options ONLY if user checked "Use Momentum" 
+    # (regardless of current portfolio's momentum status)
+    if use_momentum_vary:
+        st.markdown("---")
+        col_mom_left, col_mom_right = st.columns(2)
+        
+        with col_mom_left:
+            # Momentum Strategy Section
+            st.markdown("**Momentum strategy when NOT all negative:**")
+            momentum_options = []
+            if st.checkbox("Classic momentum", value=True, key="multi_momentum_classic"):
+                momentum_options.append("Classic")
+            if st.checkbox("Relative momentum", key="multi_momentum_relative"):
+                momentum_options.append("Relative Momentum")
+            
+            # Validation and storage for momentum strategy
+            if momentum_options:
+                variant_params["momentum_strategy"] = momentum_options
+            else:
+                st.error("⚠️ **At least one momentum strategy must be selected!**")
+            
+            st.markdown("---")
+            
+            # Negative Strategy Section  
+            st.markdown("**Strategy when ALL momentum scores are negative:**")
+            negative_options = []
+            if st.checkbox("Cash", value=True, key="multi_negative_cash"):
+                negative_options.append("Cash")
+            if st.checkbox("Equal weight", key="multi_negative_equal"):
+                negative_options.append("Equal weight")
+            if st.checkbox("Relative momentum", key="multi_negative_relative"):
+                negative_options.append("Relative momentum")
+            
+            # Validation and storage for negative strategy
+            if negative_options:
+                variant_params["negative_strategy"] = negative_options
+            else:
+                st.error("⚠️ **At least one negative strategy must be selected!**")
+        
+        with col_mom_right:
+            # Beta in momentum weighting (section title - not a checkbox!)
+            st.markdown("**Include Beta in momentum weighting:**")
+            beta_options = []
+            if st.checkbox("With Beta", value=True, key="multi_beta_yes"):
+                beta_options.append(True)
+            if st.checkbox("Without Beta", key="multi_beta_no"):
+                beta_options.append(False)
+            
+            # Validation: At least one beta option must be selected
+            if beta_options:
+                variant_params["include_beta"] = beta_options
+            else:
+                st.error("⚠️ **At least one Beta option must be selected!**")
+            
+            st.markdown("---")
+            
+            # Volatility in momentum weighting (section title - not a checkbox!)
+            st.markdown("**Include Volatility in momentum weighting:**")
+            vol_options = []
+            if st.checkbox("With Volatility", value=True, key="multi_vol_yes"):
+                vol_options.append(True)
+            if st.checkbox("Without Volatility", key="multi_vol_no"):
+                vol_options.append(False)
+            
+            # Validation: At least one volatility option must be selected
+            if vol_options:
+                variant_params["include_volatility"] = vol_options
+            else:
+                st.error("⚠️ **At least one Volatility option must be selected!**")
+    else:
+        st.info("💡 **Momentum-related options** (Momentum Strategy, Negative Strategy, Beta, Volatility) are only available when momentum is enabled in the current portfolio or when varying 'Use Momentum' to include enabled variants.")
+    
+    # Calculate total combinations
+    total_variants = 1
+    for param_values in variant_params.values():
+        total_variants *= len(param_values)
+    
+    if variant_params:
+        st.info(f"🎯 **{total_variants} variants** will be generated")
+        
+        # Validation: Check for required parameters
+        validation_errors = []
+        
+        # Check if rebalance frequency is missing (always required)
+        if "rebalance_frequency" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **Rebalance Frequency**")
+        
+        # If momentum is enabled (user checked "Use Momentum"), we need ALL momentum parameters
+        if use_momentum_vary:
+            # Check if momentum strategies are missing (they're always required when momentum enabled)
+            if "momentum_strategy" not in variant_params:
+                validation_errors.append("⚠️ Select at least one **Momentum Strategy** when momentum is enabled")
+            
+            # Check if negative strategies are missing (they're always required when momentum enabled)
+            if "negative_strategy" not in variant_params:
+                validation_errors.append("⚠️ Select at least one **Negative Strategy** when momentum is enabled")
+            
+            # Check if beta options are missing (they're always required when momentum enabled)
+            if "include_beta" not in variant_params:
+                validation_errors.append("⚠️ Select at least one **Beta option** when momentum is enabled")
+            
+            # Check if volatility options are missing (they're always required when momentum enabled)
+            if "include_volatility" not in variant_params:
+                validation_errors.append("⚠️ Select at least one **Volatility option** when momentum is enabled")
+        
+        # Show validation errors
+        if validation_errors:
+            for error in validation_errors:
+                st.error(error)
+            st.warning("🚫 **Cannot generate variants** - Fix the errors above first")
+        else:
+            # All validations passed - show generate button
+            if st.button(f"✨ Generate {total_variants} Portfolio Variants", type="primary"):
+                from Backtest_Engine import generate_portfolio_variants
+                import copy
+                
+                base_portfolio = copy.deepcopy(active_portfolio)
+                base_name = base_portfolio['name']
+                
+                # SMART NUCLEAR: Handle momentum based on "Use Momentum" checkbox
+                if use_momentum_vary:
+                    base_portfolio['use_momentum'] = True
+                    # Only add default momentum windows if base portfolio had none
+                    if not base_portfolio.get('momentum_windows'):
+                        base_portfolio['momentum_windows'] = [
+                            {"lookback": 365, "exclude": 30, "weight": 0.5},
+                            {"lookback": 180, "exclude": 30, "weight": 0.3},
+                            {"lookback": 120, "exclude": 30, "weight": 0.2},
+                        ]
+                        base_portfolio['momentum_strategy'] = base_portfolio.get('momentum_strategy', 'Classic')
+                        base_portfolio['negative_momentum_strategy'] = base_portfolio.get('negative_momentum_strategy', 'Cash')
+                        base_portfolio['calc_beta'] = base_portfolio.get('calc_beta', True)
+                        base_portfolio['calc_volatility'] = base_portfolio.get('calc_volatility', True)
+                        print("SMART NUCLEAR: Added default momentum settings to base portfolio (had none)")
+                    else:
+                        print(f"SMART NUCLEAR: Preserved existing momentum windows on base portfolio (had {len(base_portfolio['momentum_windows'])} windows)")
+                else:
+                    # User unchecked "Use Momentum" - disable momentum for variants
+                    base_portfolio['use_momentum'] = False
+                    print("SMART NUCLEAR: Disabled momentum for variants (Use Momentum unchecked)")
+                
+                variants = generate_portfolio_variants(base_portfolio, variant_params)
+                
+                # CUSTOM NAMING: Override the generated names with clearer, more readable names
+                for variant in variants:
+                    # Create a much clearer name format
+                    clear_name_parts = []
+                    
+                    # Rebalancing frequency (compact - just the frequency word)
+                    if 'rebalancing_frequency' in variant:
+                        freq = variant['rebalancing_frequency']
+                        clear_name_parts.append(freq)  # Just "Quarterly", "Monthly", etc.
+                    
+                    # Add dash separator
+                    clear_name_parts.append("-")
+                    
+                    # Momentum status and strategy
+                    if variant.get('use_momentum', False):
+                        clear_name_parts.append("Momentum :")
+                        
+                        # Momentum strategy
+                        if variant.get('momentum_strategy') == 'Classic':
+                            clear_name_parts.append("Classic")
+                        elif variant.get('momentum_strategy') == 'Relative Momentum':
+                            clear_name_parts.append("Relative")
+                        
+                        # Negative strategy with "and" connector
+                        if variant.get('negative_momentum_strategy') == 'Cash':
+                            clear_name_parts.append("and Cash")
+                        elif variant.get('negative_momentum_strategy') == 'Equal weight':
+                            clear_name_parts.append("and Equal Weight")
+                        elif variant.get('negative_momentum_strategy') == 'Relative momentum':
+                            clear_name_parts.append("and Relative")
+                        
+                        # Beta and Volatility (only show when True, omit when False)
+                        if variant.get('calc_beta', False):
+                            clear_name_parts.append("- Beta")
+                        if variant.get('calc_volatility', False):
+                            clear_name_parts.append("- Volatility")
+                    else:
+                        clear_name_parts.append("No Momentum")
+                        # Stop here - no beta/volatility for non-momentum portfolios
+                    
+                    # Create the new clear name
+                    clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
+                    variant['name'] = clear_name
+                
+                # Add variants to portfolio list with unique names
+                for variant in variants:
+                    # Use central function - automatically ensures unique name
+                    add_portfolio_to_configs(variant)
+                    
+                    # If this variant has momentum enabled, ensure session state is properly initialized
+                    # This matches what update_use_momentum() does when momentum is enabled normally
+                    if variant.get('use_momentum', False):
+                        # We don't need to update session state widgets here because they're per-portfolio
+                        # and will be updated when the user selects this variant
+                        pass
+                
+                st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'!")
+                st.info(f"📊 Total portfolios: {len(st.session_state.multi_backtest_portfolio_configs)}")
+                st.rerun()
+    else:
+        st.warning("⚠️ Select at least one parameter to vary")
 
 col_left, col_right = st.columns([1, 1])
 with col_left:
@@ -3243,10 +3865,15 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
             pass
         if st.session_state.get('multi_backtest_active_calc_beta', False):
-            if "multi_backtest_active_beta_window" not in st.session_state:
-                st.session_state["multi_backtest_active_beta_window"] = active_portfolio['beta_window_days']
-            if "multi_backtest_active_beta_exclude" not in st.session_state:
-                st.session_state["multi_backtest_active_beta_exclude"] = active_portfolio['exclude_days_beta']
+            # Always ensure widgets have the correct values when beta is enabled
+            # Check for saved settings first, then use portfolio values, then defaults
+            if 'saved_beta_settings' in active_portfolio:
+                saved_settings = active_portfolio['saved_beta_settings']
+                st.session_state["multi_backtest_active_beta_window"] = saved_settings.get('beta_window_days', 365)
+                st.session_state["multi_backtest_active_beta_exclude"] = saved_settings.get('exclude_days_beta', 30)
+            else:
+                st.session_state["multi_backtest_active_beta_window"] = active_portfolio.get('beta_window_days', 365)
+                st.session_state["multi_backtest_active_beta_exclude"] = active_portfolio.get('exclude_days_beta', 30)
             st.number_input("Beta Lookback (days)", min_value=1, key="multi_backtest_active_beta_window", on_change=update_beta_window)
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
@@ -3256,10 +3883,15 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
             pass
         if st.session_state.get('multi_backtest_active_calc_vol', False):
-            if "multi_backtest_active_vol_window" not in st.session_state:
-                st.session_state["multi_backtest_active_vol_window"] = active_portfolio['vol_window_days']
-            if "multi_backtest_active_vol_exclude" not in st.session_state:
-                st.session_state["multi_backtest_active_vol_exclude"] = active_portfolio['exclude_days_vol']
+            # Always ensure widgets have the correct values when volatility is enabled
+            # Check for saved settings first, then use portfolio values, then defaults
+            if 'saved_vol_settings' in active_portfolio:
+                saved_settings = active_portfolio['saved_vol_settings']
+                st.session_state["multi_backtest_active_vol_window"] = saved_settings.get('vol_window_days', 365)
+                st.session_state["multi_backtest_active_vol_exclude"] = saved_settings.get('exclude_days_vol', 30)
+            else:
+                st.session_state["multi_backtest_active_vol_window"] = active_portfolio.get('vol_window_days', 365)
+                st.session_state["multi_backtest_active_vol_exclude"] = active_portfolio.get('exclude_days_vol', 30)
             st.number_input("Volatility Lookback (days)", min_value=1, key="multi_backtest_active_vol_window", on_change=update_vol_window)
             st.number_input("Volatility Exclude (days)", min_value=0, key="multi_backtest_active_vol_exclude", on_change=update_vol_exclude)
     st.markdown("---")
@@ -3346,10 +3978,9 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
                 if st.session_state[weight_key] != int(active_portfolio['momentum_windows'][j]['weight'] * 100.0):
                     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['momentum_windows'][j]['weight'] = st.session_state[weight_key] / 100.0
 else:
-    
-    active_portfolio['momentum_windows'] = []
-    active_portfolio['calc_beta'] = False
-    active_portfolio['calc_volatility'] = False
+    # Don't clear momentum_windows - they should persist when momentum is disabled
+    # so they're available when momentum is re-enabled or for variant generation
+    pass
 
 with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     # Clean portfolio config for export by removing unused settings
@@ -3376,16 +4007,40 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     components.html(copy_html, height=40)
     
     # Add PDF download button for individual portfolio JSON
-    def generate_individual_json_pdf():
+    def generate_individual_json_pdf(custom_name=""):
         """Generate a PDF with pure JSON content only for easy CTRL+A / CTRL+V copying."""
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.platypus import SimpleDocTemplate, Preformatted
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         import io
+        from datetime import datetime
         
         # Create PDF buffer
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+        
+        # Add proper PDF metadata
+        portfolio_name = active_portfolio.get('name', 'Portfolio')
+        
+        # Use custom name if provided, otherwise use portfolio name
+        if custom_name.strip():
+            title = f"Multi Backtest - {custom_name.strip()} - JSON Configuration"
+            subject = f"JSON Configuration: {custom_name.strip()}"
+        else:
+            title = f"Multi Backtest - {portfolio_name} - JSON Configuration"
+            subject = f"JSON Configuration for {portfolio_name}"
+        
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4, 
+            rightMargin=36, 
+            leftMargin=36, 
+            topMargin=36, 
+            bottomMargin=36,
+            title=title,
+            author="Portfolio Backtest System",
+            subject=subject,
+            creator="Multi Backtest Application"
+        )
         story = []
         
         # Pure JSON style - just monospace text
@@ -3412,13 +4067,30 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
         
         return pdf_data
     
+    # Optional custom PDF name for individual portfolio
+    custom_individual_pdf_name = st.text_input(
+        "📝 Custom Portfolio JSON PDF Name (optional):", 
+        value="",
+        placeholder=f"e.g., {active_portfolio.get('name', 'Portfolio')} Configuration, Custom Setup Analysis",
+        help="Leave empty to use automatic naming based on portfolio name",
+        key="multi_individual_custom_pdf_name"
+    )
+    
     if st.button("📄 Download JSON as PDF", help="Download a PDF containing the JSON configuration for easy copying", key="multi_individual_json_pdf_btn"):
         try:
-            pdf_data = generate_individual_json_pdf()
+            pdf_data = generate_individual_json_pdf(custom_individual_pdf_name)
+            
+            # Generate filename based on custom name or default
+            if custom_individual_pdf_name.strip():
+                clean_name = custom_individual_pdf_name.strip().replace(' ', '_').replace('/', '_').replace('\\', '_')
+                filename = f"{clean_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            else:
+                filename = f"multi_portfolio_{active_portfolio.get('name', 'portfolio').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
             st.download_button(
                 label="💾 Download Portfolio JSON PDF",
                 data=pdf_data,
-                file_name=f"multi_portfolio_{active_portfolio.get('name', 'portfolio').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                file_name=filename,
                 mime="application/pdf",
                 key="multi_individual_json_pdf_download"
             )
@@ -3532,6 +4204,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         # Don't run the backtest, but continue showing the UI
         pass
     else:
+        # Show standalone popup notification that code is really running
+        st.toast("**Code is running!** Starting backtest...", icon="🚀")
+        
         progress_bar = st.empty()
         progress_bar.progress(0, text="Initializing multi-portfolio backtest...")
         
@@ -3556,8 +4231,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 try:
                     progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
                     progress_bar.progress((i + 1) / (len(all_tickers) + 1), text=progress_text)
-                    ticker = yf.Ticker(t)
-                    hist = ticker.history(period="max", auto_adjust=False)[["Close", "Dividends"]]
+                    hist = get_ticker_data(t, period="max", auto_adjust=False)
                     if hist.empty:
                         invalid_tickers.append(t)
                         continue
@@ -4253,7 +4927,47 @@ def paste_all_json_callback():
         st.warning('No JSON provided')
         return
     try:
-        obj = json.loads(txt)
+        # Use the SAME parsing logic as successful PDF extraction
+        raw_text = txt
+        
+        # STEP 1: Try the exact same approach as PDF extraction (simple strip + parse)
+        try:
+            cleaned_text = raw_text.strip()
+            obj = json.loads(cleaned_text)
+            st.success("✅ Multi-portfolio JSON parsed successfully using PDF-style parsing!")
+        except json.JSONDecodeError:
+            # STEP 2: If that fails, apply our advanced cleaning (fallback)
+            st.info("🔧 Simple parsing failed, applying advanced PDF extraction fixes...")
+            
+            json_text = raw_text
+            import re
+            
+            # Fix broken portfolio name lines
+            broken_pattern = r'"name":\s*"([^"]*?)"\s*"stocks":'
+            json_text = re.sub(broken_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix truncated names
+            truncated_pattern = r'"name":\s*"([^"]*?)\s+"stocks":'
+            json_text = re.sub(truncated_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix missing opening brace for portfolio objects
+            missing_brace_pattern = r'(},)\s*("name":)'
+            json_text = re.sub(missing_brace_pattern, r'\1 {\n \2', json_text)
+            
+            obj = json.loads(json_text)
+            st.success("✅ Multi-portfolio JSON parsed successfully using advanced cleaning!")
+        
+        # Add missing fields for compatibility if they don't exist
+        if isinstance(obj, list):
+            for portfolio in obj:
+                # Add missing fields with default values
+                if 'collect_dividends_as_cash' not in portfolio:
+                    portfolio['collect_dividends_as_cash'] = False
+                if 'exclude_from_cashflow_sync' not in portfolio:
+                    portfolio['exclude_from_cashflow_sync'] = False
+                if 'exclude_from_rebalancing_sync' not in portfolio:
+                    portfolio['exclude_from_rebalancing_sync'] = False
+        
         if isinstance(obj, list):
             # Clear widget keys to force re-initialization
             widget_keys_to_clear = [
@@ -4487,16 +5201,40 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
     components.html(copy_html_all, height=40)
     
     # Add PDF download button for JSON
-    def generate_json_pdf():
+    def generate_json_pdf(custom_name=""):
         """Generate a PDF with pure JSON content only for easy CTRL+A / CTRL+V copying."""
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.platypus import SimpleDocTemplate, Preformatted
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         import io
+        from datetime import datetime
         
         # Create PDF buffer
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+        
+        # Add proper PDF metadata
+        portfolio_count = len(st.session_state.get('multi_backtest_portfolio_configs', []))
+        
+        # Use custom name if provided, otherwise use default
+        if custom_name.strip():
+            title = f"Multi Backtest - {custom_name.strip()} - JSON Configuration"
+            subject = f"JSON Configuration for Multi Backtest: {custom_name.strip()} ({portfolio_count} portfolios)"
+        else:
+            title = f"Multi Backtest - All Portfolios ({portfolio_count}) - JSON Configuration"
+            subject = f"JSON Configuration for {portfolio_count} Multi Backtest Portfolios"
+        
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4, 
+            rightMargin=36, 
+            leftMargin=36, 
+            topMargin=36, 
+            bottomMargin=36,
+            title=title,
+            author="Portfolio Backtest System",
+            subject=subject,
+            creator="Multi Backtest Application"
+        )
         story = []
         
         # Pure JSON style - just monospace text
@@ -4523,13 +5261,30 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
         
         return pdf_data
     
+    # Optional custom PDF name
+    custom_pdf_name = st.text_input(
+        "📝 Custom PDF Name (optional):", 
+        value="",
+        placeholder="e.g., Tech vs Conservative Comparison, Q4 2024 Analysis, etc.",
+        help="Leave empty to use automatic naming: 'Multi Backtest - All Portfolios (X) - JSON Configuration'",
+        key="multi_backtest_custom_pdf_name"
+    )
+    
     if st.button("📄 Download JSON as PDF", help="Download a PDF containing the JSON configuration for easy copying", key="multi_backtest_json_pdf_btn"):
         try:
-            pdf_data = generate_json_pdf()
+            pdf_data = generate_json_pdf(custom_pdf_name)
+            
+            # Generate filename based on custom name or default
+            if custom_pdf_name.strip():
+                clean_name = custom_pdf_name.strip().replace(' ', '_').replace('/', '_').replace('\\', '_')
+                filename = f"{clean_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            else:
+                filename = f"multi_backtest_configs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
             st.download_button(
                 label="💾 Download Multi Backtest JSON PDF",
                 data=pdf_data,
-                file_name=f"multi_backtest_configs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                file_name=filename,
                 mime="application/pdf",
                 key="multi_backtest_json_pdf_download"
             )
@@ -6704,12 +7459,27 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
     st.markdown("---")
     st.subheader("📄 PDF Export")
     
+    # Optional custom PDF report name
+    custom_report_name = st.text_input(
+        "📝 Custom Report Name (optional):", 
+        value="",
+        placeholder="e.g., Tech Stocks Q4 Analysis, Conservative vs Aggressive, Monthly Performance Review",
+        help="Leave empty to use automatic naming: 'Multi_Backtest_Report_[timestamp].pdf'",
+        key="multi_backtest_custom_report_name"
+    )
+    
     if st.button("Generate PDF Report", type="primary", use_container_width=True):
         try:
-            pdf_buffer = generate_simple_pdf_report()
+            pdf_buffer = generate_simple_pdf_report(custom_report_name)
             if pdf_buffer:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"Multi_Backtest_Report_{timestamp}.pdf"
+                
+                # Generate filename based on custom name or default
+                if custom_report_name.strip():
+                    clean_name = custom_report_name.strip().replace(' ', '_').replace('/', '_').replace('\\', '_')
+                    filename = f"{clean_name}_{timestamp}.pdf"
+                else:
+                    filename = f"Multi_Backtest_Report_{timestamp}.pdf"
                 
                 st.success("✅ PDF Report Generated Successfully!")
                 st.download_button(
