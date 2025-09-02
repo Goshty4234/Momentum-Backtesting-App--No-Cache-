@@ -645,14 +645,45 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
         next_rebalance_datetime = next_rebalance_datetime.replace(tzinfo=None)
     if hasattr(now, 'tzinfo') and now.tzinfo is not None:
         now = now.replace(tzinfo=None)
-    if next_rebalance_datetime <= now:
-        # If next rebalance is in the past, calculate the next one
-        if rebalancing_frequency == 'market_day' or rebalancing_frequency == 'calendar_day':
-            next_rebalance_datetime = now + timedelta(days=1)
-            next_date = next_rebalance_datetime.date()
-        else:
-            # For other frequencies, recalculate from the next date
-            return calculate_next_rebalance_date(rebalancing_frequency, next_rebalance_datetime)
+    # If next rebalance is in the past, calculate the next one iteratively instead of recursively
+    max_iterations = 10  # Prevent infinite loops
+    iteration = 0
+    while next_rebalance_datetime <= now and iteration < max_iterations:
+        iteration += 1
+        if rebalancing_frequency in ['market_day', 'calendar_day']:
+            next_date = next_date + timedelta(days=1)
+        elif rebalancing_frequency == 'week':
+            next_date = next_date + timedelta(weeks=1)
+        elif rebalancing_frequency == '2weeks':
+            next_date = next_date + timedelta(weeks=2)
+        elif rebalancing_frequency == 'month':
+            # Add one month safely
+            if next_date.month == 12:
+                next_date = next_date.replace(year=next_date.year + 1, month=1)
+            else:
+                next_date = next_date.replace(month=next_date.month + 1)
+            # Handle day overflow
+            try:
+                next_date = next_date.replace(day=min(next_date.day, 28))
+            except ValueError:
+                next_date = next_date.replace(day=1)
+        elif rebalancing_frequency == '3months':
+            # Add three months safely
+            new_month = next_date.month + 3
+            new_year = next_date.year + (new_month - 1) // 12
+            new_month = ((new_month - 1) % 12) + 1
+            next_date = next_date.replace(year=new_year, month=new_month, day=1)
+        elif rebalancing_frequency == '6months':
+            # Add six months safely
+            new_month = next_date.month + 6
+            new_year = next_date.year + (new_month - 1) // 12
+            new_month = ((new_month - 1) % 12) + 1
+            next_date = next_date.replace(year=new_year, month=new_month, day=1)
+        elif rebalancing_frequency == 'year':
+            next_date = next_date.replace(year=next_date.year + 1)
+        
+        next_rebalance_datetime = datetime.combine(next_date, time(9, 30))
+    
     time_until = next_rebalance_datetime - now
     
     return next_date, time_until, next_rebalance_datetime
@@ -729,30 +760,73 @@ def plotly_to_matplotlib_figure(plotly_fig, title="", width_inches=8, height_inc
                 color_index += 1
                 
             elif trace.type == 'pie':
-                # Handle pie charts
+                # Handle pie charts - SIMPLE PERFECT CIRCLE SOLUTION
                 labels = trace.labels if hasattr(trace, 'labels') else []
                 values = trace.values if hasattr(trace, 'values') else []
                 
                 if labels and values:
-                    # Create a new figure for pie chart with square aspect ratio
-                    fig_pie, ax_pie = plt.subplots(figsize=(8, 8))  # Force square aspect ratio
-                    ax_pie.set_title(title, fontsize=14, fontweight='bold', pad=20)
+                    # Create a slightly wider figure to ensure perfect circle
+                    fig_pie, ax_pie = plt.subplots(figsize=(8.5, 8))
                     
-                    # Add percentages to labels for legend
-                    labels_with_pct = [f"{k} ({v:.1f}%)" for k, v in zip(labels, values)]
+                    # Format long titles to break into multiple lines
+                    def format_long_title(title_text, max_length=50):
+                        if len(title_text) <= max_length:
+                            return title_text
+                        
+                        # Try to break at word boundaries first
+                        words = title_text.split()
+                        if len(words) == 1:
+                            # Single long word, break at max_length
+                            return '\n'.join([title_text[i:i+max_length] for i in range(0, len(title_text), max_length)])
+                        
+                        # Try to break at word boundaries
+                        current_line = ""
+                        lines = []
+                        for word in words:
+                            if len(current_line) + len(word) + 1 <= max_length:
+                                current_line += (word + " ") if current_line else word
+                            else:
+                                if current_line:
+                                    lines.append(current_line.strip())
+                                current_line = word
+                        
+                        if current_line:
+                            lines.append(current_line.strip())
+                        
+                        return '\n'.join(lines)
                     
-                    # Create pie chart with colors - only show percentages for larger slices
-                    def autopct_format(pct):
-                        return f'{pct:.1f}%' if pct > 5 else ''
+                    # Set title with line breaks and MORE SPACING to prevent overlap
+                    formatted_title = format_long_title(title)
+                    ax_pie.set_title(formatted_title, fontsize=14, fontweight='bold', pad=40, y=0.95)
                     
-                    wedges, texts, autotexts = ax_pie.pie(values, labels=labels, autopct=autopct_format, 
-                                                     startangle=90, colors=colors[:len(values)], center=(-0.1, 0))
-                    ax_pie.axis('equal')  # This ensures the pie chart is perfectly circular
+                    # Create pie chart with smart percentage display - hide small ones to prevent overlap
+                    def smart_autopct(pct):
+                        return f'{pct:.1f}%' if pct > 3 else ''  # Only show percentages > 3%
                     
-                    # Add legend with percentages
-                    ax_pie.legend(wedges, labels_with_pct, title="Categories", loc="center left", bbox_to_anchor=(1.1, 0, 0.5, 1))
+                    wedges, texts, autotexts = ax_pie.pie(
+                        values, 
+                        labels=labels, 
+                        autopct=smart_autopct,  # Use smart percentage display
+                        startangle=90, 
+                        colors=colors[:len(values)]
+                    )
                     
-                    plt.tight_layout()
+                    # Create legend labels with percentages
+                    legend_labels = []
+                    for i, label in enumerate(labels):
+                        percentage = (values[i] / sum(values)) * 100
+                        legend_labels.append(f"{label} ({percentage:.1f}%)")
+                    
+                    # Add legend with SPECIFIC POSITIONING to prevent overlap
+                    ax_pie.legend(wedges, legend_labels, title="Categories", 
+                                loc="center left", bbox_to_anchor=(1.15, 0.5))
+                    
+                    # This is the magic - force perfect circle
+                    ax_pie.axis('equal')
+                    
+                    # Add extra spacing to prevent overlap
+                    plt.subplots_adjust(right=0.8)
+                    
                     return fig_pie
         
         # Format the plot
