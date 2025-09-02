@@ -23,6 +23,86 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import base64
 warnings.filterwarnings('ignore')
 
+# =============================================================================
+# PERFORMANCE OPTIMIZATION: NO CACHING VERSION
+# =============================================================================
+
+def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
+    """Get ticker data without caching (NO_CACHE version)
+    
+    Args:
+        ticker_symbol: Stock ticker symbol
+        period: Data period
+        auto_adjust: Auto-adjust setting
+    """
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+        return hist
+    except Exception:
+        return pd.DataFrame()
+
+def get_ticker_info(ticker_symbol):
+    """Get ticker info without caching (NO_CACHE version)"""
+    try:
+        stock = yf.Ticker(ticker_symbol)
+        info = stock.info
+        return info
+    except Exception:
+        return {}
+
+def calculate_portfolio_metrics(portfolio_config, allocation_data):
+    """Calculate portfolio metrics without caching (NO_CACHE version)"""
+    # This will calculate the results without caching
+    # Note: The actual calculation logic remains unchanged
+    return portfolio_config, allocation_data  # Placeholder - will be filled in by calling functions
+
+def optimize_data_loading():
+    """Session state optimization to prevent redundant operations - PAGE-SPECIFIC"""
+    # Use page-specific keys to prevent conflicts between pages
+    page_prefix = "alloc_page_"
+    
+    # Initialize performance flags if not present
+    if f'{page_prefix}data_loaded' not in st.session_state:
+        st.session_state[f'{page_prefix}data_loaded'] = False
+    if f'{page_prefix}last_refresh' not in st.session_state:
+        st.session_state[f'{page_prefix}last_refresh'] = None
+    
+    # Check if data needs refresh (5 minutes)
+    current_time = datetime.datetime.now()
+    if (st.session_state[f'{page_prefix}last_refresh'] is None or 
+        (current_time - st.session_state[f'{page_prefix}last_refresh']).seconds > 300):
+        st.session_state[f'{page_prefix}data_loaded'] = False
+        st.session_state[f'{page_prefix}last_refresh'] = current_time
+    
+    return st.session_state[f'{page_prefix}data_loaded']
+
+def create_safe_cache_key(data):
+    """Create a safe, consistent cache key from complex data structures"""
+    import hashlib
+    import json
+    try:
+        # Convert to JSON string and hash for consistent cache keys
+        json_str = json.dumps(data, sort_keys=True, default=str)
+        return hashlib.md5(json_str.encode()).hexdigest()
+    except Exception:
+        # Fallback to string representation
+        return hashlib.md5(str(data).encode()).hexdigest()
+
+def run_cached_backtest(portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id="allocations"):
+    """Run backtest without caching (NO_CACHE version)
+    
+    Args:
+        portfolios_config_hash: Hash of portfolio configurations to detect changes
+        start_date_str: Start date as string for consistent cache key
+        end_date_str: End date as string for consistent cache key  
+        benchmark_str: Benchmark ticker as string
+        page_id: Page identifier to prevent cross-page conflicts
+    """
+    # This will be called by the actual backtest functions when needed
+    # No caching is applied in this version
+    return portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id  # Placeholder
+
 def check_currency_warning(tickers):
     """
     Check if any tickers are non-USD and display a warning.
@@ -737,7 +817,7 @@ def create_matplotlib_table(data, headers=None):
         print(f"Error creating matplotlib table: {e}")
         return None
 
-def generate_allocations_pdf():
+def generate_allocations_pdf(custom_name=""):
     """Generate PDF report for allocations page."""
     try:
         # Create progress bar
@@ -750,7 +830,27 @@ def generate_allocations_pdf():
         
         # Create PDF document
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+        
+        # Add proper PDF metadata
+        if custom_name.strip():
+            title = f"Allocations Report - {custom_name.strip()}"
+            subject = f"Portfolio Allocation Analysis: {custom_name.strip()}"
+        else:
+            title = "Allocations Report"
+            subject = "Portfolio Allocation and Asset Distribution Analysis"
+        
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4, 
+            rightMargin=72, 
+            leftMargin=72, 
+            topMargin=72, 
+            bottomMargin=72,
+            title=title,
+            author="Portfolio Backtest System",
+            subject=subject,
+            creator="Allocations Application"
+        )
         story = []
         
         # Define styles
@@ -792,14 +892,18 @@ def generate_allocations_pdf():
             alignment=1  # Center alignment
         )
         
-        # Main title
-        story.append(Paragraph("Portfolio Allocations Report", title_style))
-        story.append(Paragraph("Comprehensive Investment Portfolio Analysis", subtitle_style))
+        # Main title - use custom name if provided
+        if custom_name.strip():
+            main_title = f"Allocations Report - {custom_name.strip()}"
+            subtitle = f"Portfolio Allocation Analysis: {custom_name.strip()}"
+        else:
+            main_title = "Portfolio Allocations Report"
+            subtitle = "Comprehensive Investment Portfolio Analysis"
         
-        # Set document title for PDF viewer
-        doc.title = "Portfolio Allocations Report"
-        doc.author = "Momentum Backtest System"
-        doc.subject = "Investment Portfolio Analysis Report"
+        story.append(Paragraph(main_title, title_style))
+        story.append(Paragraph(subtitle, subtitle_style))
+        
+        # Document metadata is set in SimpleDocTemplate creation above
         
         # Report metadata
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2261,7 +2365,47 @@ def normalize_momentum_weights_callback():
 
 def paste_json_callback():
     try:
-        json_data = json.loads(st.session_state.get('alloc_paste_json_text', '{}'))
+        # Use the SAME parsing logic as successful PDF extraction
+        raw_text = st.session_state.get('alloc_paste_json_text', '{}')
+        
+        # STEP 1: Try the exact same approach as PDF extraction (simple strip + parse)
+        try:
+            cleaned_text = raw_text.strip()
+            json_data = json.loads(cleaned_text)
+            st.success("✅ JSON parsed successfully using PDF-style parsing!")
+        except json.JSONDecodeError:
+            # STEP 2: If that fails, apply our advanced cleaning (fallback)
+            st.info("🔧 Simple parsing failed, applying advanced PDF extraction fixes...")
+            
+            json_text = raw_text
+            import re
+            
+            # Fix common PDF extraction issues
+            # Pattern to find broken portfolio name lines like: "name": "Some Name "stocks":
+            broken_pattern = r'"name":\s*"([^"]*?)"\s*"stocks":'
+            # Replace with proper JSON structure: "name": "Some Name", "stocks":
+            json_text = re.sub(broken_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix truncated names that end abruptly without closing quote
+            # Pattern: "name": "Some text without closing quote "stocks":
+            truncated_pattern = r'"name":\s*"([^"]*?)\s+"stocks":'
+            json_text = re.sub(truncated_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix missing opening brace for portfolio objects
+            # Pattern: }, "name": should be }, { "name":
+            missing_brace_pattern = r'(},)\s*("name":)'
+            json_text = re.sub(missing_brace_pattern, r'\1 {\n \2', json_text)
+            
+            json_data = json.loads(json_text)
+            st.success("✅ JSON parsed successfully using advanced cleaning!")
+        
+        # Add missing fields for compatibility if they don't exist
+        if 'collect_dividends_as_cash' not in json_data:
+            json_data['collect_dividends_as_cash'] = False
+        if 'exclude_from_cashflow_sync' not in json_data:
+            json_data['exclude_from_cashflow_sync'] = False
+        if 'exclude_from_rebalancing_sync' not in json_data:
+            json_data['exclude_from_rebalancing_sync'] = False
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -2845,16 +2989,40 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     components.html(copy_html, height=40)
     
     # Add PDF download button for JSON
-    def generate_json_pdf():
+    def generate_json_pdf(custom_name=""):
         """Generate a PDF with pure JSON content only for easy CTRL+A / CTRL+V copying."""
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.platypus import SimpleDocTemplate, Preformatted
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         import io
+        from datetime import datetime
         
         # Create PDF buffer
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+        
+        # Add proper PDF metadata
+        portfolio_name = active_portfolio.get('name', 'Portfolio')
+        
+        # Use custom name if provided, otherwise use portfolio name
+        if custom_name.strip():
+            title = f"Allocations - {custom_name.strip()} - JSON Configuration"
+            subject = f"JSON Configuration: {custom_name.strip()}"
+        else:
+            title = f"Allocations - {portfolio_name} - JSON Configuration"
+            subject = f"JSON Configuration for {portfolio_name}"
+        
+        doc = SimpleDocTemplate(
+            buffer, 
+            pagesize=A4, 
+            rightMargin=36, 
+            leftMargin=36, 
+            topMargin=36, 
+            bottomMargin=36,
+            title=title,
+            author="Portfolio Backtest System",
+            subject=subject,
+            creator="Allocations Application"
+        )
         story = []
         
         # Pure JSON style - just monospace text
@@ -2881,13 +3049,30 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
         
         return pdf_data
     
+    # Optional custom PDF name for individual portfolio
+    custom_individual_pdf_name = st.text_input(
+        "📝 Custom Portfolio JSON PDF Name (optional):", 
+        value="",
+        placeholder=f"e.g., {active_portfolio.get('name', 'Portfolio')} Allocation Config, Asset Setup Analysis",
+        help="Leave empty to use automatic naming based on portfolio name",
+        key="alloc_individual_custom_pdf_name"
+    )
+    
     if st.button("📄 Download JSON as PDF", help="Download a PDF containing the JSON configuration for easy copying", key="alloc_json_pdf_btn"):
         try:
-            pdf_data = generate_json_pdf()
+            pdf_data = generate_json_pdf(custom_individual_pdf_name)
+            
+            # Generate filename based on custom name or default
+            if custom_individual_pdf_name.strip():
+                clean_name = custom_individual_pdf_name.strip().replace(' ', '_').replace('/', '_').replace('\\', '_')
+                filename = f"{clean_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            else:
+                filename = f"allocations_config_{active_portfolio.get('name', 'portfolio').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
             st.download_button(
                 label="💾 Download Allocations JSON PDF",
                 data=pdf_data,
-                file_name=f"allocations_config_{active_portfolio.get('name', 'portfolio').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                file_name=filename,
                 mime="application/pdf",
                 key="alloc_json_pdf_download"
             )
@@ -2975,7 +3160,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
 _TOTAL_TOL = 1.0
 _ALLOC_TOL = 1.0
 
-# Move Run Backtest to the left sidebar to make it conspicuous and separate from config
+# Move Run Backtest to the first sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
     
     # Pre-backtest validation check for all portfolios
@@ -3011,6 +3196,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         progress_bar.empty()
         st.stop()
     else:
+        # Show standalone popup notification that code is really running
+        st.toast("**Code is running!** Starting backtest...", icon="🚀")
+        
         progress_bar.progress(0, text="Starting backtest...")
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
@@ -3023,8 +3211,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             try:
                 progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
                 progress_bar.progress((i + 1) / (len(all_tickers) + len(portfolio_list)), text=progress_text)
-                ticker = yf.Ticker(t)
-                hist = ticker.history(period="max", auto_adjust=False)[["Close", "Dividends"]]
+                hist = get_ticker_data(t, period="max", auto_adjust=False)
                 if hist.empty:
                     print(f"No data available for {t}")
                     invalid_tickers.append(t)
@@ -3452,7 +3639,46 @@ def paste_all_json_callback():
         st.warning('No JSON provided')
         return
     try:
-        obj = json.loads(txt)
+        # Use the SAME parsing logic as successful PDF extraction
+        raw_text = txt
+        
+        # STEP 1: Try the exact same approach as PDF extraction (simple strip + parse)
+        try:
+            cleaned_text = raw_text.strip()
+            obj = json.loads(cleaned_text)
+            st.success("✅ Multi-portfolio JSON parsed successfully using PDF-style parsing!")
+        except json.JSONDecodeError:
+            # STEP 2: If that fails, apply our advanced cleaning (fallback)
+            st.info("🔧 Simple parsing failed, applying advanced PDF extraction fixes...")
+            
+            json_text = raw_text
+            import re
+            
+            # Fix broken portfolio name lines
+            broken_pattern = r'"name":\s*"([^"]*?)"\s*"stocks":'
+            json_text = re.sub(broken_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix truncated names
+            truncated_pattern = r'"name":\s*"([^"]*?)\s+"stocks":'
+            json_text = re.sub(truncated_pattern, r'"name": "\1", "stocks":', json_text)
+            
+            # Fix missing opening brace for portfolio objects
+            missing_brace_pattern = r'(},)\s*("name":)'
+            json_text = re.sub(missing_brace_pattern, r'\1 {\n \2', json_text)
+            
+            obj = json.loads(json_text)
+            st.success("✅ Multi-portfolio JSON parsed successfully using advanced cleaning!")
+        
+        # Add missing fields for compatibility if they don't exist
+        if isinstance(obj, list):
+            for portfolio in obj:
+                # Add missing fields with default values
+                if 'collect_dividends_as_cash' not in portfolio:
+                    portfolio['collect_dividends_as_cash'] = False
+                if 'exclude_from_cashflow_sync' not in portfolio:
+                    portfolio['exclude_from_cashflow_sync'] = False
+                if 'exclude_from_rebalancing_sync' not in portfolio:
+                    portfolio['exclude_from_rebalancing_sync'] = False
         if isinstance(obj, list):
             # Process each portfolio configuration for Allocations page
             processed_configs = []
@@ -3819,8 +4045,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     
                     try:
                         # Fetch comprehensive data from Yahoo Finance
-                        stock = yf.Ticker(ticker)
-                        info = stock.info
+                        info = get_ticker_info(ticker)
                         
                         # Get current price
                         current_price = info.get('currentPrice', info.get('regularMarketPrice', None))
@@ -4983,12 +5208,28 @@ if st.session_state.get('alloc_backtest_run', False):
     # Add PDF generation button at the very end
     st.markdown("---")
     st.markdown("### 📄 Generate PDF Report")
+    
+    # Optional custom PDF report name
+    custom_report_name = st.text_input(
+        "📝 Custom Report Name (optional):", 
+        value="",
+        placeholder="e.g., Portfolio Allocation Analysis, Asset Distribution Q4, Sector Breakdown Study",
+        help="Leave empty to use automatic naming: 'Allocations_Report_[timestamp].pdf'",
+        key="allocations_custom_report_name"
+    )
+    
     if st.button("Generate PDF Report", type="primary", use_container_width=True, key="alloc_pdf_btn_2"):
         try:
-            success = generate_allocations_pdf()
+            success = generate_allocations_pdf(custom_report_name)
             if success:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"Allocations_Report_{timestamp}.pdf"
+                
+                # Generate filename based on custom name or default
+                if custom_report_name.strip():
+                    clean_name = custom_report_name.strip().replace(' ', '_').replace('/', '_').replace('\\', '_')
+                    filename = f"{clean_name}_{timestamp}.pdf"
+                else:
+                    filename = f"Allocations_Report_{timestamp}.pdf"
                 
                 st.success("✅ PDF Report Generated Successfully!")
                 st.download_button(
