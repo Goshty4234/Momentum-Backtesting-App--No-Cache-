@@ -14,17 +14,16 @@ import os
 import plotly.io as pio
 
 # =============================================================================
-# PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
+# PERFORMANCE OPTIMIZATION: NO CACHE VERSION
 # =============================================================================
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Cache ticker data to improve performance across multiple tabs
+    """Get ticker data without caching (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol
-        period: Data period (used in cache key to prevent conflicts)
-        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
+        period: Data period
+        auto_adjust: Auto-adjust setting
     """
     try:
         ticker = yf.Ticker(ticker_symbol)
