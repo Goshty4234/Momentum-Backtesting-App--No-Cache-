@@ -1210,10 +1210,25 @@ def generate_simple_pdf_report(custom_name=""):
                                                                     row.append('')
                                                             table_rows.append(row)
                                                         
+                                                        # Calculate total values for summary row
+                                                        total_alloc_pct = sum(float(row[1].rstrip('%')) for row in table_rows)
+                                                        total_value = sum(float(row[4].replace('$', '').replace(',', '')) for row in table_rows)
+                                                        total_port_pct = sum(float(row[5].rstrip('%')) for row in table_rows)
+
+                                                        # Add total row
+                                                        total_row = [
+                                                            'TOTAL',
+                                                            f"{total_alloc_pct:.2f}%",
+                                                            '',
+                                                            '',
+                                                            f"${total_value:,.2f}",
+                                                            f"{total_port_pct:.2f}%"
+                                                        ]
+
                                                         # Create table with proper formatting
                                                         page_width = 7.5*inch
                                                         col_widths = [page_width/len(headers)] * len(headers)
-                                                        alloc_table = Table([headers] + table_rows, colWidths=col_widths)
+                                                        alloc_table = Table([headers] + table_rows + [total_row], colWidths=col_widths)
                                                         alloc_table.setStyle(TableStyle([
                                                             ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                                                             ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -1227,7 +1242,11 @@ def generate_simple_pdf_report(custom_name=""):
                                                             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
                                                             ('TOPPADDING', (0, 0), (-1, -1), 2),
                                                             ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                                            ('WORDWRAP', (0, 0), (-1, -1), True)
+                                                            ('WORDWRAP', (0, 0), (-1, -1), True),
+                                                            # Style the total row
+                                                            ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                                            ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                                            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
                                                         ]))
                                                         story.append(alloc_table)
                                                         story.append(Spacer(1, 5))
@@ -1248,9 +1267,18 @@ def generate_simple_pdf_report(custom_name=""):
                                                 table_rows.append([asset, f"{float(weight)*100:.2f}%"])
                                         
                                         if table_rows:
+                                            # Calculate total values for summary row
+                                            total_alloc_pct = sum(float(row[1].rstrip('%')) for row in table_rows)
+
+                                            # Add total row
+                                            total_row = [
+                                                'TOTAL',
+                                                f"{total_alloc_pct:.2f}%"
+                                            ]
+
                                             page_width = 7.5*inch
                                             col_widths = [page_width/len(headers)] * len(headers)
-                                            alloc_table = Table([headers] + table_rows, colWidths=col_widths)
+                                            alloc_table = Table([headers] + table_rows + [total_row], colWidths=col_widths)
                                             alloc_table.setStyle(TableStyle([
                                                 ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                                                 ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -1264,7 +1292,11 @@ def generate_simple_pdf_report(custom_name=""):
                                                 ('RIGHTPADDING', (0, 0), (-1, -1), 3),
                                                 ('TOPPADDING', (0, 0), (-1, -1), 2),
                                                 ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                                ('WORDWRAP', (0, 0), (-1, -1), True)
+                                                ('WORDWRAP', (0, 0), (-1, -1), True),
+                                                # Style the total row
+                                                ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                                ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
                                             ]))
                                             story.append(alloc_table)
                                             story.append(Spacer(1, 3))
@@ -7557,12 +7589,37 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                 }
                                                 try:
                                                     st.markdown(f"**{label}**")
+                                                    
+                                                    # Add total row
+                                                    total_alloc_pct = df_display['Allocation %'].sum()
+                                                    total_value = df_display['Total Value ($)'].sum()
+                                                    total_port_pct = df_display['% of Portfolio'].sum()
+
+                                                    total_row = pd.DataFrame({
+                                                        'Allocation %': [total_alloc_pct],
+                                                        'Price ($)': [float('nan')],
+                                                        'Shares': [float('nan')],
+                                                        'Total Value ($)': [total_value],
+                                                        '% of Portfolio': [total_port_pct]
+                                                    }, index=['TOTAL'])
+
+                                                    df_display = pd.concat([df_display, total_row])
+                                                    
                                                     sty = df_display.style.format(fmt)
                                                     if 'CASH' in df_table.index and show_cash:
                                                         def _highlight_cash_row(s):
                                                             if s.name == 'CASH':
                                                                 return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
+                                                            return [''] * len(s)
                                                         sty = sty.apply(_highlight_cash_row, axis=1)
+
+                                                    # Highlight TOTAL row
+                                                    def _highlight_total_row(s):
+                                                        if s.name == 'TOTAL':
+                                                            return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
+                                                        return [''] * len(s)
+                                                    sty = sty.apply(_highlight_total_row, axis=1)
+                                                    
                                                     st.dataframe(sty, use_container_width=True)
                                                 except Exception:
                                                     st.dataframe(df_display, use_container_width=True)
@@ -7797,12 +7854,37 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             }
                                             try:
                                                 st.markdown(f"**{label}**")
+                                                
+                                                # Add total row
+                                                total_alloc_pct = df_display['Allocation %'].sum()
+                                                total_value = df_display['Total Value ($)'].sum()
+                                                total_port_pct = df_display['% of Portfolio'].sum()
+
+                                                total_row = pd.DataFrame({
+                                                    'Allocation %': [total_alloc_pct],
+                                                    'Price ($)': [float('nan')],
+                                                    'Shares': [float('nan')],
+                                                    'Total Value ($)': [total_value],
+                                                    '% of Portfolio': [total_port_pct]
+                                                }, index=['TOTAL'])
+
+                                                df_display = pd.concat([df_display, total_row])
+                                                
                                                 sty = df_display.style.format(fmt)
                                                 if 'CASH' in df_table.index and show_cash:
                                                     def _highlight_cash_row(s):
                                                         if s.name == 'CASH':
                                                             return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
+                                                        return [''] * len(s)
                                                     sty = sty.apply(_highlight_cash_row, axis=1)
+
+                                                # Highlight TOTAL row
+                                                def _highlight_total_row(s):
+                                                    if s.name == 'TOTAL':
+                                                        return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
+                                                    return [''] * len(s)
+                                                sty = sty.apply(_highlight_total_row, axis=1)
+                                                
                                                 st.dataframe(sty, use_container_width=True)
                                                 
                                                 # Table storage is now handled outside this function
