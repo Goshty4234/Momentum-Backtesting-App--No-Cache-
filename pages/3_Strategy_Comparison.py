@@ -668,52 +668,112 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                                 row.append('')
                                         table_rows.append(row)
                                     
-                                    # Create table with smart column widths for statistics table
-                                    page_width = 7.5*inch
+                                    # Create table with smart column widths for statistics table - WIDER TABLE WITH MONETARY COLUMNS
+                                    page_width = 8.2*inch  # Increased from 7.5 to 8.2 inches for maximum width usage
                                     
-                                    # Smart column width distribution for statistics table
-                                    if len(headers) > 8:  # If we have many columns, use smaller widths
-                                        # First column (Portfolio name) gets more space for multi-line names, others get less
-                                        col_widths = [1.8*inch] + [(page_width - 1.8*inch)/(len(headers)-1)] * (len(headers)-1)
+                                    # Optimized column width distribution for statistics table - WITH WIDER MONETARY COLUMNS
+                                    if len(headers) > 8:  # If we have many columns, use optimized widths
+                                        # Portfolio column: increased from 1.4 to 2.1 inches for better text wrapping
+                                        # Performance metrics get more space for better readability
+                                        portfolio_width = 2.1*inch
+                                        remaining_width = page_width - portfolio_width
+                                        
+                                        # Create custom column widths with wider monetary columns
+                                        col_widths = [portfolio_width]
+                                        for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                            header_lower = header.lower()
+                                            # Give extra width to monetary value columns
+                                            if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                                col_widths.append(1.6 * (remaining_width / (len(headers) - 1)))  # 60% wider for monetary columns
+                                            else:
+                                                col_widths.append(remaining_width / (len(headers) - 1))
+                                        
+                                        # Ensure total width equals page_width
+                                        total_allocated = sum(col_widths)
+                                        if total_allocated > page_width:
+                                            # Scale down proportionally
+                                            scale_factor = page_width / total_allocated
+                                            col_widths = [w * scale_factor for w in col_widths]
+                                            
+                                    elif len(headers) > 6:  # Medium number of columns
+                                        # Portfolio column: 2.3 inches for medium tables
+                                        portfolio_width = 2.3*inch
+                                        remaining_width = page_width - portfolio_width
+                                        
+                                        # Create custom column widths with wider monetary columns
+                                        col_widths = [portfolio_width]
+                                        for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                            header_lower = header.lower()
+                                            # Give extra width to monetary value columns
+                                            if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                                col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))  # 70% wider for monetary columns
+                                            else:
+                                                col_widths.append(remaining_width / (len(headers) - 1))
+                                        
+                                        # Ensure total width equals page_width
+                                        total_allocated = sum(col_widths)
+                                        if total_allocated > page_width:
+                                            # Scale down proportionally
+                                            scale_factor = page_width / total_allocated
+                                            col_widths = [w * scale_factor for w in col_widths]
+                                            
                                     else:
-                                        # Equal width distribution for fewer columns
-                                        col_widths = [page_width/len(headers)] * len(headers)
+                                        # Few columns: Portfolio gets 2.0 inches, others share remaining space
+                                        portfolio_width = 2.0*inch
+                                        remaining_width = page_width - portfolio_width
+                                        
+                                        # Create custom column widths with wider monetary columns
+                                        col_widths = [portfolio_width]
+                                        for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                            header_lower = header.lower()
+                                            # Give extra width to monetary value columns
+                                            if any(word in header_lower for word in ['value', 'portfolio', 'total']):
+                                                col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))  # 70% wider for monetary columns
+                                            else:
+                                                col_widths.append(remaining_width / (len(headers) - 1))
+                                        
+                                        # Ensure total width equals page_width
+                                        total_allocated = sum(col_widths)
+                                        if total_allocated > page_width:
+                                            # Scale down proportionally
+                                            scale_factor = page_width / total_allocated
+                                            col_widths = [w * scale_factor for w in col_widths]
                                     
                                     stats_table = Table([wrapped_headers] + table_rows, colWidths=col_widths)
                                     # Dynamic font sizing based on number of columns and header complexity
                                     num_columns = len(headers)
                                     max_header_length = max(len(header) for header in headers)
                                     
-                                    # More sophisticated font sizing
+                                    # More sophisticated font sizing - SLIGHTLY LARGER FOR BETTER READABILITY
                                     if num_columns > 14:
-                                        font_size = 4  # Increased from 3
+                                        font_size = 5  # Slightly increased from 4
                                     elif num_columns > 12:
-                                        font_size = 5  # Increased from 4
+                                        font_size = 6  # Slightly increased from 5
                                     elif num_columns > 10:
-                                        font_size = 6  # Increased from 5
+                                        font_size = 7  # Slightly increased from 6
                                     elif num_columns > 8:
-                                        font_size = 7  # Increased from 6
+                                        font_size = 8  # Slightly increased from 7
                                     else:
-                                        font_size = 8  # Increased from 7
+                                        font_size = 9  # Slightly increased from 8
                                     
-                                    # Adjust for very long headers
+                                    # Adjust for very long headers - moderate reduction
                                     if max_header_length > 20:
-                                        font_size = max(3, font_size - 1)  # Reduce font size but not below 3
+                                        font_size = max(4, font_size - 1)  # Reduce font size moderately
                                     
                                     stats_table.setStyle(TableStyle([
                                         ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                                         ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
                                         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                        ('FONTSIZE', (0, 0), (-1, 0), font_size),  # Small font for headers
-                                        ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),  # Bigger font for data rows
+                                        ('FONTSIZE', (0, 0), (-1, 0), font_size),  # Font size for headers
+                                        ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),  # Slightly larger font for data rows
                                         ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
                                         ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
                                         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                        ('LEFTPADDING', (0, 0), (-1, -1), 2),  # Small padding for better readability
-                                        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-                                        ('TOPPADDING', (0, 0), (-1, 0), 3),  # Padding for header row
-                                        ('BOTTOMPADDING', (0, 0), (-1, 0), 3),
+                                        ('LEFTPADDING', (0, 0), (-1, -1), 1),  # Reduced padding to maximize table width usage
+                                        ('RIGHTPADDING', (0, 0), (-1, -1), 1),  # Reduced padding to maximize table width usage
+                                        ('TOPPADDING', (0, 0), (-1, 0), 4),  # Increased padding for header row for better title visibility
+                                        ('BOTTOMPADDING', (0, 0), (-1, 0), 4),  # Increased padding for header row for better title visibility
                                         ('TOPPADDING', (0, 1), (-1, -1), 2),  # Padding for data rows
                                         ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
                                         ('WORDWRAP', (0, 0), (-1, -1), True)
@@ -768,28 +828,89 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                             table_data.append(row)
                     
                     if table_data:
-                        # Create table with smart formatting for statistics
-                        page_width = 7.5*inch
+                        # Create table with smart formatting for statistics - WIDER TABLE WITH MONETARY COLUMNS
+                        page_width = 8.2*inch  # Increased from 7.5 to 8.2 inches for maximum width usage
                         
-                        # Smart column width distribution for statistics table
-                        if len(headers) > 8:  # If we have many columns, use smaller widths
-                            # First column (Portfolio name) gets more space, others get less
-                            col_widths = [1.2*inch] + [(page_width - 1.2*inch)/(len(headers)-1)] * (len(headers)-1)
+                        # Optimized column width distribution for statistics table - WITH WIDER MONETARY COLUMNS
+                        if len(headers) > 8:  # If we have many columns, use optimized widths
+                            # Portfolio column: increased from 1.4 to 2.1 inches for better text wrapping
+                            # Performance metrics get more space for better readability
+                            portfolio_width = 2.1*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            # Create custom column widths with wider monetary columns
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                header_lower = header.lower()
+                                # Give extra width to monetary value columns
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.5 * (remaining_width / (len(headers) - 1)))  # 50% wider for monetary columns
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            # Ensure total width equals page_width
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                # Scale down proportionally
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
+                        elif len(headers) > 6:  # Medium number of columns
+                            # Portfolio column: 2.3 inches for medium tables
+                            portfolio_width = 2.3*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            # Create custom column widths with wider monetary columns
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                header_lower = header.lower()
+                                # Give extra width to monetary value columns
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.6 * (remaining_width / (len(headers) - 1)))  # 60% wider for monetary columns
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            # Ensure total width equals page_width
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                # Scale down proportionally
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
                         else:
-                            # Equal width distribution for fewer columns
-                            col_widths = [page_width/len(headers)] * len(headers)
+                            # Few columns: Portfolio gets 2.0 inches, others share remaining space
+                            portfolio_width = 2.0*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            # Create custom column widths with wider monetary columns
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                header_lower = header.lower()
+                                # Give extra width to monetary value columns
+                                if any(word in header_lower for word in ['value', 'portfolio', 'total']):
+                                    col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))  # 70% wider for monetary columns
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            # Ensure total width equals page_width
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                # Scale down proportionally
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
                         
                         stats_table = Table([wrapped_headers] + table_data, colWidths=col_widths)
                         
-                        # Smart font size based on number of columns - micro size for statistics
-                        font_size = 3 if len(headers) > 14 else 4 if len(headers) > 12 else 5 if len(headers) > 10 else 6 if len(headers) > 8 else 7
+                        # Smart font size based on number of columns - SLIGHTLY LARGER FOR BETTER READABILITY
+                        font_size = 4 if len(headers) > 14 else 5 if len(headers) > 12 else 6 if len(headers) > 10 else 7 if len(headers) > 8 else 8
                         
                         stats_table.setStyle(TableStyle([
                             ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                             ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
                             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                            ('FONTSIZE', (0, 0), (-1, -1), font_size),  # Dynamic font size
+                            ('FONTSIZE', (0, 0), (-1, 0), font_size),  # Font size for headers
+                            ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),  # Slightly larger font for data rows
                             ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
                             ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
                             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -847,7 +968,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                             available_data.append([wrapped_name, 'Data Available'])
                 
                 if available_data:
-                    fallback_table = Table([headers] + available_data, colWidths=[3*inch, 2*inch])
+                    fallback_table = Table([headers] + available_data, colWidths=[2.2*inch, 2.8*inch])
                     fallback_table.setStyle(TableStyle([
                         ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                         ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -944,7 +1065,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                     # Use textwrap for proper word-based wrapping
                     import textwrap
                     wrapped_title = textwrap.fill(title_text, width=40, break_long_words=True, break_on_hyphens=False)
-                    ax_target.set_title(wrapped_title, fontsize=14, fontweight='bold', pad=30)
+                    ax_target.set_title(wrapped_title, fontsize=14, fontweight='bold', pad=80)
                     # Force perfectly circular shape
                     ax_target.set_aspect('equal')
                     # Use tighter axis limits to make pie chart appear larger within its space
