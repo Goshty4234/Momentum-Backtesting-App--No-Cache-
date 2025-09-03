@@ -2974,6 +2974,41 @@ def remove_portfolio_callback():
         st.session_state.strategy_comparison_active_portfolio_index = max(0, st.session_state.strategy_comparison_active_portfolio_index - 1)
         st.session_state.strategy_comparison_rerun_flag = True
 
+def bulk_delete_portfolios_callback(portfolio_names_to_delete):
+    """Delete multiple portfolios at once"""
+    if len(st.session_state.strategy_comparison_portfolio_configs) <= 1:
+        return  # Don't delete the last portfolio
+    
+    # Get indices of portfolios to delete
+    indices_to_delete = []
+    for name in portfolio_names_to_delete:
+        for i, cfg in enumerate(st.session_state.strategy_comparison_portfolio_configs):
+            if cfg['name'] == name:
+                indices_to_delete.append(i)
+                break
+    
+    # Sort indices in descending order to avoid index shifting issues
+    indices_to_delete.sort(reverse=True)
+    
+    # Delete portfolios
+    deleted_count = 0
+    for idx in indices_to_delete:
+        if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
+            st.session_state.strategy_comparison_portfolio_configs.pop(idx)
+            deleted_count += 1
+    
+    # Clear all checkboxes after deletion
+    st.session_state.strategy_comparison_portfolio_checkboxes = {}
+    
+    # Update active portfolio index if necessary
+    if st.session_state.strategy_comparison_active_portfolio_index >= len(st.session_state.strategy_comparison_portfolio_configs):
+        st.session_state.strategy_comparison_active_portfolio_index = max(0, len(st.session_state.strategy_comparison_portfolio_configs) - 1)
+    
+    # Set success message
+    st.session_state.strategy_comparison_bulk_delete_success = f"Successfully deleted {deleted_count} portfolio(s)!"
+    
+    st.session_state.strategy_comparison_rerun_flag = True
+
 def add_stock_callback():
     # Add stock without triggering full refresh - just set flag for processing
     st.session_state.strategy_comparison_add_stock_flag = True
@@ -3243,14 +3278,20 @@ def sync_cashflow_from_first_portfolio_callback():
                     st.session_state['strategy_comparison_active_added_amount'] = added_amount
                     st.session_state['strategy_comparison_active_add_freq'] = added_frequency
                 
+                # Store success message in session state instead of showing it at top
+                st.session_state['strategy_comparison_cashflow_sync_message'] = f"✅ Successfully synced cashflow settings to {updated_count} portfolio(s)"
+                st.session_state['strategy_comparison_cashflow_sync_message_type'] = 'success'
+                
                 # Force immediate rerun to show changes
                 st.session_state.strategy_comparison_rerun_flag = True
-                st.session_state.strategy_comparison_sync_success = True
-                st.rerun()
             else:
-                st.info("No portfolios were updated (all were excluded or already had matching values)")
+                # Store info message in session state
+                st.session_state['strategy_comparison_cashflow_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
+                st.session_state['strategy_comparison_cashflow_sync_message_type'] = 'info'
     except Exception as e:
-        st.error(f"Error during cash flow sync: {str(e)}")
+        # Store error message in session state
+        st.session_state['strategy_comparison_cashflow_sync_message'] = f"❌ Error during cash flow sync: {str(e)}"
+        st.session_state['strategy_comparison_cashflow_sync_message_type'] = 'error'
 
 def sync_rebalancing_from_first_portfolio_callback():
     """Sync rebalancing frequency from first portfolio to all others"""
@@ -3279,14 +3320,20 @@ def sync_rebalancing_from_first_portfolio_callback():
                     # Update UI widget session state to reflect the change
                     st.session_state['strategy_comparison_active_rebal_freq'] = rebalancing_frequency
                 
+                # Store success message in session state instead of showing it at top
+                st.session_state['strategy_comparison_rebalancing_sync_message'] = f"✅ Successfully synced rebalancing frequency to {updated_count} portfolio(s)"
+                st.session_state['strategy_comparison_rebalancing_sync_message_type'] = 'success'
+                
                 # Force immediate rerun to show changes
                 st.session_state.strategy_comparison_rerun_flag = True
-                st.session_state.strategy_comparison_sync_success = True
-                st.rerun()
             else:
-                st.info("No portfolios were updated (all were excluded or already had matching values)")
+                # Store info message in session state
+                st.session_state['strategy_comparison_rebalancing_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
+                st.session_state['strategy_comparison_rebalancing_sync_message_type'] = 'info'
     except Exception as e:
-        st.error(f"Error during rebalancing sync: {str(e)}")
+        # Store error message in session state
+        st.session_state['strategy_comparison_rebalancing_sync_message'] = f"❌ Error during rebalancing sync: {str(e)}"
+        st.session_state['strategy_comparison_rebalancing_sync_message_type'] = 'error'
 
 def add_momentum_window_callback():
     st.session_state.strategy_comparison_add_momentum_window_flag = True
@@ -4179,11 +4226,127 @@ active_portfolio = st.session_state.strategy_comparison_portfolio_configs[st.ses
 
 if st.sidebar.button("Add New Portfolio", on_click=add_portfolio_callback):
     pass
+
+# Individual portfolio removal (original functionality)
 if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
     if st.sidebar.button("Remove Selected Portfolio", on_click=remove_portfolio_callback):
         pass
+
+# Reset selected portfolio button
 if st.sidebar.button("Reset Selected Portfolio", on_click=reset_portfolio_callback):
     pass
+
+# NEW: Enhanced bulk portfolio management dropdown
+if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔄 Bulk Portfolio Management")
+    
+    # Initialize session state for selected portfolios
+    if "strategy_comparison_portfolio_checkboxes" not in st.session_state:
+        st.session_state.strategy_comparison_portfolio_checkboxes = {}
+    
+    # Enhanced dropdown with built-in selection controls
+    with st.sidebar.expander("📋 Manage Multiple Portfolios", expanded=False):
+        st.caption(f"Total portfolios: {len(portfolio_names)}")
+        
+        # Create checkboxes for each portfolio
+        st.markdown("**Select portfolios to delete:**")
+        
+        # Quick selection buttons at the top
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            if st.button("✅ Select All", key="strategy_comparison_select_all_portfolios", 
+                        help="Select all portfolios for deletion", use_container_width=True):
+                for name in portfolio_names:
+                    st.session_state.strategy_comparison_portfolio_checkboxes[name] = True
+                st.rerun()
+        
+        with col2:
+            if st.button("❌ Clear All", key="strategy_comparison_clear_all_portfolios", 
+                        help="Clear all portfolio selections", use_container_width=True):
+                st.session_state.strategy_comparison_portfolio_checkboxes = {}
+                st.rerun()
+        
+        with col3:
+            if st.button("🔄 Refresh", key="strategy_comparison_refresh_selections", 
+                        help="Refresh the selection list", use_container_width=True):
+                st.rerun()
+        
+        # Portfolio checkboxes with scrollable container
+        st.markdown("---")
+        
+        # Create a scrollable container for many portfolios
+        with st.container():
+            # Limit height and add scrollbar for many portfolios
+            st.markdown("""
+            <style>
+            .portfolio-checkboxes {
+                max-height: 300px;
+                overflow-y: auto;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Portfolio checkboxes with individual callback functions
+            for i, portfolio_name in enumerate(portfolio_names):
+                # Initialize checkbox state if not exists
+                if portfolio_name not in st.session_state.strategy_comparison_portfolio_checkboxes:
+                    st.session_state.strategy_comparison_portfolio_checkboxes[portfolio_name] = False
+                
+                # Create a unique callback function for each portfolio
+                def create_portfolio_callback(portfolio_name):
+                    def callback():
+                        # Toggle the current state
+                        current_state = st.session_state.strategy_comparison_portfolio_checkboxes.get(portfolio_name, False)
+                        st.session_state.strategy_comparison_portfolio_checkboxes[portfolio_name] = not current_state
+                    return callback
+                
+                # Create checkbox for each portfolio with callback
+                checkbox_key = f"strategy_comparison_portfolio_checkbox_{hash(portfolio_name)}"
+                is_checked = st.checkbox(
+                    f"🗑️ {portfolio_name}",
+                    value=st.session_state.strategy_comparison_portfolio_checkboxes[portfolio_name],
+                    key=checkbox_key,
+                    help=f"Select {portfolio_name} for deletion",
+                    on_change=create_portfolio_callback(portfolio_name)
+                )
+        
+        # Get selected portfolios from checkboxes
+        selected_portfolios_for_deletion = [
+            name for name, checked in st.session_state.strategy_comparison_portfolio_checkboxes.items() 
+            if checked
+        ]
+        
+        # Show success message if portfolios were deleted
+        if "strategy_comparison_bulk_delete_success" in st.session_state and st.session_state.strategy_comparison_bulk_delete_success:
+            st.success(st.session_state.strategy_comparison_bulk_delete_success)
+            # Clear the success message after showing it
+            del st.session_state.strategy_comparison_bulk_delete_success
+        
+        # Show selection summary
+        if selected_portfolios_for_deletion:
+            st.info(f"📊 Selected: {len(selected_portfolios_for_deletion)} portfolio(s)")
+            st.caption(f"Selected: {', '.join(selected_portfolios_for_deletion[:3])}{'...' if len(selected_portfolios_for_deletion) > 3 else ''}")
+            
+            # Bulk delete button with confirmation
+            confirm_deletion = st.checkbox(
+                f"🗑️ Confirm deletion of {len(selected_portfolios_for_deletion)} portfolio(s)",
+                key="strategy_comparison_confirm_bulk_deletion",
+                help="Check this box to enable the delete button"
+            )
+            
+            if confirm_deletion:
+                if st.button("🚨 DELETE SELECTED PORTFOLIOS", 
+                           type="secondary",
+                           help=f"Delete {len(selected_portfolios_for_deletion)} selected portfolio(s)",
+                           on_click=bulk_delete_portfolios_callback,
+                           args=(selected_portfolios_for_deletion,),
+                           use_container_width=True):
+                    pass
+        else:
+            st.caption("No portfolios selected for deletion")
 
 # Global Ticker Management Section (moved to sidebar)
 st.sidebar.markdown("---")
@@ -4737,6 +4900,20 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     - Beta and Volatility only appear when enabled
     """)
 
+    # Add checkbox to keep current portfolio
+    keep_current_portfolio = st.checkbox(
+        "✅ Keep Current Portfolio", 
+        value=True, 
+        key="strategy_comparison_keep_current_portfolio",
+        help="When checked, the current portfolio (including benchmark) will be kept. When unchecked, only the generated variants will be created."
+    )
+    
+    # Add explanatory note about what happens when unchecked
+    if not keep_current_portfolio:
+        st.info("⚠️ **Note:** When unchecked, the current portfolio will be **removed** after generating variants. Only the variants will remain in your portfolio list.")
+    
+    st.markdown("---")  # Add separator before variant parameters
+
     variant_params = {}
     
     col1, col2 = st.columns(2)
@@ -4891,13 +5068,14 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # All validations passed - show generate button
             if st.button(f"✨ Generate {total_variants} Portfolio Variants", type="primary"):
                 # Define the function locally to avoid import issues
-                def generate_portfolio_variants(base_portfolio, variant_params):
+                def generate_portfolio_variants(base_portfolio, variant_params, base_name):
                     """
                     Generate multiple portfolio variants based on the base portfolio and variant parameters.
                     
                     Args:
                         base_portfolio (dict): The base portfolio configuration
                         variant_params (dict): Dictionary containing variant parameters and their possible values
+                        base_name (str): The base name to use for variant naming
                         
                     Returns:
                         list: List of portfolio variant configurations
@@ -5002,7 +5180,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     base_portfolio['use_momentum'] = False
                     print("SMART NUCLEAR: Disabled momentum for variants (Use Momentum unchecked)")
                 
-                variants = generate_portfolio_variants(base_portfolio, variant_params)
+                variants = generate_portfolio_variants(base_portfolio, variant_params, base_name)
                 
                 # CUSTOM NAMING: Override the generated names with clearer, more readable names
                 for variant in variants:
@@ -5048,13 +5226,36 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
                     variant['name'] = clear_name
                 
+                # Handle current portfolio based on user choice - use exact same logic as Remove Selected Portfolio
+                if not keep_current_portfolio:
+                    if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
+                        # Use exact same logic as remove_portfolio_callback
+                        st.session_state.strategy_comparison_portfolio_configs.pop(st.session_state.strategy_comparison_active_portfolio_index)
+                        st.session_state.strategy_comparison_active_portfolio_index = max(0, st.session_state.strategy_comparison_active_portfolio_index - 1)
+                        
+                        # CRITICAL: Force a proper portfolio switch to update all UI widgets
+                        # This ensures the portfolio name text box and other widgets show the new portfolio's data
+                        st.session_state.strategy_comparison_rerun_flag = True
+                        
+                        st.success("🗑️ Removed original portfolio - Active portfolio updated")
+                    else:
+                        # Only one portfolio - can't remove it
+                        st.warning("⚠️ Cannot remove the only portfolio. Keeping original portfolio.")
+                        keep_current_portfolio = True
+                
                 # Add variants to portfolio list with unique names
                 for variant in variants:
                     # Use central function - automatically ensures unique name
                     add_portfolio_to_configs(variant)
                 
-                st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'!")
-                st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
+                # Show appropriate success message based on user choice
+                if keep_current_portfolio:
+                    st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio kept.")
+                    st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
+                else:
+                    st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio removed.")
+                    st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
+                
                 st.rerun()
     else:
         st.warning("⚠️ Select at least one parameter to vary")
@@ -5113,10 +5314,36 @@ if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
     if st.button("Sync ALL Portfolios Rebalancing Frequency from First Portfolio", on_click=sync_rebalancing_from_first_portfolio_callback, use_container_width=True):
         pass
     
-    # Show success message if sync was performed
-    if st.session_state.get('strategy_comparison_sync_success', False):
-        st.success("Portfolio settings synchronized successfully!")
-        st.session_state.strategy_comparison_sync_success = False
+    # Display sync messages locally below the buttons
+    if 'strategy_comparison_cashflow_sync_message' in st.session_state and st.session_state['strategy_comparison_cashflow_sync_message']:
+        message = st.session_state['strategy_comparison_cashflow_sync_message']
+        message_type = st.session_state.get('strategy_comparison_cashflow_sync_message_type', 'info')
+        
+        if message_type == 'success':
+            st.success(message)
+        elif message_type == 'error':
+            st.error(message)
+        else:
+            st.info(message)
+        
+        # Clear the message after displaying it
+        del st.session_state['strategy_comparison_cashflow_sync_message']
+        del st.session_state['strategy_comparison_cashflow_sync_message_type']
+    
+    if 'strategy_comparison_rebalancing_sync_message' in st.session_state and st.session_state['strategy_comparison_rebalancing_sync_message']:
+        message = st.session_state['strategy_comparison_rebalancing_sync_message']
+        message_type = st.session_state.get('strategy_comparison_rebalancing_sync_message_type', 'info')
+        
+        if message_type == 'success':
+            st.success(message)
+        elif message_type == 'error':
+            st.error(message)
+        else:
+            st.info(message)
+        
+        # Clear the message after displaying it
+        del st.session_state['strategy_comparison_rebalancing_sync_message']
+        del st.session_state['strategy_comparison_rebalancing_sync_message_type']
 
 # Sync exclusion options (only show if there are multiple portfolios and not for the first portfolio)
 if len(st.session_state.strategy_comparison_portfolio_configs) > 1 and st.session_state.strategy_comparison_active_portfolio_index > 0:
