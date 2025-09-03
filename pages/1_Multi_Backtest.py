@@ -156,8 +156,14 @@ def plotly_to_matplotlib_figure(plotly_fig, title="", width_inches=8, height_inc
         
         # Format the plot
         ax.grid(True, alpha=0.3)
-        if ax.get_legend_handles_labels()[0]:  # Only add legend if there are labels
-            ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+        # Don't add legend here - it will be added separately below the plot
+        # Extract legend information for separate placement
+        if ax.get_legend_handles_labels()[0]:
+            handles, labels = ax.get_legend_handles_labels()
+            colors = [handle.get_color() if hasattr(handle, 'get_color') else 'black' for handle in handles]
+            fig.legend_info = [{'label': label, 'color': color} for label, color in zip(labels, colors)]
+            # Remove legend from plot since we'll add it separately
+            ax.legend().remove()
         
         # Format x-axis for dates if needed
         if fig_data and len(fig_data) > 0 and hasattr(fig_data[0], 'x') and fig_data[0].x is not None:
@@ -181,6 +187,139 @@ def plotly_to_matplotlib_figure(plotly_fig, title="", width_inches=8, height_inc
         ax.text(0.5, 0.5, f'Error converting plot: {str(e)}', 
                 ha='center', va='center', transform=ax.transAxes)
         return fig
+
+
+def create_legend_figure(legend_info, title="Legend", width_inches=10, height_inches=2):
+    """
+    Create a separate matplotlib figure for the legend to be placed below the main plot
+    """
+    try:
+        if not legend_info:
+            return None
+        
+        # Process labels to handle long portfolio names
+        processed_labels = []
+        max_label_length = 0
+        
+        for item in legend_info:
+            label = item['label']
+            # If label is very long, wrap it intelligently
+            if len(label) > 40:
+                # Split long labels at spaces or special characters
+                words = label.split()
+                if len(words) > 3:
+                    # For very long names, create multiple lines
+                    if len(words) <= 6:
+                        # Split in the middle
+                        mid = len(words) // 2
+                        wrapped_label = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                    else:
+                        # Split into thirds for extremely long names
+                        third = len(words) // 3
+                        wrapped_label = '\n'.join([
+                            ' '.join(words[:third]),
+                            ' '.join(words[third:2*third]),
+                            ' '.join(words[2*third:])
+                        ])
+                else:
+                    wrapped_label = label
+            else:
+                wrapped_label = label
+            
+            processed_labels.append(wrapped_label)
+            # Calculate max height needed for wrapped labels
+            lines = wrapped_label.count('\n') + 1
+            max_label_length = max(max_label_length, lines)
+        
+        # Calculate dynamic height based on number of items and label complexity
+        num_items = len(legend_info)
+        base_height = 2.5  # Increased from 2.0 to 2.5 for larger text
+        height_per_item = max(0.8, max_label_length * 0.25)  # Increased from 0.6/0.2 to 0.8/0.25 for larger text
+        legend_height = max(base_height, min(6.0, num_items * height_per_item))  # Increased max from 5.0 to 6.0
+        
+        fig, ax = plt.subplots(figsize=(width_inches, legend_height))
+        ax.axis('off')
+        
+        # Create legend handles
+        handles = []
+        
+        for item in legend_info:
+            # Create a line handle for the legend
+            line = plt.Line2D([], [], color=item['color'], linewidth=3)
+            handles.append(line)
+        
+        # Determine optimal number of columns based on content
+        if num_items <= 3:
+            ncol = num_items
+        elif num_items <= 6:
+            ncol = min(3, num_items)
+        else:
+            ncol = min(4, num_items)  # Max 4 columns for many items
+        
+        # Create legend with specific positioning and better text handling
+        legend = ax.legend(handles, processed_labels, 
+                           loc='center',
+                           ncol=ncol,
+                           frameon=True,
+                           fancybox=True,
+                           shadow=True,
+                           fontsize=16,  # Increased from 12 to 16 for better readability
+                           columnspacing=2.0,
+                           labelspacing=1.2)  # Increased from 1.0 to 1.2 for better spacing
+        
+        # Add title if provided
+        if title:
+            ax.set_title(title, fontsize=18, fontweight='bold', pad=15)  # Increased from 14 to 18
+        
+        plt.tight_layout()
+        return fig
+        
+    except Exception as e:
+        # Return a simple error figure
+        fig, ax = plt.subplots(figsize=(width_inches, 1))
+        ax.text(0.5, 0.5, f'Error creating legend: {str(e)}', 
+                ha='center', va='center', transform=ax.transAxes)
+        return fig
+
+
+def create_paginated_legends(legend_info, title="Legend", width_inches=10, max_items_per_page=25):
+    """
+    Create multiple legend figures if the legend is very long, splitting across pages
+    """
+    if not legend_info:
+        return []
+    
+    legends = []
+    total_items = len(legend_info)
+    
+    # If legend is short enough, create single legend
+    if total_items <= max_items_per_page:
+        single_legend = create_legend_figure(legend_info, title, width_inches)
+        if single_legend:
+            legends.append(single_legend)
+        return legends
+    
+    # Split legend into multiple pages
+    num_pages = (total_items + max_items_per_page - 1) // max_items_per_page
+    
+    for page in range(num_pages):
+        start_idx = page * max_items_per_page
+        end_idx = min((page + 1) * max_items_per_page, total_items)
+        
+        page_legend_info = legend_info[start_idx:end_idx]
+        page_title = f"{title} (Page {page + 1} of {num_pages})"
+        
+        # Calculate height for this page
+        num_items = len(page_legend_info)
+        base_height = 2.5  # Increased from 2.0 to 2.5 for larger text
+        height_per_item = 0.8  # Increased from 0.6 to 0.8 for larger text
+        page_height = max(base_height, min(6.0, num_items * height_per_item))  # Increased max from 5.0 to 6.0
+        
+        page_legend = create_legend_figure(page_legend_info, page_title, width_inches, page_height)
+        if page_legend:
+            legends.append(page_legend)
+    
+    return legends
 
 def create_matplotlib_table(data, headers, title="", width_inches=10, height_inches=4):
     """
@@ -555,6 +694,22 @@ def generate_simple_pdf_report(custom_name=""):
                 # Add to PDF
                 story.append(Image(img_buffer, width=7.5*inch, height=4.5*inch))  # Full page width
                 story.append(Spacer(1, 15))
+                
+                # Add legend below the plot if available
+                if hasattr(mpl_fig, 'legend_info') and mpl_fig.legend_info:
+                    try:
+                        legend_figures = create_paginated_legends(mpl_fig.legend_info, "Portfolio Legend", width_inches=10)
+                        for legend_fig in legend_figures:
+                            legend_buffer = io.BytesIO()
+                            legend_fig.savefig(legend_buffer, format='png', dpi=300, bbox_inches='tight')
+                            legend_buffer.seek(0)
+                            plt.close(legend_fig)
+                            
+                            # Add legend to PDF
+                            story.append(Image(legend_buffer, width=7.5*inch, height=2*inch))
+                            story.append(Spacer(1, 10))
+                    except Exception as e:
+                        story.append(Paragraph(f"Error creating legend: {str(e)}", styles['Normal']))
             except Exception as e:
                 story.append(Paragraph(f"Error converting performance plot: {str(e)}", styles['Normal']))
         
@@ -574,6 +729,22 @@ def generate_simple_pdf_report(custom_name=""):
                 # Add to PDF
                 story.append(Image(img_buffer, width=7.5*inch, height=4.5*inch))  # Full page width
                 story.append(Spacer(1, 15))
+                
+                # Add legend below the plot if available
+                if hasattr(mpl_fig, 'legend_info') and mpl_fig.legend_info:
+                    try:
+                        legend_figures = create_paginated_legends(mpl_fig.legend_info, "Portfolio Legend", width_inches=10)
+                        for legend_fig in legend_figures:
+                            legend_buffer = io.BytesIO()
+                            legend_fig.savefig(legend_buffer, format='png', dpi=300, bbox_inches='tight')
+                            legend_buffer.seek(0)
+                            plt.close(legend_fig)
+                            
+                            # Add legend to PDF
+                            story.append(Image(legend_buffer, width=7.5*inch, height=2*inch))
+                            story.append(Spacer(1, 10))
+                    except Exception as e:
+                        story.append(Paragraph(f"Error creating legend: {str(e)}", styles['Normal']))
             except Exception as e:
                 story.append(Paragraph(f"Error converting drawdown plot: {str(e)}", styles['Normal']))
         
