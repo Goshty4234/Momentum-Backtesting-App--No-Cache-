@@ -418,6 +418,25 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
             story.append(Paragraph(f"Portfolio: {config.get('name', 'Unknown')}", subheading_style))
             story.append(Spacer(1, 10))
             
+            # Get final portfolio value from backtest results if available
+            portfolio_value_str = "N/A"
+            if 'strategy_comparison_all_results' in st.session_state and st.session_state.strategy_comparison_all_results:
+                portfolio_name = config.get('name', 'Unknown')
+                portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name)
+                if portfolio_results:
+                    if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
+                        final_value = portfolio_results['with_additions'].iloc[-1]
+                        if not pd.isna(final_value) and final_value > 0:
+                            portfolio_value_str = f"${float(final_value):,.2f}"
+                    elif isinstance(portfolio_results, dict) and 'no_additions' in portfolio_results:
+                        final_value = portfolio_results['no_additions'].iloc[-1]
+                        if not pd.isna(final_value) and final_value > 0:
+                            portfolio_value_str = f"${float(final_value):,.2f}"
+                    elif isinstance(portfolio_results, pd.Series):
+                        latest_value = portfolio_results.iloc[-1]
+                        if not pd.isna(latest_value) and latest_value > 0:
+                            portfolio_value_str = f"${float(latest_value):,.2f}"
+            
             # Create configuration table with all parameters
             config_data = [
                 ['Parameter', 'Value', 'Description'],
@@ -425,6 +444,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                 ['Added Amount', f"${config.get('added_amount', 0):,.2f}", 'Regular contribution amount'],
                 ['Added Frequency', config.get('added_frequency', 'N/A'), 'How often contributions are made'],
                 ['Rebalancing Frequency', config.get('rebalancing_frequency', 'N/A'), 'How often portfolio is rebalanced'],
+                ['Portfolio Value', portfolio_value_str, 'Current portfolio value (if backtest completed)'],
                 ['Benchmark', config.get('benchmark_ticker', 'N/A'), 'Performance comparison index'],
                 ['Use Momentum', 'Yes' if config.get('use_momentum', False) else 'No', 'Whether momentum strategy is enabled'],
                 ['Momentum Strategy', config.get('momentum_strategy', 'N/A'), 'Type of momentum calculation'],
@@ -1085,7 +1105,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                     # Add to PDF - increased pie chart size for better visibility
                     story.append(Image(target_img_buffer, width=5.5*inch, height=5.5*inch))
                     
-                    # Add Next Rebalance Timer information - simple text display
+                    # Add Next Rebalance Timer information - enhanced display
                     story.append(Paragraph(f"Next Rebalance Timer - {portfolio_name}", subheading_style))
                     story.append(Spacer(1, 1))
                     
@@ -1119,6 +1139,37 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                             story.append(Paragraph("Next rebalance information not available", styles['Normal']))
                     else:
                         story.append(Paragraph("Next rebalance information not available", styles['Normal']))
+                    
+                    # Add portfolio value to the timer section
+                    try:
+                        portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                        if isinstance(portfolio_results, dict):
+                            if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                latest_value = portfolio_results['with_additions'].iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                latest_value = portfolio_results['no_additions'].iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            elif isinstance(portfolio_results, pd.Series):
+                                latest_value = portfolio_results.iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            else:
+                                portfolio_value_str = "N/A"
+                        else:
+                            portfolio_value_str = "N/A"
+                        
+                        story.append(Paragraph(f"Portfolio Value: {portfolio_value_str}", styles['Normal']))
+                    except Exception as e:
+                        story.append(Paragraph("Portfolio Value: N/A", styles['Normal']))
                     
                     # Add page break after pie plot + timer to separate from allocation table
                     story.append(PageBreak())
@@ -1163,10 +1214,25 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                                             row.append('')
                                                     table_rows.append(row)
                                                 
+                                                # Calculate total values for summary row
+                                                total_alloc_pct = sum(float(row[1].rstrip('%')) for row in table_rows)
+                                                total_value = sum(float(row[4].replace('$', '').replace(',', '')) for row in table_rows)
+                                                total_port_pct = sum(float(row[5].rstrip('%')) for row in table_rows)
+
+                                                # Add total row
+                                                total_row = [
+                                                    'TOTAL',
+                                                    f"{total_alloc_pct:.2f}%",
+                                                    '',
+                                                    '',
+                                                    f"${total_value:,.2f}",
+                                                    f"{total_port_pct:.2f}%"
+                                                ]
+
                                                 # Create table with proper formatting
                                                 page_width = 7.5*inch
                                                 col_widths = [page_width/len(headers)] * len(headers)
-                                                alloc_table = Table([headers] + table_rows, colWidths=col_widths)
+                                                alloc_table = Table([headers] + table_rows + [total_row], colWidths=col_widths)
                                                 alloc_table.setStyle(TableStyle([
                                                     ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                                                     ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -1178,12 +1244,52 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                                                     ('LEFTPADDING', (0, 0), (-1, -1), 3),
                                                     ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-                                                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                                    ('WORDWRAP', (0, 0), (-1, -1), True)
+                                                                                            ('TOPPADDING', (0, 0), (-1, -1), 2),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                        ('WORDWRAP', (0, 0), (-1, -1), True),
+                                        # Style the total row
+                                        ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                        ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                                                    # Style the total row
+                                                    ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                                    ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                                    ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
                                                 ]))
                                                 story.append(alloc_table)
                                                 story.append(Spacer(1, 5))
+                                                
+                                                # Add total value line after the allocation table
+                                                try:
+                                                    portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                                                    if isinstance(portfolio_results, dict):
+                                                        if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                                            latest_value = portfolio_results['with_additions'].iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                                            latest_value = portfolio_results['no_additions'].iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        elif isinstance(portfolio_results, pd.Series):
+                                                            latest_value = portfolio_results.iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        else:
+                                                            total_value_str = "N/A"
+                                                    else:
+                                                        total_value_str = "N/A"
+                                                    
+                                                    story.append(Paragraph(f"Total Value: {total_value_str}", styles['Heading4']))
+                                                except Exception as e:
+                                                    story.append(Paragraph("Total Value: N/A", styles['Heading4']))
+                                                
                                                 table_created = True
                                                 break
                         except Exception as e:
@@ -1201,9 +1307,18 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                         table_rows.append([asset, f"{float(weight)*100:.2f}%"])
                                 
                                 if table_rows:
+                                    # Calculate total values for summary row
+                                    total_alloc_pct = sum(float(row[1].rstrip('%')) for row in table_rows)
+
+                                    # Add total row
+                                    total_row = [
+                                        'TOTAL',
+                                        f"{total_alloc_pct:.2f}%"
+                                    ]
+
                                     page_width = 7.5*inch
                                     col_widths = [page_width/len(headers)] * len(headers)
-                                    alloc_table = Table([headers] + table_rows, colWidths=col_widths)
+                                    alloc_table = Table([headers] + table_rows + [total_row], colWidths=col_widths)
                                     alloc_table.setStyle(TableStyle([
                                         ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                                         ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -1217,10 +1332,46 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                         ('RIGHTPADDING', (0, 0), (-1, -1), 3),
                                         ('TOPPADDING', (0, 0), (-1, -1), 2),
                                         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                        ('WORDWRAP', (0, 0), (-1, -1), True)
+                                        ('WORDWRAP', (0, 0), (-1, -1), True),
+                                        # Style the total row
+                                        ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                        ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold')
                                     ]))
                                     story.append(alloc_table)
                                     story.append(Spacer(1, 5))
+                                    
+                                    # Add total value line after the allocation table
+                                    try:
+                                        portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                                        if isinstance(portfolio_results, dict):
+                                            if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                                latest_value = portfolio_results['with_additions'].iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                                latest_value = portfolio_results['no_additions'].iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            elif isinstance(portfolio_results, pd.Series):
+                                                latest_value = portfolio_results.iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            else:
+                                                total_value_str = "N/A"
+                                        else:
+                                            total_value_str = "N/A"
+                                        
+                                        story.append(Paragraph(f"Total Value: {total_value_str}", styles['Heading4']))
+                                    except Exception as e:
+                                        story.append(Paragraph("Total Value: N/A", styles['Heading4']))
+                                    
                                     table_created = True
                                 else:
                                     story.append(Paragraph("No allocation data available", styles['Normal']))
@@ -1279,6 +1430,8 @@ def check_currency_warning(tickers):
 # Initialize page-specific session state for Strategy Comparison page
 if 'strategy_comparison_page_initialized' not in st.session_state:
     st.session_state.strategy_comparison_page_initialized = True
+    # Initialize loading state
+    st.session_state.strategy_comparison_is_running = False
     # Initialize strategy-comparison specific session state
     st.session_state.strategy_comparison_portfolio_configs = [
         # 1) Equal weight portfolio (no momentum) - baseline strategy
@@ -5205,6 +5358,9 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
 if st.session_state.get('strategy_comparison_run_backtest', False):
     st.session_state.strategy_comparison_run_backtest = False
     
+    # Set loading state to True
+    st.session_state.strategy_comparison_is_running = True
+    
     # Pre-backtest validation check for all portfolios
     configs_to_run = st.session_state.strategy_comparison_portfolio_configs
     valid_configs = True
@@ -7740,12 +7896,37 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                                 }
                                                 try:
                                                     st.markdown(f"**{label}**")
+                                                    
+                                                    # Add total row
+                                                    total_alloc_pct = df_display['Allocation %'].sum()
+                                                    total_value = df_display['Total Value ($)'].sum()
+                                                    total_port_pct = df_display['% of Portfolio'].sum()
+
+                                                    total_row = pd.DataFrame({
+                                                        'Allocation %': [total_alloc_pct],
+                                                        'Price ($)': [float('nan')],
+                                                        'Shares': [float('nan')],
+                                                        'Total Value ($)': [total_value],
+                                                        '% of Portfolio': [total_port_pct]
+                                                    }, index=['TOTAL'])
+
+                                                    df_display = pd.concat([df_display, total_row])
+                                                    
                                                     sty = df_display.style.format(fmt)
                                                     if 'CASH' in df_table.index and show_cash:
                                                         def _highlight_cash_row(s):
                                                             if s.name == 'CASH':
                                                                 return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
+                                                            return [''] * len(s)
                                                         sty = sty.apply(_highlight_cash_row, axis=1)
+
+                                                    # Highlight TOTAL row
+                                                    def _highlight_total_row(s):
+                                                        if s.name == 'TOTAL':
+                                                            return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
+                                                        return [''] * len(s)
+                                                    sty = sty.apply(_highlight_total_row, axis=1)
+                                                    
                                                     st.dataframe(sty, use_container_width=True)
                                                 except Exception:
                                                     st.dataframe(df_display, use_container_width=True)
@@ -7947,12 +8128,37 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                             }
                                             try:
                                                 st.markdown(f"**{label}**")
+                                                
+                                                # Add total row
+                                                total_alloc_pct = df_display['Allocation %'].sum()
+                                                total_value = df_display['Total Value ($)'].sum()
+                                                total_port_pct = df_display['% of Portfolio'].sum()
+
+                                                total_row = pd.DataFrame({
+                                                    'Allocation %': [total_alloc_pct],
+                                                    'Price ($)': [float('nan')],
+                                                    'Shares': [float('nan')],
+                                                    'Total Value ($)': [total_value],
+                                                    '% of Portfolio': [total_port_pct]
+                                                }, index=['TOTAL'])
+
+                                                df_display = pd.concat([df_display, total_row])
+                                                
                                                 sty = df_display.style.format(fmt)
                                                 if 'CASH' in df_table.index and show_cash:
                                                     def _highlight_cash_row(s):
                                                         if s.name == 'CASH':
                                                             return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
+                                                        return [''] * len(s)
                                                     sty = sty.apply(_highlight_cash_row, axis=1)
+
+                                                # Highlight TOTAL row
+                                                def _highlight_total_row(s):
+                                                    if s.name == 'TOTAL':
+                                                        return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
+                                                    return [''] * len(s)
+                                                sty = sty.apply(_highlight_total_row, axis=1)
+                                                
                                                 st.dataframe(sty, use_container_width=True)
                                             except Exception:
                                                 st.dataframe(df_display, use_container_width=True)
