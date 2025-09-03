@@ -4633,52 +4633,91 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 
                 progress_bar.progress(1.0, text="Executing multi-portfolio backtest analysis...")
                 
-                # Run mega backtest for all strategies simultaneously
+                # =============================================================================
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO CACHE VERSION)
+                # =============================================================================
+                
+                # Initialize results storage
                 all_results = {}
                 all_drawdowns = {}
                 all_stats = {}
                 all_allocations = {}
                 all_metrics = {}
-                # Map portfolio index (0-based) to the unique key used in the result dicts
                 portfolio_key_map = {}
+                successful_portfolios = 0
+                failed_portfolios = []
                 
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO CACHE)...**")
+                
+                # Process portfolios one by one with robust error handling
                 for i, cfg in enumerate(st.session_state.multi_backtest_portfolio_configs, start=1):
-                    name = cfg.get('name', f'Backtest {i}')
-                    
-                    # Ensure unique key for storage to avoid overwriting when duplicate names exist
-                    base_name = name
-                    unique_name = base_name
-                    suffix = 1
-                    while unique_name in all_results or unique_name in all_allocations:
-                        unique_name = f"{base_name} ({suffix})"
-                        suffix += 1
-                    
-                    # Run single backtest for this strategy
-                    total_series, total_series_no_additions, historical_allocations, historical_metrics = single_backtest(cfg, simulation_index, data_reindexed)
-                
-                    # compute today_weights_map (target weights as-if rebalanced at final snapshot date)
-                    today_weights_map = {}
                     try:
-                        alloc_dates = sorted(list(historical_allocations.keys()))
-                        final_d = alloc_dates[-1]
-                        metrics_local = historical_metrics
+                        # Update progress
+                        progress_percent = i / len(st.session_state.multi_backtest_portfolio_configs)
+                        progress_bar.progress(progress_percent, text=f"Processing portfolio {i}/{len(st.session_state.multi_backtest_portfolio_configs)}: {cfg.get('name', f'Portfolio {i}')}")
                         
-                        # Check if momentum is used for this portfolio
-                        use_momentum = cfg.get('use_momentum', True)
+                        name = cfg.get('name', f'Portfolio {i}')
                         
-                        if final_d in metrics_local:
-                            if use_momentum:
-                                # extract Calculated_Weight if present (momentum-based)
-                                weights = {t: v.get('Calculated_Weight', 0) for t, v in metrics_local[final_d].items()}
-                                # normalize (ensure sums to 1 excluding CASH)
-                                sumw = sum(w for k, w in weights.items() if k != 'CASH')
-                                if sumw > 0:
-                                    norm = {k: (w / sumw) if k != 'CASH' else weights.get('CASH', 0) for k, w in weights.items()}
-                                else:
-                                    norm = weights
-                                today_weights_map = norm
-                            else:
-                                # When momentum is not used, use user-defined allocations from portfolio config
+                        # Ensure unique key for storage
+                        base_name = name
+                        unique_name = base_name
+                        suffix = 1
+                        while unique_name in all_results or unique_name in all_allocations:
+                            unique_name = f"{base_name} ({suffix})"
+                            suffix += 1
+                        
+                        # Run single backtest for this portfolio
+                        total_series, total_series_no_additions, historical_allocations, historical_metrics = single_backtest(cfg, simulation_index, data_reindexed)
+                        
+                        if total_series is not None and len(total_series) > 0:
+                            # Compute today_weights_map
+                            today_weights_map = {}
+                            try:
+                                alloc_dates = sorted(list(historical_allocations.keys()))
+                                if alloc_dates:
+                                    final_d = alloc_dates[-1]
+                                    metrics_local = historical_metrics
+                                    
+                                    # Check if momentum is used for this portfolio
+                                    use_momentum = cfg.get('use_momentum', True)
+                                    
+                                    if final_d in metrics_local:
+                                        if use_momentum:
+                                            # Extract Calculated_Weight if present (momentum-based)
+                                            weights = {t: v.get('Calculated_Weight', 0) for t, v in metrics_local[final_d].items()}
+                                            # Normalize (ensure sums to 1 excluding CASH)
+                                            sumw = sum(w for k, w in weights.items() if k != 'CASH')
+                                            if sumw > 0:
+                                                norm = {k: (w / sumw) if k != 'CASH' else weights.get('CASH', 0) for k, w in weights.items()}
+                                            else:
+                                                norm = weights
+                                            today_weights_map = norm
+                                        else:
+                                            # Use user-defined allocations from portfolio config
+                                            today_weights_map = {}
+                                            for stock in cfg.get('stocks', []):
+                                                ticker = stock.get('ticker', '').strip()
+                                                if ticker:
+                                                    today_weights_map[ticker] = stock.get('allocation', 0)
+                                            # Add CASH if needed
+                                            total_alloc = sum(today_weights_map.values())
+                                            if total_alloc < 1.0:
+                                                today_weights_map['CASH'] = 1.0 - total_alloc
+                                            else:
+                                                today_weights_map['CASH'] = 0
+                                    else:
+                                        # Fallback: use allocation snapshot at final date
+                                        final_alloc = historical_allocations.get(final_d, {})
+                                        noncash = {k: v for k, v in final_alloc.items() if k != 'CASH'}
+                                        s = sum(noncash.values())
+                                        if s > 0:
+                                            norm = {k: (v / s) for k, v in noncash.items()}
+                                            norm['CASH'] = final_alloc.get('CASH', 0)
+                                        else:
+                                            norm = final_alloc
+                                        today_weights_map = norm
+                            except Exception as e:
+                                # If computation fails, use user-defined allocations as fallback
                                 today_weights_map = {}
                                 for stock in cfg.get('stocks', []):
                                     ticker = stock.get('ticker', '').strip()
@@ -4690,64 +4729,75 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     today_weights_map['CASH'] = 1.0 - total_alloc
                                 else:
                                     today_weights_map['CASH'] = 0
+                            
+                            # Store results in simplified format
+                            all_results[unique_name] = {
+                                'no_additions': total_series_no_additions,
+                                'with_additions': total_series,
+                                'today_weights_map': today_weights_map
+                            }
+                            all_allocations[unique_name] = historical_allocations
+                            all_metrics[unique_name] = historical_metrics
+                            
+                            # Remember mapping from portfolio index (0-based) to unique key
+                            portfolio_key_map[i-1] = unique_name
+                            
+                            successful_portfolios += 1
+                            
+                            # Memory cleanup every 20 portfolios
+                            if successful_portfolios % 20 == 0:
+                                import gc
+                                gc.collect()
+                                
                         else:
-                            # fallback: use allocation snapshot at final date but convert market-value alloc to target weights (exclude CASH then renormalize)
-                            final_alloc = historical_allocations.get(final_d, {})
-                            noncash = {k: v for k, v in final_alloc.items() if k != 'CASH'}
-                            s = sum(noncash.values())
-                            if s > 0:
-                                norm = {k: (v / s) for k, v in noncash.items()}
-                                norm['CASH'] = final_alloc.get('CASH', 0)
-                            else:
-                                norm = final_alloc
-                            today_weights_map = norm
+                            failed_portfolios.append((name, "Empty results from backtest"))
+                            st.warning(f"⚠️ Portfolio {name} failed: Empty results from backtest")
+                            
                     except Exception as e:
-                        # If computation fails, use user-defined allocations as fallback
-                        today_weights_map = {}
-                        for stock in cfg.get('stocks', []):
-                            ticker = stock.get('ticker', '').strip()
-                            if ticker:
-                                today_weights_map[ticker] = stock.get('allocation', 0)
-                        # Add CASH if needed
-                        total_alloc = sum(today_weights_map.values())
-                        if total_alloc < 1.0:
-                            today_weights_map['CASH'] = 1.0 - total_alloc
-                        else:
-                            today_weights_map['CASH'] = 0
-                    
-                    # Store both series under the unique key for later use
-                    all_results[unique_name] = {
-                        'no_additions': total_series_no_additions,
-                        'with_additions': total_series,
-                        'today_weights_map': today_weights_map
-                    }
-                    all_allocations[unique_name] = historical_allocations
-                    all_metrics[unique_name] = historical_metrics
-                    # Remember mapping from portfolio index (0-based) to unique key
-                    portfolio_key_map[i-1] = unique_name
-                    # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
-                    # Track cash flows as pandas Series indexed by date
-                    cash_flows = pd.Series(0.0, index=total_series.index)
-                    # Initial investment: negative cash flow on first date
-                    if len(total_series.index) > 0:
-                        cash_flows.iloc[0] = -cfg.get('initial_value', 0)
-                    # Periodic additions: negative cash flow on their respective dates
-                    dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
-                    for d in dates_added:
-                        if d in cash_flows.index and d != cash_flows.index[0]:
-                            cash_flows.loc[d] -= cfg.get('added_amount', 0)
-                    # Final value: positive cash flow on last date for MWRR
-                    if len(total_series.index) > 0:
-                        cash_flows.iloc[-1] += total_series.iloc[-1]
-                    
-                    # Store cash flows and portfolio values for MWRR calculation after all portfolios are processed
-                    all_results[unique_name]['cash_flows'] = cash_flows
-                    all_results[unique_name]['portfolio_values'] = total_series
-                    
-                    # Get benchmark returns for stats calculation
-                    benchmark_returns = None
-                    if cfg['benchmark_ticker'] and cfg['benchmark_ticker'] in data_reindexed:
-                        benchmark_returns = data_reindexed[cfg['benchmark_ticker']]['Price_change']
+                        failed_portfolios.append((cfg.get('name', f'Portfolio {i}'), str(e)))
+                        st.warning(f"⚠️ Portfolio {cfg.get('name', f'Portfolio {i}')} failed: {str(e)}")
+                        continue
+                
+                # Final progress update
+                progress_bar.progress(1.0, text="Portfolio processing completed!")
+                
+                # Show results summary
+                if successful_portfolios > 0:
+                    st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios!**")
+                    if failed_portfolios:
+                        st.warning(f"⚠️ **{len(failed_portfolios)} portfolios failed** - check warnings above for details")
+                else:
+                    st.error("❌ **No portfolios were processed successfully!** Please check your configuration.")
+                    st.stop()
+                
+                # Memory cleanup
+                import gc
+                gc.collect()
+                progress_bar.empty()
+                
+                # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
+                # Track cash flows as pandas Series indexed by date
+                cash_flows = pd.Series(0.0, index=total_series.index)
+                # Initial investment: negative cash flow on first date
+                if len(total_series.index) > 0:
+                    cash_flows.iloc[0] = -cfg.get('initial_value', 0)
+                # Periodic additions: negative cash flow on their respective dates
+                dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
+                for d in dates_added:
+                    if d in cash_flows.index and d != cash_flows.index[0]:
+                        cash_flows.loc[d] -= cfg.get('added_amount', 0)
+                # Final value: positive cash flow on last date for MWRR
+                if len(total_series.index) > 0:
+                    cash_flows.iloc[-1] += total_series.iloc[-1]
+                
+                # Store cash flows and portfolio values for MWRR calculation after all portfolios are processed
+                all_results[unique_name]['cash_flows'] = cash_flows
+                all_results[unique_name]['portfolio_values'] = total_series
+                
+                # Get benchmark returns for stats calculation
+                benchmark_returns = None
+                if cfg['benchmark_ticker'] and cfg['benchmark_ticker'] in data_reindexed:
+                    benchmark_returns = data_reindexed[cfg['benchmark_ticker']]['Price_change']
                     # Ensure benchmark_returns is a pandas Series aligned to total_series
                     if benchmark_returns is not None:
                         benchmark_returns = pd.Series(benchmark_returns, index=total_series.index).dropna()
