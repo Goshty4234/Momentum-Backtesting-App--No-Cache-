@@ -67,9 +67,12 @@ def plotly_to_matplotlib_figure(plotly_fig, title="", width_inches=8, height_inc
         # Create matplotlib figure
         fig, ax = plt.subplots(figsize=(width_inches, height_inches))
         
-        # Set title
+        # Set title with wrapping for long titles
         if title:
-            ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+            # Use textwrap for proper word-based wrapping
+            import textwrap
+            wrapped_title = textwrap.fill(title, width=40, break_long_words=True, break_on_hyphens=False)
+            ax.set_title(wrapped_title, fontsize=14, fontweight='bold', pad=20)
         
         # Define a color palette for different traces
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
@@ -116,35 +119,9 @@ def plotly_to_matplotlib_figure(plotly_fig, title="", width_inches=8, height_inc
                     # Create a slightly wider figure to ensure perfect circle
                     fig_pie, ax_pie = plt.subplots(figsize=(8.5, 8))
                     
-                    # Format long titles to break into multiple lines
-                    def format_long_title(title_text, max_length=50):
-                        if len(title_text) <= max_length:
-                            return title_text
-                        
-                        # Try to break at word boundaries first
-                        words = title_text.split()
-                        if len(words) == 1:
-                            # Single long word, break at max_length
-                            return '\n'.join([title_text[i:i+max_length] for i in range(0, len(title_text), max_length)])
-                        
-                        # Try to break at word boundaries
-                        current_line = ""
-                        lines = []
-                        for word in words:
-                            if len(current_line) + len(word) + 1 <= max_length:
-                                current_line += (word + " ") if current_line else word
-                            else:
-                                if current_line:
-                                    lines.append(current_line.strip())
-                                current_line = word
-                        
-                        if current_line:
-                            lines.append(current_line.strip())
-                        
-                        return '\n'.join(lines)
-                    
-                    # Set title with line breaks and MORE SPACING to prevent overlap
-                    formatted_title = format_long_title(title)
+                    # Format long titles to break into multiple lines using textwrap
+                    import textwrap
+                    formatted_title = textwrap.fill(title, width=40, break_long_words=True, break_on_hyphens=False)
                     ax_pie.set_title(formatted_title, fontsize=14, fontweight='bold', pad=40, y=0.95)
                     
                     # Create pie chart with smart percentage display - hide small ones to prevent overlap
@@ -250,9 +227,12 @@ def create_matplotlib_table(data, headers, title="", width_inches=10, height_inc
                 if i % 2 == 0:
                     table[(i, j)].set_facecolor('#f0f0f0')
         
-        # Add title
+        # Add title with wrapping for long titles
         if title:
-            ax.set_title(title, fontsize=12, fontweight='bold', pad=20)
+            # Use textwrap for proper word-based wrapping
+            import textwrap
+            wrapped_title = textwrap.fill(title, width=40, break_long_words=True, break_on_hyphens=False)
+            ax.set_title(wrapped_title, fontsize=12, fontweight='bold', pad=20)
         
         plt.tight_layout()
         return fig
@@ -962,29 +942,75 @@ def generate_simple_pdf_report(custom_name=""):
                         vals_today = [float(today_weights[k]) * 100 for k in labels_today]
                         
                         if labels_today and vals_today:
-                            # Create the pie chart
-                            fig_today = go.Figure()
-                            fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
-                            fig_today.update_traces(textinfo='percent+label')
-                            fig_today.update_layout(
-                                template='plotly_dark', 
-                                margin=dict(t=30),
-                                height=600,
-                                showlegend=True
-                            )
+                            # Create matplotlib pie chart (same format as pages 1, 2, 3)
+                            fig, ax_target = plt.subplots(1, 1, figsize=(10, 10))
                             
-                            # Convert Plotly figure to matplotlib (handles pie charts)
-                            mpl_fig = plotly_to_matplotlib_figure(fig_today, title=f"Target Allocation - {portfolio_name}", width_inches=6, height_inches=6)
+                            # Create pie chart with smart percentage display - hide small ones to prevent overlap
+                            def smart_autopct(pct):
+                                return f'{pct:.1f}%' if pct > 3 else ''  # Only show percentages > 3%
                             
-                            # Save matplotlib figure to buffer
-                            pie_img_buffer = io.BytesIO()
-                            mpl_fig.savefig(pie_img_buffer, format='png', dpi=300, bbox_inches='tight')
-                            pie_img_buffer.seek(0)
-                            plt.close(mpl_fig)  # Close to free memory
+                            wedges_target, texts_target, autotexts_target = ax_target.pie(vals_today, autopct=smart_autopct, 
+                                                                                         startangle=90)
                             
-                            # Add to PDF
-                            story.append(Image(pie_img_buffer, width=5*inch, height=5*inch))
-                            story.append(Spacer(1, 2))
+                            # Add ticker names with percentages outside the pie chart slices for allocations > 2.4%
+                            for i, (wedge, ticker, alloc) in enumerate(zip(wedges_target, labels_today, vals_today)):
+                                # Only show tickers above 2.4%
+                                if alloc > 2.4:
+                                    # Calculate position for the text (middle of the slice)
+                                    angle = (wedge.theta1 + wedge.theta2) / 2
+                                    # Convert angle to radians and calculate position
+                                    rad = np.radians(angle)
+                                    # Position text outside the pie chart at 1.4 radius (farther away)
+                                    x = 1.4 * np.cos(rad)
+                                    y = 1.4 * np.sin(rad)
+                                    
+                                    # Add ticker name with percentage under it (e.g., "ORLY 5%")
+                                    ax_target.text(x, y, f"{ticker}\n{alloc:.1f}%", ha='center', va='center', 
+                                                 fontsize=8, fontweight='bold', 
+                                                 bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                    
+                                    # Add leader line from slice edge to label
+                                    # Start from edge of pie chart (radius 1.0)
+                                    line_start_x = 1.0 * np.cos(rad)
+                                    line_start_y = 1.0 * np.sin(rad)
+                                    # End at label position
+                                    line_end_x = 1.25 * np.cos(rad)
+                                    line_end_y = 1.25 * np.sin(rad)
+                                    
+                                    ax_target.plot([line_start_x, line_end_x], [line_start_y, line_end_y], 
+                                                 'k-', linewidth=0.5, alpha=0.6)
+                            
+                            # Create legend with percentages - positioned farther to the right to avoid overlap
+                            legend_labels = [f"{ticker} ({alloc:.1f}%)" for ticker, alloc in zip(labels_today, vals_today)]
+                            ax_target.legend(wedges_target, legend_labels, title="Tickers", loc="center left", bbox_to_anchor=(1.15, 0, 0.5, 1), fontsize=10)
+                            
+                            # Wrap long titles to prevent them from going out of bounds
+                            title_text = f'Target Allocation - {portfolio_name}'
+                            # Use textwrap for proper word-based wrapping
+                            import textwrap
+                            wrapped_title = textwrap.fill(title_text, width=40, break_long_words=True, break_on_hyphens=False)
+                            ax_target.set_title(wrapped_title, fontsize=14, fontweight='bold', pad=30)
+                            # Force perfectly circular shape
+                            ax_target.set_aspect('equal')
+                            # Use tighter axis limits to make pie chart appear larger within its space
+                            ax_target.set_xlim(-1.2, 1.2)
+                            ax_target.set_ylim(-1.2, 1.2)
+                            
+                            # Adjust layout to accommodate legend and title (better spacing to prevent title cutoff)
+                            # Use more aggressive spacing like sector/industry charts for bigger pie chart
+                            plt.subplots_adjust(left=0.1, right=0.7, top=0.95, bottom=0.05)
+                            
+                            # Save to buffer
+                            target_img_buffer = io.BytesIO()
+                            fig.savefig(target_img_buffer, format='png', dpi=300, facecolor='white')
+                            target_img_buffer.seek(0)
+                            plt.close(fig)
+                            
+                            # Add to PDF - increased pie chart size for better visibility
+                            story.append(Image(target_img_buffer, width=5.5*inch, height=5.5*inch))
+                            
+                            # Add minimal spacing after pie chart before timer section
+                            story.append(Spacer(1, 5))
                             
                             # Add Next Rebalance Timer information - simple text display
                             story.append(Paragraph(f"Next Rebalance Timer - {portfolio_name}", subheading_style))
@@ -1021,14 +1047,12 @@ def generate_simple_pdf_report(custom_name=""):
                             else:
                                 story.append(Paragraph("Next rebalance information not available", styles['Normal']))
                             
-                            story.append(Spacer(1, 5))
-                            
-                            # Add page break after pie plot + timer to separate from allocation table
+                            # Add page break so Allocation Details starts on a new page
                             story.append(PageBreak())
                             
-                            # Now add the allocation table on the next page
+                            # Now add the allocation table on a new page
                             story.append(Paragraph(f"Allocation Details for {portfolio_name}", subheading_style))
-                            story.append(Spacer(1, 10))
+                            story.append(Spacer(1, 3))
                             
                             # NUKE APPROACH: Rebuild allocation table from scratch
                             alloc_table_key = f"alloc_table_{portfolio_name}"
@@ -1123,7 +1147,7 @@ def generate_simple_pdf_report(custom_name=""):
                                                 ('WORDWRAP', (0, 0), (-1, -1), True)
                                             ]))
                                             story.append(alloc_table)
-                                            story.append(Spacer(1, 5))
+                                            story.append(Spacer(1, 3))
                                             table_created = True
                                         else:
                                             story.append(Paragraph("No allocation data available", styles['Normal']))
@@ -1138,7 +1162,7 @@ def generate_simple_pdf_report(custom_name=""):
                                     if float(weight) > 0:
                                         story.append(Paragraph(f"{asset}: {float(weight)*100:.1f}%", styles['Normal']))
                             
-                            story.append(Spacer(1, 5))
+                            story.append(Spacer(1, 3))
                         else:
                             story.append(Paragraph(f"No allocation data available for {portfolio_name}", styles['Normal']))
                     except Exception as e:
