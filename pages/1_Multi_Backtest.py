@@ -1197,6 +1197,273 @@ def generate_simple_pdf_report(custom_name=""):
             story.append(Paragraph("Statistics data not available. Please run the backtest first.", styles['Normal']))
             story.append(Spacer(1, 15))
         
+        # SECTION 3.1: Top 5 Best and Worst Performing Portfolios
+        # Extract data from the Final Performance Statistics table that was just created
+        if table_created and 'fig_stats' in st.session_state:
+            try:
+                all_results = st.session_state.multi_all_results
+                
+                fig_stats = st.session_state.fig_stats
+                if hasattr(fig_stats, 'data') and fig_stats.data:
+                    for trace in fig_stats.data:
+                        if trace.type == 'table':
+                            # Get headers and data from the existing table
+                            if hasattr(trace, 'header') and trace.header and hasattr(trace.header, 'values'):
+                                headers = trace.header.values
+                            else:
+                                headers = ['Portfolio', 'CAGR (%)', 'Max Drawdown (%)', 'Volatility (%)', 'Sharpe Ratio', 'Sortino Ratio']
+                            
+                            if hasattr(trace, 'cells') and trace.cells and hasattr(trace.cells, 'values'):
+                                cell_data = trace.cells.values
+                                if cell_data and len(cell_data) > 0 and len(cell_data[0]) > 0:
+                                    # Convert to list of rows for easier processing
+                                    num_rows = len(cell_data[0])
+                                    table_rows = []
+                                    for row_idx in range(num_rows):
+                                        row = []
+                                        for col_idx in range(len(cell_data)):
+                                            if col_idx < len(cell_data) and row_idx < len(cell_data[col_idx]):
+                                                value = cell_data[col_idx][row_idx]
+                                                row.append(str(value) if value is not None else '')
+                                            else:
+                                                row.append('')
+                                        table_rows.append(row)
+                                    
+                                    if len(table_rows) > 0:
+                                        # Sort by Final Portfolio Value (column 1) to get best and worst performers
+                                        # Convert Final Portfolio Value to float for sorting (remove $ and commas)
+                                        def get_final_value(row):
+                                            try:
+                                                value_str = str(row[1]).replace('$', '').replace(',', '')
+                                                return float(value_str)
+                                            except:
+                                                return 0.0
+                                        
+                                        # Sort by Final Portfolio Value descending (best first)
+                                        sorted_rows = sorted(table_rows, key=get_final_value, reverse=True)
+                                        
+                                        # Get top 5 best and worst
+                                        num_portfolios = len(sorted_rows)
+                                        top_5_best = sorted_rows[:min(5, num_portfolios)]
+                                        
+                                        # For worst performers, get the actual worst (lowest final values)
+                                        # Sort by final value ascending to get worst first, then take top 5
+                                        worst_sorted = sorted(table_rows, key=get_final_value, reverse=False)
+                                        top_5_worst = worst_sorted[:min(5, num_portfolios)]
+                    
+                    # Add page break before the new tables
+                    story.append(PageBreak())
+                    
+                    # Top 5 Best Performing Portfolios
+                    story.append(Paragraph("3.1. Top 5 Best Performing Portfolios by Final Value", heading_style))
+                    story.append(Spacer(1, 10))
+                    
+                    if len(top_5_best) > 0:
+                        # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
+                        # Wrap headers for better display
+                        wrapped_headers = []
+                        for header in headers:
+                            if len(header) > 15:  # Wrap long headers
+                                words = header.split()
+                                if len(words) > 1:
+                                    if len(words) == 2:
+                                        wrapped_header = '\n'.join(words)
+                                    elif len(words) == 3:
+                                        wrapped_header = '\n'.join([words[0], ' '.join(words[1:])])
+                                    elif len(words) == 4:
+                                        wrapped_header = '\n'.join([' '.join(words[:2]), ' '.join(words[2:])])
+                                    else:
+                                        mid = len(words) // 2
+                                        wrapped_header = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                else:
+                                    if len(header) > 10:
+                                        mid = len(header) // 2
+                                        wrapped_header = header[:mid] + '\n' + header[mid:]
+                                    else:
+                                        wrapped_header = header
+                            else:
+                                wrapped_header = header
+                            wrapped_headers.append(wrapped_header)
+                        
+                        # Wrap portfolio names in the first column for best performers
+                        wrapped_best_rows = []
+                        for row in top_5_best:
+                            wrapped_row = row.copy()
+                            if len(str(row[0])) > 25:  # Wrap long portfolio names
+                                words = str(row[0]).split()
+                                if len(words) > 5:
+                                    if len(words) <= 8:
+                                        mid = len(words) // 2
+                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                    else:
+                                        third = len(words) // 3
+                                        wrapped_row[0] = '\n'.join([
+                                            ' '.join(words[:third]),
+                                            ' '.join(words[third:2*third]),
+                                            ' '.join(words[2*third:])
+                                        ])
+                                elif len(words) > 3:
+                                    mid = len(words) // 2
+                                    wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                            wrapped_best_rows.append(wrapped_row)
+                        
+                        # Create table data with wrapped headers and rows
+                        best_table_data = [wrapped_headers] + wrapped_best_rows
+                        
+                        # EXACT SAME COLUMN WIDTH LOGIC AS FINAL PERFORMANCE STATISTICS TABLE
+                        page_width = 8.2*inch  # Same as Final Performance Statistics
+                        
+                        # Optimized column width distribution - EXACT SAME LOGIC
+                        if len(headers) > 8:  # If we have many columns, use optimized widths
+                            portfolio_width = 2.1*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.6 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
+                        elif len(headers) > 6:  # Medium number of columns
+                            portfolio_width = 2.3*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
+                        else:  # Few columns
+                            portfolio_width = 2.0*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                        
+                        # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
+                        best_table = Table(best_table_data, colWidths=col_widths)
+                        
+                        # Dynamic font sizing - EXACT SAME LOGIC
+                        num_columns = len(headers)
+                        max_header_length = max(len(header) for header in headers)
+                        
+                        if num_columns > 14:
+                            font_size = 5
+                        elif num_columns > 12:
+                            font_size = 6
+                        elif num_columns > 10:
+                            font_size = 7
+                        elif num_columns > 8:
+                            font_size = 8
+                        else:
+                            font_size = 9
+                        
+                        if max_header_length > 20:
+                            font_size = max(4, font_size - 1)
+                        
+                        best_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), font_size),
+                            ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
+                            ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                            ('TOPPADDING', (0, 0), (-1, 0), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                            ('TOPPADDING', (0, 1), (-1, -1), 2),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                            ('WORDWRAP', (0, 0), (-1, -1), True)
+                        ]))
+                        story.append(best_table)
+                        story.append(Spacer(1, 15))
+                    
+                    # Top 5 Worst Performing Portfolios
+                    story.append(Paragraph("3.2. Top 5 Worst Performing Portfolios by Final Value", heading_style))
+                    story.append(Spacer(1, 10))
+                    
+                    if len(top_5_worst) > 0:
+                        # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
+                        # Wrap portfolio names in the first column for worst performers
+                        wrapped_worst_rows = []
+                        for row in top_5_worst:
+                            wrapped_row = row.copy()
+                            if len(str(row[0])) > 25:  # Wrap long portfolio names
+                                words = str(row[0]).split()
+                                if len(words) > 5:
+                                    if len(words) <= 8:
+                                        mid = len(words) // 2
+                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                    else:
+                                        third = len(words) // 3
+                                        wrapped_row[0] = '\n'.join([
+                                            ' '.join(words[:third]),
+                                            ' '.join(words[third:2*third]),
+                                            ' '.join(words[2*third:])
+                                        ])
+                                elif len(words) > 3:
+                                    mid = len(words) // 2
+                                    wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                            wrapped_worst_rows.append(wrapped_row)
+                        
+                        worst_table_data = [wrapped_headers] + wrapped_worst_rows
+                        
+                        # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
+                        worst_table = Table(worst_table_data, colWidths=col_widths)
+                        worst_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.7, 0.3, 0.3)),  # Red header for worst
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), font_size),
+                            ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
+                            ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                            ('TOPPADDING', (0, 0), (-1, 0), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                            ('TOPPADDING', (0, 1), (-1, -1), 2),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                            ('WORDWRAP', (0, 0), (-1, -1), True)
+                        ]))
+                        story.append(worst_table)
+                        story.append(Spacer(1, 15))
+                    
+            except Exception as e:
+                story.append(Paragraph(f"Error creating top performers tables: {str(e)}", styles['Normal']))
+                story.append(Spacer(1, 15))
+        
         # Update progress
         progress_bar.progress(80)
         status_text.text("🎯 Adding allocation charts and timers...")
@@ -3853,7 +4120,6 @@ if "multi_backtest_start_with_radio" not in st.session_state:
 st.sidebar.radio(
     "How to handle assets with different start dates?",
     ["all", "oldest"],
-    index=0 if st.session_state["multi_backtest_start_with_radio"] == "all" else 1,
     format_func=lambda x: "Start when ALL assets are available" if x == "all" else "Start with OLDEST asset",
     help="""
     **All:** Starts the backtest when all selected assets are available.
