@@ -460,9 +460,11 @@ default_configs = [
     'calc_volatility': True,
         'beta_window_days': 365,
         'exclude_days_beta': 30,
-        'vol_window_days': 365,
-        'exclude_days_vol': 30,
-    },
+                    'vol_window_days': 365,
+            'exclude_days_vol': 30,
+            'use_minimal_threshold': False,
+            'minimal_threshold_percent': 2.0,
+        },
 ]
 
 # -----------------------
@@ -1031,7 +1033,8 @@ def generate_allocations_pdf(custom_name=""):
             ['Beta Lookback', f"{active_portfolio.get('beta_window_days', 0)} days", 'Days for beta calculation'],
             ['Beta Exclude', f"{active_portfolio.get('exclude_days_beta', 0)} days", 'Days excluded from beta calculation'],
             ['Volatility Lookback', f"{active_portfolio.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
-            ['Volatility Exclude', f"{active_portfolio.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation']
+            ['Volatility Exclude', f"{active_portfolio.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
+            ['Minimal Threshold', f"{active_portfolio.get('minimal_threshold_percent', 2.0):.1f}%" if active_portfolio.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold']
         ]
         
         # Add momentum windows if they exist
@@ -1164,10 +1167,10 @@ def generate_allocations_pdf(custom_name=""):
                             wedges_target, texts_target, autotexts_target = ax_target.pie(vals_today, autopct=smart_autopct, 
                                                                                          startangle=90)
                             
-                            # Add ticker names with percentages outside the pie chart slices for allocations > 2.4%
+                            # Add ticker names with percentages outside the pie chart slices for allocations > 1.8%
                             for i, (wedge, ticker, alloc) in enumerate(zip(wedges_target, labels_today, vals_today)):
-                                # Only show tickers above 2.4%
-                                if alloc > 2.4:
+                                # Only show tickers above 1.8%
+                                if alloc > 1.8:
                                     # Calculate position for the text (middle of the slice)
                                     angle = (wedge.theta1 + wedge.theta2) / 2
                                     # Convert angle to radians and calculate position
@@ -2265,6 +2268,35 @@ def single_backtest(config, sim_index, reindexed_data):
             else:
                 weights = {}
 
+        # Apply minimal threshold filter if enabled
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        if use_threshold and weights:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # STEP 1: Complete rebalancing simulation is already done above
+            # (momentum calculation, beta/volatility filtering, etc. - weights are the "simulation" result)
+            
+            # STEP 2: Check which stocks are below threshold in the simulation
+            filtered_weights = {}
+            for ticker, weight in weights.items():
+                if weight >= threshold_decimal:
+                    # Keep stocks above or equal to threshold (remove stocks below threshold)
+                    filtered_weights[ticker] = weight
+            
+            # STEP 3: Do the actual rebalancing with only the remaining stocks
+            if filtered_weights:
+                total_weight = sum(filtered_weights.values())
+                if total_weight > 0:
+                    # Normalize remaining stocks to sum to 1.0
+                    weights = {ticker: weight / total_weight for ticker, weight in filtered_weights.items()}
+                else:
+                    weights = {}
+            else:
+                # If no stocks meet threshold, keep original weights
+                weights = weights
+
         for t in weights:
             metrics[t]['Calculated_Weight'] = weights.get(t, 0)
 
@@ -2296,6 +2328,31 @@ def single_backtest(config, sim_index, reindexed_data):
             current_allocations = {t: allocations.get(t, 0) if t in available_at_start else 0 for t in tickers}
         else:
             current_allocations = {t: allocations.get(t,0) for t in tickers}
+        
+        # Apply minimal threshold filter for non-momentum strategies
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        if use_threshold and current_allocations:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # First: Filter out stocks below threshold
+            filtered_allocations = {}
+            for ticker, allocation in current_allocations.items():
+                if allocation >= threshold_decimal:
+                    # Keep stocks above or equal to threshold
+                    filtered_allocations[ticker] = allocation
+            
+            # Then: Normalize remaining stocks to sum to 1
+            if filtered_allocations:
+                total_allocation = sum(filtered_allocations.values())
+                if total_allocation > 0:
+                    current_allocations = {ticker: allocation / total_allocation for ticker, allocation in filtered_allocations.items()}
+                else:
+                    current_allocations = {}
+            else:
+                # If no stocks meet threshold, keep original allocations
+                current_allocations = current_allocations
     else:
         returns, valid_assets = calculate_momentum(sim_index[0], set(tickers), momentum_windows)
         current_allocations, metrics_on_rebal = calculate_momentum_weights(
@@ -2420,10 +2477,39 @@ def single_backtest(config, sim_index, reindexed_data):
                         unreinvested_cash[-1] = 0
                         unallocated_cash[-1] = current_total
                 else:
-                    sum_alloc = sum(allocations.get(t,0) for t in tickers)
+                    # Apply threshold filter for non-momentum strategies during rebalancing
+                    use_threshold = config.get('use_minimal_threshold', False)
+                    threshold_percent = config.get('minimal_threshold_percent', 2.0)
+                    
+                    if use_threshold:
+                        threshold_decimal = threshold_percent / 100.0
+                        
+                        # First: Filter out stocks below threshold
+                        filtered_allocations = {}
+                        for t in tickers:
+                            allocation = allocations.get(t, 0)
+                            if allocation >= threshold_decimal:
+                                # Keep stocks above or equal to threshold
+                                filtered_allocations[t] = allocation
+                        
+                        # Then: Normalize remaining stocks to sum to 1
+                        if filtered_allocations:
+                            total_allocation = sum(filtered_allocations.values())
+                            if total_allocation > 0:
+                                rebalance_allocations = {t: allocation / total_allocation for t, allocation in filtered_allocations.items()}
+                            else:
+                                rebalance_allocations = {}
+                        else:
+                            # If no stocks meet threshold, use original allocations
+                            rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                    else:
+                        # Use original allocations if threshold filter is disabled
+                        rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                    
+                    sum_alloc = sum(rebalance_allocations.values())
                     if sum_alloc > 0:
                         for t in tickers:
-                            weight = allocations.get(t,0)/sum_alloc
+                            weight = rebalance_allocations.get(t, 0) / sum_alloc
                             values[t][-1] = current_total * weight
                         unreinvested_cash[-1] = 0
                         unallocated_cash[-1] = 0
@@ -2705,6 +2791,10 @@ def paste_json_callback():
             json_data['exclude_from_cashflow_sync'] = False
         if 'exclude_from_rebalancing_sync' not in json_data:
             json_data['exclude_from_rebalancing_sync'] = False
+        if 'use_minimal_threshold' not in json_data:
+            json_data['use_minimal_threshold'] = False
+        if 'minimal_threshold_percent' not in json_data:
+            json_data['minimal_threshold_percent'] = 2.0
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -2824,6 +2914,8 @@ def paste_json_callback():
             'momentum_strategy': momentum_strategy,
             'negative_momentum_strategy': negative_momentum_strategy,
             'momentum_windows': momentum_windows,
+            'use_minimal_threshold': json_data.get('use_minimal_threshold', False),
+            'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 2.0),
             'calc_beta': json_data.get('calc_beta', True),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -2833,10 +2925,16 @@ def paste_json_callback():
         }
         
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index] = allocations_config
+        
+        # Update session state for threshold settings
+        st.session_state['alloc_active_use_threshold'] = allocations_config.get('use_minimal_threshold', False)
+        st.session_state['alloc_active_threshold_percent'] = allocations_config.get('minimal_threshold_percent', 2.0)
+        
         st.success("Portfolio configuration updated from JSON (Allocations page).")
         st.info(f"Final stocks list: {[s['ticker'] for s in allocations_config['stocks']]}")
         st.info(f"Final momentum windows: {allocations_config['momentum_windows']}")
         st.info(f"Final use_momentum: {allocations_config['use_momentum']}")
+        st.info(f"Final threshold settings: use={allocations_config.get('use_minimal_threshold', False)}, percent={allocations_config.get('minimal_threshold_percent', 2.0)}")
     except json.JSONDecodeError:
         st.error("Invalid JSON format. Please check the text and try again.")
     except Exception as e:
@@ -2911,6 +3009,12 @@ def update_vol_window():
 
 def update_vol_exclude():
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['exclude_days_vol'] = st.session_state.get('alloc_active_vol_exclude', 30)
+
+def update_use_threshold():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['use_minimal_threshold'] = st.session_state.alloc_active_use_threshold
+
+def update_threshold_percent():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['minimal_threshold_percent'] = st.session_state.alloc_active_threshold_percent
 
 # Sidebar simplified for single-portfolio allocation tracker
 st.sidebar.title("Allocation Tracker")
@@ -3132,6 +3236,10 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
 st.subheader("Strategy")
 if "alloc_active_use_momentum" not in st.session_state:
     st.session_state["alloc_active_use_momentum"] = active_portfolio['use_momentum']
+if "alloc_active_use_threshold" not in st.session_state:
+    st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+if "alloc_active_threshold_percent" not in st.session_state:
+    st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
 st.checkbox("Use Momentum Strategy", key="alloc_active_use_momentum", on_change=update_use_momentum, help="Enables momentum-based weighting of stocks.")
 
 if active_portfolio['use_momentum']:
@@ -3180,6 +3288,36 @@ if active_portfolio['use_momentum']:
             st.number_input("Volatility Exclude (days)", min_value=0, key="alloc_active_vol_exclude", on_change=update_vol_exclude)
             if st.button("Reset Volatility", on_click=reset_vol_callback):
                 pass
+    
+    # Minimal Threshold Filter Section
+    st.markdown("---")
+    st.subheader("Minimal Threshold Filter")
+    
+    # Initialize threshold settings if not present
+    if "alloc_active_use_threshold" not in st.session_state:
+        st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+    if "alloc_active_threshold_percent" not in st.session_state:
+        st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+    
+    st.checkbox(
+        "Enable Minimal Threshold Filter", 
+        key="alloc_active_use_threshold", 
+        on_change=update_use_threshold,
+        help="Exclude stocks with allocations below the threshold percentage and normalize remaining allocations to 100%"
+    )
+    
+    if st.session_state.get("alloc_active_use_threshold", False):
+        st.number_input(
+            "Minimal Threshold (%)", 
+            min_value=0.1, 
+            max_value=50.0, 
+            value=st.session_state.get("alloc_active_threshold_percent", 2.0), 
+            step=0.1,
+            key="alloc_active_threshold_percent", 
+            on_change=update_threshold_percent,
+            help="Stocks with allocations below this percentage will be excluded and their weight redistributed to remaining stocks"
+        )
+    
     st.markdown("---")
     st.subheader("Momentum Windows")
     col_reset, col_norm, col_addrem = st.columns([0.4, 0.4, 0.2])
