@@ -606,7 +606,8 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                 ['Beta Lookback', f"{config.get('beta_window_days', 0)} days", 'Days for beta calculation'],
                 ['Beta Exclude', f"{config.get('exclude_days_beta', 0)} days", 'Days excluded from beta calculation'],
                 ['Volatility Lookback', f"{config.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
-                ['Volatility Exclude', f"{config.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation']
+                ['Volatility Exclude', f"{config.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
+                ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 2.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold']
             ]
             
             # Add momentum windows if they exist
@@ -1228,23 +1229,23 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                         # Sort by Final Portfolio Value descending (best first)
                                         sorted_rows = sorted(table_rows, key=get_final_value, reverse=True)
                                         
-                                        # Get top 5 best and worst
+                                        # Get top 10 best and worst
                                         num_portfolios = len(sorted_rows)
-                                        top_5_best = sorted_rows[:min(5, num_portfolios)]
+                                        top_10_best = sorted_rows[:min(10, num_portfolios)]
                                         
                                         # For worst performers, get the actual worst (lowest final values)
-                                        # Sort by final value ascending to get worst first, then take top 5
+                                        # Sort by final value ascending to get worst first, then take top 10
                                         worst_sorted = sorted(table_rows, key=get_final_value, reverse=False)
-                                        top_5_worst = worst_sorted[:min(5, num_portfolios)]
+                                        top_10_worst = worst_sorted[:min(10, num_portfolios)]
                     
                     # Add page break before the new tables
                     story.append(PageBreak())
                     
-                    # Top 5 Best Performing Portfolios
-                    story.append(Paragraph("3.1. Top 5 Best Performing Portfolios by Final Value", heading_style))
+                    # Top 10 Best Performing Portfolios
+                    story.append(Paragraph("3.1. Top 10 Best Performing Portfolios by Final Value", heading_style))
                     story.append(Spacer(1, 10))
                     
-                    if len(top_5_best) > 0:
+                    if len(top_10_best) > 0:
                         # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
                         # Wrap headers for better display
                         wrapped_headers = []
@@ -1273,7 +1274,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                         
                         # Wrap portfolio names in the first column for best performers
                         wrapped_best_rows = []
-                        for row in top_5_best:
+                        for row in top_10_best:
                             wrapped_row = row.copy()
                             if len(str(row[0])) > 25:  # Wrap long portfolio names
                                 words = str(row[0]).split()
@@ -1393,15 +1394,16 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                         story.append(best_table)
                         story.append(Spacer(1, 15))
                     
-                    # Top 5 Worst Performing Portfolios
-                    story.append(Paragraph("3.2. Top 5 Worst Performing Portfolios by Final Value", heading_style))
+                    # Top 10 Worst Performing Portfolios
+                    story.append(PageBreak())
+                    story.append(Paragraph("3.2. Top 10 Worst Performing Portfolios by Final Value", heading_style))
                     story.append(Spacer(1, 10))
                     
-                    if len(top_5_worst) > 0:
+                    if len(top_10_worst) > 0:
                         # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
                         # Wrap portfolio names in the first column for worst performers
                         wrapped_worst_rows = []
-                        for row in top_5_worst:
+                        for row in top_10_worst:
                             wrapped_row = row.copy()
                             if len(str(row[0])) > 25:  # Wrap long portfolio names
                                 words = str(row[0]).split()
@@ -1491,10 +1493,10 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                     wedges_target, texts_target, autotexts_target = ax_target.pie(vals_today, autopct=smart_autopct, 
                                                                                  startangle=90)
                     
-                    # Add ticker names with percentages outside the pie chart slices for allocations > 2.4%
+                    # Add ticker names with percentages outside the pie chart slices for allocations > 1.8%
                     for i, (wedge, ticker, alloc) in enumerate(zip(wedges_target, labels_today, vals_today)):
-                        # Only show tickers above 2.4%
-                        if alloc > 2.4:
+                        # Only show tickers above 1.8%
+                        if alloc > 1.8:
                             # Calculate position for the text (middle of the slice)
                             angle = (wedge.theta1 + wedge.theta2) / 2
                             # Convert angle to radians and calculate position
@@ -1904,6 +1906,8 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'exclude_days_beta': 30,
             'vol_window_days': 365,
             'exclude_days_vol': 30,
+            'use_minimal_threshold': False,
+            'minimal_threshold_percent': 2.0,
         },
         # 2) Momentum-based portfolio with Beta + Volatility adjustments
         {
@@ -1936,6 +1940,8 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'exclude_days_beta': 30,
             'vol_window_days': 365,
             'exclude_days_vol': 30,
+            'use_minimal_threshold': False,
+            'minimal_threshold_percent': 2.0,
         },
         # 3) Pure momentum strategy (no beta/volatility adjustments)
         {
@@ -1968,6 +1974,8 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'exclude_days_beta': 30,
             'vol_window_days': 365,
             'exclude_days_vol': 30,
+            'use_minimal_threshold': False,
+            'minimal_threshold_percent': 2.0,
         },
     ]
     st.session_state.strategy_comparison_active_portfolio_index = 0
@@ -2721,6 +2729,35 @@ def single_backtest(config, sim_index, reindexed_data):
             if ssum > 0:
                 weights = {t: filtered[t] / ssum for t in filtered}
 
+        # Apply minimal threshold filter if enabled
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        if use_threshold and weights:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # STEP 1: Complete rebalancing simulation is already done above
+            # (momentum calculation, beta/volatility filtering, etc. - weights are the "simulation" result)
+            
+            # STEP 2: Check which stocks are below threshold in the simulation
+            filtered_weights = {}
+            for ticker, weight in weights.items():
+                if weight >= threshold_decimal:
+                    # Keep stocks above or equal to threshold (remove stocks below threshold)
+                    filtered_weights[ticker] = weight
+            
+            # STEP 3: Do the actual rebalancing with only the remaining stocks
+            if filtered_weights:
+                total_weight = sum(filtered_weights.values())
+                if total_weight > 0:
+                    # Normalize remaining stocks to sum to 1.0
+                    weights = {ticker: weight / total_weight for ticker, weight in filtered_weights.items()}
+                else:
+                    weights = {}
+            else:
+                # If no stocks meet threshold, keep original weights
+                weights = weights
+
         # Attach calculated weights to metrics and return
         for t in weights:
             metrics[t]['Calculated_Weight'] = weights.get(t, 0.0)
@@ -2744,6 +2781,31 @@ def single_backtest(config, sim_index, reindexed_data):
     # Initial allocation and metric storage
     if not use_momentum:
         current_allocations = {t: allocations.get(t,0) for t in tickers}
+        
+        # Apply minimal threshold filter for non-momentum strategies
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        if use_threshold and current_allocations:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # First: Filter out stocks below threshold
+            filtered_allocations = {}
+            for ticker, allocation in current_allocations.items():
+                if allocation >= threshold_decimal:
+                    # Keep stocks above or equal to threshold
+                    filtered_allocations[ticker] = allocation
+            
+            # Then: Normalize remaining stocks to sum to 1
+            if filtered_allocations:
+                total_allocation = sum(filtered_allocations.values())
+                if total_allocation > 0:
+                    current_allocations = {ticker: allocation / total_allocation for ticker, allocation in filtered_allocations.items()}
+                else:
+                    current_allocations = {}
+            else:
+                # If no stocks meet threshold, keep original allocations
+                current_allocations = current_allocations
     else:
         returns, valid_assets = calculate_momentum(sim_index[0], set(tickers), momentum_windows)
         current_allocations, metrics_on_rebal = calculate_momentum_weights(
@@ -2884,10 +2946,39 @@ def single_backtest(config, sim_index, reindexed_data):
                         unreinvested_cash[-1] = 0
                         unallocated_cash[-1] = 0
             else:
-                sum_alloc = sum(allocations.get(t,0) for t in tickers)
+                # Apply threshold filter for non-momentum strategies during rebalancing
+                use_threshold = config.get('use_minimal_threshold', False)
+                threshold_percent = config.get('minimal_threshold_percent', 2.0)
+                
+                if use_threshold:
+                    threshold_decimal = threshold_percent / 100.0
+                    
+                    # First: Filter out stocks below threshold
+                    filtered_allocations = {}
+                    for t in tickers:
+                        allocation = allocations.get(t, 0)
+                        if allocation >= threshold_decimal:
+                            # Keep stocks above or equal to threshold
+                            filtered_allocations[t] = allocation
+                    
+                    # Then: Normalize remaining stocks to sum to 1
+                    if filtered_allocations:
+                        total_allocation = sum(filtered_allocations.values())
+                        if total_allocation > 0:
+                            rebalance_allocations = {t: allocation / total_allocation for t, allocation in filtered_allocations.items()}
+                        else:
+                            rebalance_allocations = {}
+                    else:
+                        # If no stocks meet threshold, use original allocations
+                        rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                else:
+                    # Use original allocations if threshold filter is disabled
+                    rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                
+                sum_alloc = sum(rebalance_allocations.values())
                 if sum_alloc > 0:
                     for t in tickers:
-                        weight = allocations.get(t,0)/sum_alloc
+                        weight = rebalance_allocations.get(t, 0) / sum_alloc
                         values[t][-1] = current_total * weight
                     unreinvested_cash[-1] = 0
                     unallocated_cash[-1] = 0
@@ -2992,6 +3083,13 @@ if 'strategy_comparison_portfolio_configs' not in st.session_state:
     st.session_state.strategy_comparison_portfolio_configs = default_configs
 if 'strategy_comparison_active_portfolio_index' not in st.session_state:
     st.session_state.strategy_comparison_active_portfolio_index = 0
+
+# Ensure all portfolios have threshold settings
+for portfolio in st.session_state.strategy_comparison_portfolio_configs:
+    if 'use_minimal_threshold' not in portfolio:
+        portfolio['use_minimal_threshold'] = False
+    if 'minimal_threshold_percent' not in portfolio:
+        portfolio['minimal_threshold_percent'] = 2.0
 
 if 'strategy_comparison_paste_json_text' not in st.session_state:
     st.session_state.strategy_comparison_paste_json_text = ""
@@ -3670,6 +3768,10 @@ def paste_json_callback():
             json_data['exclude_from_cashflow_sync'] = False
         if 'exclude_from_rebalancing_sync' not in json_data:
             json_data['exclude_from_rebalancing_sync'] = False
+        if 'use_minimal_threshold' not in json_data:
+            json_data['use_minimal_threshold'] = False
+        if 'minimal_threshold_percent' not in json_data:
+            json_data['minimal_threshold_percent'] = 2.0
         
         # Clear widget keys to force re-initialization
         widget_keys_to_clear = [
@@ -3790,6 +3892,8 @@ def paste_json_callback():
             'momentum_strategy': momentum_strategy,
             'negative_momentum_strategy': negative_momentum_strategy,
             'momentum_windows': momentum_windows,
+            'use_minimal_threshold': json_data.get('use_minimal_threshold', False),
+            'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 2.0),
             'calc_beta': json_data.get('calc_beta', True),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -3832,6 +3936,10 @@ def paste_json_callback():
         st.session_state['strategy_comparison_active_use_momentum'] = strategy_comparison_config['use_momentum']
         st.session_state['strategy_comparison_active_momentum_strategy'] = strategy_comparison_config['momentum_strategy']
         st.session_state['strategy_comparison_active_negative_momentum_strategy'] = strategy_comparison_config['negative_momentum_strategy']
+        
+        # Update threshold settings
+        st.session_state['strategy_comparison_active_use_threshold'] = strategy_comparison_config.get('use_minimal_threshold', False)
+        st.session_state['strategy_comparison_active_threshold_percent'] = strategy_comparison_config.get('minimal_threshold_percent', 2.0)
         
         # Update beta settings
         st.session_state['strategy_comparison_active_calc_beta'] = strategy_comparison_config['calc_beta']
@@ -3938,6 +4046,10 @@ def paste_all_json_callback():
                     portfolio['exclude_from_cashflow_sync'] = False
                 if 'exclude_from_rebalancing_sync' not in portfolio:
                     portfolio['exclude_from_rebalancing_sync'] = False
+                if 'use_minimal_threshold' not in portfolio:
+                    portfolio['use_minimal_threshold'] = False
+                if 'minimal_threshold_percent' not in portfolio:
+                    portfolio['minimal_threshold_percent'] = 2.0
         
         if isinstance(obj, list):
             # Clear widget keys to force re-initialization
@@ -4058,6 +4170,8 @@ def paste_all_json_callback():
                     'momentum_strategy': momentum_strategy,
                     'negative_momentum_strategy': negative_momentum_strategy,
                     'momentum_windows': momentum_windows,
+                    'use_minimal_threshold': cfg.get('use_minimal_threshold', False),
+                    'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 2.0),
                     'calc_beta': cfg.get('calc_beta', True),
                     'calc_volatility': cfg.get('calc_volatility', True),
                     'beta_window_days': cfg.get('beta_window_days', 365),
@@ -4087,6 +4201,8 @@ def paste_all_json_callback():
                 st.session_state['strategy_comparison_active_benchmark'] = processed_configs[0].get('benchmark_ticker', '')
                 st.session_state['strategy_comparison_active_use_momentum'] = bool(processed_configs[0].get('use_momentum', True))
                 st.session_state['strategy_comparison_active_collect_dividends_as_cash'] = bool(processed_configs[0].get('collect_dividends_as_cash', False))
+                st.session_state['strategy_comparison_active_use_threshold'] = bool(processed_configs[0].get('use_minimal_threshold', False))
+                st.session_state['strategy_comparison_active_threshold_percent'] = float(processed_configs[0].get('minimal_threshold_percent', 2.0))
                 
                 # UPDATE GLOBAL TICKERS FROM FIRST PORTFOLIO
                 first_portfolio_stocks = processed_configs[0].get('stocks', [])
@@ -4151,11 +4267,18 @@ def update_active_portfolio_index():
     selected_name = st.session_state.get('strategy_comparison_portfolio_selector', None)
     portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
     portfolio_names = [cfg.get('name', '') for cfg in portfolio_configs]
+    
     if selected_name and selected_name in portfolio_names:
-        st.session_state.strategy_comparison_active_portfolio_index = portfolio_names.index(selected_name)
+        new_index = portfolio_names.index(selected_name)
+        st.session_state.strategy_comparison_active_portfolio_index = new_index
     else:
         # default to first portfolio if selector is missing or value not found
         st.session_state.strategy_comparison_active_portfolio_index = 0 if portfolio_names else None
+    
+    # Additional safety check - ensure index is always valid
+    if (st.session_state.strategy_comparison_active_portfolio_index is not None and 
+        st.session_state.strategy_comparison_active_portfolio_index >= len(portfolio_names)):
+        st.session_state.strategy_comparison_active_portfolio_index = max(0, len(portfolio_names) - 1) if portfolio_names else None
     
     # Sync date widgets with the new portfolio
     sync_date_widgets_with_portfolio()
@@ -4177,6 +4300,8 @@ def update_active_portfolio_index():
         
         # Sync expander state (same pattern as other portfolio parameters)
         st.session_state['strategy_comparison_active_variant_expanded'] = active_portfolio.get('variant_expander_expanded', False)
+        st.session_state['strategy_comparison_active_use_threshold'] = active_portfolio.get('use_minimal_threshold', False)
+        st.session_state['strategy_comparison_active_threshold_percent'] = active_portfolio.get('minimal_threshold_percent', 2.0)
         
         # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
         if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
@@ -4186,6 +4311,12 @@ def update_active_portfolio_index():
                 {"lookback": 120, "exclude": 30, "weight": 0.2},
             ]
             print(f"NUCLEAR: FORCED momentum windows for portfolio {active_portfolio.get('name', 'Unknown')}")
+        
+        # NUCLEAR: Ensure threshold settings exist
+        if 'use_minimal_threshold' not in active_portfolio:
+            active_portfolio['use_minimal_threshold'] = False
+        if 'minimal_threshold_percent' not in active_portfolio:
+            active_portfolio['minimal_threshold_percent'] = 2.0
         
         print(f"NUCLEAR: Synced momentum widgets for portfolio {active_portfolio.get('name', 'Unknown')}, use_momentum={active_portfolio.get('use_momentum', False)}, windows_count={len(active_portfolio.get('momentum_windows', []))}")
         
@@ -4474,12 +4605,31 @@ def update_vol_window():
 def update_vol_exclude():
     st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['exclude_days_vol'] = st.session_state.strategy_comparison_active_vol_exclude
 
+def update_use_threshold():
+    st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['use_minimal_threshold'] = st.session_state.strategy_comparison_active_use_threshold
+
+def update_threshold_percent():
+    st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['minimal_threshold_percent'] = st.session_state.strategy_comparison_active_threshold_percent
+
 def update_collect_dividends_as_cash():
     st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['collect_dividends_as_cash'] = st.session_state.strategy_comparison_active_collect_dividends_as_cash
 
 # Sidebar for portfolio selection
 st.sidebar.title("Manage Portfolios")
 portfolio_names = [cfg['name'] for cfg in st.session_state.strategy_comparison_portfolio_configs]
+
+# Ensure the active portfolio index is valid
+if (st.session_state.strategy_comparison_active_portfolio_index is None or 
+    st.session_state.strategy_comparison_active_portfolio_index >= len(portfolio_names) or
+    st.session_state.strategy_comparison_active_portfolio_index < 0):
+    st.session_state.strategy_comparison_active_portfolio_index = 0 if portfolio_names else None
+
+# Use the current portfolio name as the default selection to make it more reliable
+current_portfolio_name = None
+if (st.session_state.strategy_comparison_active_portfolio_index is not None and 
+    st.session_state.strategy_comparison_active_portfolio_index < len(portfolio_names)):
+    current_portfolio_name = portfolio_names[st.session_state.strategy_comparison_active_portfolio_index]
+
 selected_portfolio_name = st.sidebar.selectbox(
     "Select Portfolio",
     options=portfolio_names,
@@ -4902,6 +5052,10 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['start_with'] = st.session_state.get('strategy_comparison_start_with', 'all')
             cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
             
+            # Ensure threshold settings are included (read from current config)
+            cleaned_config['use_minimal_threshold'] = config.get('use_minimal_threshold', False)
+            cleaned_config['minimal_threshold_percent'] = config.get('minimal_threshold_percent', 2.0)
+            
             # Convert date objects to strings for JSON serialization
             if cleaned_config.get('start_date_user') is not None:
                 cleaned_config['start_date_user'] = cleaned_config['start_date_user'].isoformat() if hasattr(cleaned_config['start_date_user'], 'isoformat') else str(cleaned_config['start_date_user'])
@@ -5290,6 +5444,90 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     else:
         st.info("💡 **Momentum-related options** (Momentum Strategy, Negative Strategy, Beta, Volatility) are only available when momentum is enabled in the current portfolio or when varying 'Use Momentum' to include enabled variants.")
     
+    # Minimal Threshold Filter Section - Only show when momentum is enabled
+    if use_momentum_vary:
+        st.markdown("---")
+        st.markdown("**Minimal Threshold Filter:**")
+        
+        # Initialize session state for threshold filters if not exists
+        if f"threshold_filters_{portfolio_index}" not in st.session_state:
+            st.session_state[f"threshold_filters_{portfolio_index}"] = []
+        
+        # Checkboxes for enable/disable
+        col_thresh_left, col_thresh_right = st.columns(2)
+        
+        with col_thresh_left:
+            disable_threshold = st.checkbox(
+                "Disable Minimal Threshold Filter", 
+                value=True, 
+                key=f"disable_threshold_{portfolio_index}",
+                help="Keeps the minimal threshold filter disabled"
+            )
+        
+        with col_thresh_right:
+            enable_threshold = st.checkbox(
+                "Enable Minimal Threshold Filter", 
+                value=False, 
+                key=f"enable_threshold_{portfolio_index}",
+                help="Enables the minimal threshold filter with customizable values"
+            )
+        
+        # Validation: At least one must be selected
+        if not disable_threshold and not enable_threshold:
+            st.error("⚠️ **At least one Minimal Threshold Filter option must be selected!**")
+        
+        # Build threshold options list
+        threshold_options = []
+        
+        # If disable is selected, add None to options
+        if disable_threshold:
+            threshold_options.append(None)
+        
+        # If enable is selected, show threshold input options
+        if enable_threshold:
+            st.markdown("**Threshold Values:**")
+            
+            # Add new threshold button
+            if st.button("➕ Add Threshold Value", key=f"add_threshold_{portfolio_index}"):
+                st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
+                st.rerun()
+            
+            # Display existing threshold inputs
+            for i, threshold in enumerate(st.session_state[f"threshold_filters_{portfolio_index}"]):
+                col_input, col_remove = st.columns([3, 1])
+                
+                with col_input:
+                    threshold_value = st.number_input(
+                        f"Threshold {i+1} (%)",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=threshold,
+                        step=0.1,
+                        format="%.2f",
+                        key=f"threshold_input_{portfolio_index}_{i}",
+                        help="Minimum threshold percentage for portfolio allocation"
+                    )
+                    threshold_options.append(threshold_value)
+                
+                with col_remove:
+                    if st.button("🗑️", key=f"remove_threshold_{portfolio_index}_{i}", help="Remove this threshold"):
+                        st.session_state[f"threshold_filters_{portfolio_index}"].pop(i)
+                        st.rerun()
+            
+            # If no thresholds exist, add a default one
+            if not st.session_state[f"threshold_filters_{portfolio_index}"]:
+                st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
+                st.rerun()
+        
+        # Store threshold options in variant params if any are selected
+        if threshold_options:
+            variant_params["minimal_threshold"] = threshold_options
+        elif not disable_threshold and not enable_threshold:
+            st.error("⚠️ **At least one threshold value must be provided when Enable is selected!**")
+    else:
+        # When momentum is not enabled, add None as default
+        variant_params["minimal_threshold"] = [None]
+    
     # Calculate total combinations
     total_variants = 1
     for param_values in variant_params.values():
@@ -5322,6 +5560,10 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # Check if volatility options are missing (they're always required when momentum enabled)
             if "include_volatility" not in variant_params:
                 validation_errors.append("⚠️ Select at least one **Volatility option** when momentum is enabled")
+        
+        # Check if minimal threshold filter is missing (only required when momentum is enabled)
+        if use_momentum_vary and "minimal_threshold" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **Minimal Threshold Filter** option when momentum is enabled")
         
         # Show validation errors
         if validation_errors:
@@ -5384,6 +5626,13 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                                 variant["calc_beta"] = value
                             elif param == "include_volatility":
                                 variant["calc_volatility"] = value
+                            elif param == "minimal_threshold":
+                                if value is not None:
+                                    variant["use_minimal_threshold"] = True
+                                    variant["minimal_threshold_percent"] = value
+                                else:
+                                    variant["use_minimal_threshold"] = False
+                                    variant["minimal_threshold_percent"] = 2.0  # Default value
                             else:
                                 # For any other parameters, use the original name
                                 variant[param] = value
@@ -5485,6 +5734,11 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     else:
                         clear_name_parts.append("No Momentum")
                         # Stop here - no beta/volatility for non-momentum portfolios
+                    
+                    # Add threshold information (only show when enabled)
+                    if variant.get('use_minimal_threshold', False):
+                        threshold_percent = variant.get('minimal_threshold_percent', 2.0)
+                        clear_name_parts.append(f"- Min {threshold_percent:.2f}%")
                     
                     # Create the new clear name
                     clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
@@ -5661,6 +5915,10 @@ st.text_input("Benchmark Ticker (default: ^GSPC, used for beta calculation)", ke
 st.subheader("Strategy")
 if "strategy_comparison_active_use_momentum" not in st.session_state:
     st.session_state["strategy_comparison_active_use_momentum"] = active_portfolio['use_momentum']
+if "strategy_comparison_active_use_threshold" not in st.session_state:
+    st.session_state["strategy_comparison_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+if "strategy_comparison_active_threshold_percent" not in st.session_state:
+    st.session_state["strategy_comparison_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
 st.checkbox("Use Momentum Strategy", key="strategy_comparison_active_use_momentum", on_change=update_use_momentum, help="Enables momentum-based weighting of stocks.")
 
 if st.session_state.get('strategy_comparison_active_use_momentum', active_portfolio.get('use_momentum', True)):
@@ -5709,6 +5967,36 @@ if st.session_state.get('strategy_comparison_active_use_momentum', active_portfo
             st.session_state["strategy_comparison_active_vol_exclude"] = active_portfolio.get('exclude_days_vol', 30)
             st.number_input("Volatility Lookback (days)", min_value=1, key="strategy_comparison_active_vol_window", on_change=update_vol_window)
             st.number_input("Volatility Exclude (days)", min_value=0, key="strategy_comparison_active_vol_exclude", on_change=update_vol_exclude)
+    
+    # Minimal Threshold Filter Section
+    st.markdown("---")
+    st.subheader("Minimal Threshold Filter")
+    
+    # Initialize threshold settings if not present
+    if "strategy_comparison_active_use_threshold" not in st.session_state:
+        st.session_state["strategy_comparison_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+    if "strategy_comparison_active_threshold_percent" not in st.session_state:
+        st.session_state["strategy_comparison_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+    
+    st.checkbox(
+        "Enable Minimal Threshold Filter", 
+        key="strategy_comparison_active_use_threshold", 
+        on_change=update_use_threshold,
+        help="Exclude stocks with allocations below the threshold percentage and normalize remaining allocations to 100%"
+    )
+    
+    if st.session_state.get("strategy_comparison_active_use_threshold", False):
+        st.number_input(
+            "Minimal Threshold (%)", 
+            min_value=0.1, 
+            max_value=50.0, 
+            value=st.session_state.get("strategy_comparison_active_threshold_percent", 2.0), 
+            step=0.1,
+            key="strategy_comparison_active_threshold_percent", 
+            on_change=update_threshold_percent,
+            help="Stocks with allocations below this percentage will be excluded and their weight redistributed to remaining stocks"
+        )
+    
     st.markdown("---")
     st.subheader("Momentum Windows")
     col_reset, col_norm, col_addrem = st.columns([0.4, 0.4, 0.2])
@@ -7287,7 +7575,8 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 'Beta Window': f"{cfg.get('beta_window_days', 0)} days" if cfg.get('use_beta', False) else 'N/A',
                 'Volatility Window': f"{cfg.get('vol_window_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
                 'Beta Exclude Days': f"{cfg.get('beta_exclude_days', 0)} days" if cfg.get('use_beta', False) else 'N/A',
-                'Volatility Exclude Days': f"{cfg.get('vol_exclude_days', 0)} days" if cfg.get('use_vol', False) else 'N/A'
+                'Volatility Exclude Days': f"{cfg.get('vol_exclude_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
+                'Minimal Threshold': f"{cfg.get('minimal_threshold_percent', 2.0):.1f}%" if cfg.get('use_minimal_threshold', False) else 'Disabled'
             }
         
         config_df = pd.DataFrame(config_data).T
