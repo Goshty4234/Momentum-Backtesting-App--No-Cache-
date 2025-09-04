@@ -488,9 +488,19 @@ def get_dates_by_freq(freq, start, end, market_days):
     elif freq == "Biweekly":
         base = pd.date_range(start=start, end=end, freq='2W-MON')
     elif freq == "Monthly":
-        base = pd.date_range(start=start, end=end, freq='MS')
+        # Fixed calendar dates: 1st of each month
+        monthly = []
+        for y in range(start.year, end.year + 1):
+            for m in range(1, 13):
+                monthly.append(pd.Timestamp(year=y, month=m, day=1))
+        base = pd.DatetimeIndex(monthly)
     elif freq == "Quarterly":
-        base = pd.date_range(start=start, end=end, freq='3MS')
+        # Fixed calendar dates: 1st of each quarter (Jan 1, Apr 1, Jul 1, Oct 1)
+        quarterly = []
+        for y in range(start.year, end.year + 1):
+            for m in [1, 4, 7, 10]:  # Q1, Q2, Q3, Q4
+                quarterly.append(pd.Timestamp(year=y, month=m, day=1))
+        base = pd.DatetimeIndex(quarterly)
     elif freq == "Semiannually":
         # First day of Jan and Jul each year
         semi = []
