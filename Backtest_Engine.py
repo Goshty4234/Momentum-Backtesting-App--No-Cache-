@@ -24,6 +24,43 @@ try:
 except Exception:
     plotly_events = None
 
+# =============================================================================
+# PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS FOR MAIN ENGINE
+# =============================================================================
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period=None, auto_adjust=False):
+    """Cache ticker data to dramatically improve performance - MAIN ENGINE VERSION
+    
+    Args:
+        ticker_symbol: Stock ticker symbol
+        start_date: Start date for data (None for period-based)
+        end_date: End date for data (None for period-based)
+        period: Period string like "max", "1y" (None for date-based)
+        auto_adjust: Auto-adjust setting
+    """
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        
+        if period:
+            # Period-based download
+            hist = ticker.history(period=period, auto_adjust=auto_adjust)
+        else:
+            # Date-based download
+            hist = ticker.history(start=start_date, end=end_date, auto_adjust=auto_adjust, raise_errors=False)
+            
+        return hist
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_ticker_download(ticker_symbol, start_date=None, end_date=None, progress=False):
+    """Cache yf.download calls for fallback scenarios"""
+    try:
+        return yf.download(ticker_symbol, start=start_date, end=end_date, progress=progress)
+    except Exception:
+        return pd.DataFrame()
+
 # Set up logging to capture print statements
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 console_output = io.StringIO()
@@ -125,17 +162,16 @@ def get_risk_free_rate(dates):
         for s in symbols:
             # attempt 1: Ticker.history
             try:
-                t = yf.Ticker(s)
-                h = t.history(start=start_date, end=end_date, raise_errors=False)
+                h = get_cached_ticker_data(s, start_date=start_date, end_date=end_date, auto_adjust=False)
                 if h is None or getattr(h, 'empty', True):
                     # attempt 2: yf.download as fallback
-                    h = yf.download(s, start=start_date, end=end_date, progress=False)
+                    h = get_cached_ticker_download(s, start_date=start_date, end_date=end_date, progress=False)
                 if h is None or getattr(h, 'empty', True):
                     # try expanding the window by 30 days each side once
                     try:
                         adj_start = (pd.to_datetime(start_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
                         adj_end = (pd.to_datetime(end_date) + pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-                        h = yf.download(s, start=adj_start, end=adj_end, progress=False)
+                        h = get_cached_ticker_download(s, start_date=adj_start, end_date=adj_end, progress=False)
                     except Exception:
                         h = None
                 if h is None or getattr(h, 'empty', True):
@@ -639,8 +675,7 @@ def _load_data(tickers: List[str], start_date: datetime, end_date: datetime):
 
     for t in tickers:
         try:
-            ticker = yf.Ticker(t)
-            hist = ticker.history(start=start_date, end=yf_end_date, auto_adjust=False)
+            hist = get_cached_ticker_data(t, start_date=start_date, end_date=yf_end_date, auto_adjust=False)
 
             if hist.empty:
                 logger.warning(f"No data available for {t}")
@@ -654,7 +689,8 @@ def _load_data(tickers: List[str], start_date: datetime, end_date: datetime):
             # Clip to end_date in case yf_end_date brought extra rows
             hist = hist[hist.index <= end_date]
 
-            # Fetch dividends
+            # Fetch dividends - we need the ticker object for this
+            ticker = yf.Ticker(t)
             divs = ticker.dividends.copy()
             if getattr(divs.index, "tz", None) is not None:
                 divs.index = divs.index.tz_convert(None)
@@ -834,9 +870,13 @@ def _get_rebalancing_dates(all_dates: pd.DatetimeIndex, rebalancing_frequency: s
         mondays = all_dates[all_dates.weekday == 0]
         return mondays[::2]
     elif rebalancing_frequency == "Monthly":
-        return all_dates[all_dates.is_month_end]
+        # First available trading day of each month
+        months = all_dates.to_series().groupby([all_dates.year, all_dates.month]).first()
+        return pd.DatetimeIndex(months.values)
     elif rebalancing_frequency == "Quarterly":
-        return all_dates[all_dates.is_quarter_end]
+        # First available trading day of each quarter
+        quarters = all_dates.to_series().groupby([all_dates.year, all_dates.quarter]).first()
+        return pd.DatetimeIndex(quarters.values)
     elif rebalancing_frequency == "Semiannually":
         # First trading day of Jan/Jul each year
         semi = [(y, m) for y in sorted(set(all_dates.year)) for m in [1, 7]]
@@ -855,9 +895,13 @@ def _get_added_cash_dates(all_dates: pd.DatetimeIndex, added_frequency: str):
         return pd.DatetimeIndex([])
 
     if added_frequency == "Monthly":
-        return all_dates[all_dates.is_month_end]
+        # First available trading day of each month
+        months = all_dates.to_series().groupby([all_dates.year, all_dates.month]).first()
+        return pd.DatetimeIndex(months.values)
     elif added_frequency == "Quarterly":
-        return all_dates[all_dates.is_quarter_end]
+        # First available trading day of each quarter
+        quarters = all_dates.to_series().groupby([all_dates.year, all_dates.quarter]).first()
+        return pd.DatetimeIndex(quarters.values)
     elif added_frequency == "Annually":
         return all_dates[all_dates.is_year_end]
     else:
@@ -1080,6 +1124,8 @@ def _rebalance_portfolio(
     use_volatility_flag,
     vol_window_days_val,
     exclude_days_vol_val,
+    rebalancing_frequency=None,
+    current_asset_values=None,
 ):
     """Rebalancing now uses the new, more robust momentum logic."""
     global data, calc_beta, calc_volatility, beta_window_days, exclude_days_beta, benchmark_ticker, vol_window_days, exclude_days_vol, use_relative_momentum
@@ -1104,6 +1150,36 @@ def _rebalance_portfolio(
         "beta": {},
         "target_allocation": {},
     }
+
+    # Handle Buy & Hold strategies - they don't rebalance existing positions, only add new cash
+    if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+        # For buy and hold, total_portfolio_value is actually just the cash to distribute
+        
+        if rebalancing_frequency == "Buy & Hold":
+            # Use current proportions from existing holdings
+            if current_asset_values and sum(current_asset_values.values()) > 0:
+                # Calculate current proportions based on existing holdings
+                total_current_value = sum(current_asset_values.values())
+                current_proportions = {t: current_asset_values.get(t, 0) / total_current_value for t in tradable_tickers_today}
+            else:
+                # If no current holdings, use equal weights
+                current_proportions = {t: 1.0 / len(tradable_tickers_today) for t in tradable_tickers_today}
+            
+            for t in tradable_tickers_today:
+                target_allocation[t] = total_portfolio_value * current_proportions.get(t, 0)
+                rebalance_metrics["target_allocation"][t] = current_proportions.get(t, 0)
+        else:  # "Buy & Hold (Target)"
+            # Use initial target allocations
+            alloc_sum_available = sum(allocations.get(t, 0.0) for t in tradable_tickers_today)
+            if alloc_sum_available <= 0:
+                alloc_sum_available = sum(allocations.values()) if sum(allocations.values()) > 0 else 1.0
+            
+            for t in tradable_tickers_today:
+                normalized_alloc = allocations.get(t, 0.0) / alloc_sum_available
+                target_allocation[t] = total_portfolio_value * normalized_alloc
+                rebalance_metrics["target_allocation"][t] = normalized_alloc
+        
+        return target_allocation, rebalance_metrics
 
     if use_momentum:
         returns, valid_assets = calculate_momentum(current_date, set(tradable_tickers_today), momentum_windows, data)
@@ -1512,48 +1588,99 @@ def run_backtest(
         # Rebalance with additions
         if should_rebalance:
             # print(f"Rebalancing portfolio with additions on {current_date.date()}...")
-            target_alloc_with, rebalance_metrics = _rebalance_portfolio(
-                current_date, 
-                current_port_value_with_additions, 
-                data, 
-                tradable_tickers_today,
-                use_momentum, 
-                momentum_windows, 
-                negative_momentum_strategy,
-                use_relative_momentum, 
-                allocations,
-                calc_beta,
-                beta_window_days,
-                exclude_days_beta,
-                benchmark_ticker,
-                calc_volatility,
-                vol_window_days,
-                exclude_days_vol
-            )
+            
+            # For Buy & Hold strategies, only distribute the new cash, not rebalance entire portfolio
+            if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+                # Only distribute the new cash amount
+                cash_to_distribute = cash_with_additions
+                target_alloc_with, rebalance_metrics = _rebalance_portfolio(
+                    current_date, 
+                    cash_to_distribute,  # Only the new cash, not total portfolio
+                    data, 
+                    tradable_tickers_today,
+                    use_momentum, 
+                    momentum_windows, 
+                    negative_momentum_strategy,
+                    use_relative_momentum, 
+                    allocations,
+                    calc_beta,
+                    beta_window_days,
+                    exclude_days_beta,
+                    benchmark_ticker,
+                    calc_volatility,
+                    vol_window_days,
+                    exclude_days_vol,
+                    rebalancing_frequency,
+                    asset_values_with_additions
+                )
+            else:
+                # Normal rebalancing for other strategies
+                target_alloc_with, rebalance_metrics = _rebalance_portfolio(
+                    current_date, 
+                    current_port_value_with_additions, 
+                    data, 
+                    tradable_tickers_today,
+                    use_momentum, 
+                    momentum_windows, 
+                    negative_momentum_strategy,
+                    use_relative_momentum, 
+                    allocations,
+                    calc_beta,
+                    beta_window_days,
+                    exclude_days_beta,
+                    benchmark_ticker,
+                    calc_volatility,
+                    vol_window_days,
+                    exclude_days_vol,
+                    rebalancing_frequency,
+                    asset_values_with_additions
+                )
             # Store rebalance metrics ONLY on true rebalancing dates
             rebalance_metrics_list.append(rebalance_metrics)
             
             # Record last rebalance allocation
             last_rebalance_allocations = rebalance_metrics["target_allocation"]
 
-            # Reset shares to zero and calculate new shares, updating cash
-            new_cash = current_port_value_with_additions
-            new_shares = pd.Series(0.0, index=tickers_with_data)
-            
-            for t, target_val in target_alloc_with.items():
-                # Use last available price on or before current_date
-                df_t = data.get(t, pd.DataFrame())
-                if not df_t.empty:
-                    # Find the last available price before or on current_date
-                    price_idx = df_t.index.asof(current_date)
-                    if pd.notna(price_idx):
-                        price = float(df_t.loc[price_idx, "Close"])
-                        if price > 0:
-                            new_shares.loc[t] = target_val / price
-                            new_cash -= target_val
-            
-            asset_shares_with_additions = new_shares
-            cash_with_additions = new_cash
+            # For Buy & Hold strategies, only add new shares without touching existing holdings
+            if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+                # Keep existing shares and only add new shares from cash distribution
+                new_shares = asset_shares_with_additions.copy()
+                new_cash = cash_with_additions
+                
+                for t, target_val in target_alloc_with.items():
+                    # Use last available price on or before current_date
+                    df_t = data.get(t, pd.DataFrame())
+                    if not df_t.empty:
+                        # Find the last available price before or on current_date
+                        price_idx = df_t.index.asof(current_date)
+                        if pd.notna(price_idx):
+                            price = float(df_t.loc[price_idx, "Close"])
+                            if price > 0:
+                                # Add new shares to existing shares
+                                new_shares.loc[t] += target_val / price
+                                new_cash -= target_val
+                
+                asset_shares_with_additions = new_shares
+                cash_with_additions = new_cash
+            else:
+                # Normal rebalancing: Reset shares to zero and calculate new shares
+                new_cash = current_port_value_with_additions
+                new_shares = pd.Series(0.0, index=tickers_with_data)
+                
+                for t, target_val in target_alloc_with.items():
+                    # Use last available price on or before current_date
+                    df_t = data.get(t, pd.DataFrame())
+                    if not df_t.empty:
+                        # Find the last available price before or on current_date
+                        price_idx = df_t.index.asof(current_date)
+                        if pd.notna(price_idx):
+                            price = float(df_t.loc[price_idx, "Close"])
+                            if price > 0:
+                                new_shares.loc[t] = target_val / price
+                                new_cash -= target_val
+                
+                asset_shares_with_additions = new_shares
+                cash_with_additions = new_cash
 
         # Rebalance without additions
         if should_rebalance:
@@ -3372,8 +3499,11 @@ with st.sidebar:
 
     # 5. How to handle assets with different start dates?
     start_with_options = ["all", "oldest"]
+    # Initialize the session state value if not present
     if "start_with_radio_key" not in st.session_state:
         st.session_state["start_with_radio_key"] = "oldest"
+    
+    # Use the radio button without specifying index - let Streamlit handle it via the key
     start_with = st.radio(
         "How to handle assets with different start dates?",
         start_with_options,
@@ -3719,8 +3849,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     asset_start_dates = []  # List of (ticker, date)
     if benchmark_ticker:
         try:
-            ticker_yf = yf.Ticker(benchmark_ticker)
-            hist_yf = ticker_yf.history(period="max")
+            hist_yf = get_cached_ticker_data(benchmark_ticker, period="max")
             if hist_yf.empty:
                 benchmark_error = f"Benchmark ticker '{benchmark_ticker}' not found on Yahoo Finance. Please choose another ticker."
             else:
@@ -3728,8 +3857,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
                 # Get start dates for all asset tickers
                 for t in st.session_state.tickers:
                     try:
-                        ticker_yf_asset = yf.Ticker(t)
-                        hist_asset = ticker_yf_asset.history(period="max")
+                        hist_asset = get_cached_ticker_data(t, period="max")
                         if not hist_asset.empty:
                             asset_start_dates.append((t, hist_asset.index.min().date()))
                     except Exception:
@@ -3766,8 +3894,7 @@ if not st.session_state.get("_run_requested", False):
             # Print start date of each selected ticker and benchmark for debugging
             for t in st.session_state.tickers:
                 try:
-                    ticker_yf = yf.Ticker(t)
-                    hist = ticker_yf.history(period="max")
+                    hist = get_cached_ticker_data(t, period="max")
                     if not hist.empty:
                         print(f"DEBUG: Asset Ticker {t} starts on {hist.index.min().date()}")
                     else:
@@ -3776,8 +3903,7 @@ if not st.session_state.get("_run_requested", False):
                     print(f"DEBUG: Asset Ticker {t}: Error - {e}")
             if benchmark_ticker:
                 try:
-                    ticker_yf = yf.Ticker(benchmark_ticker)
-                    hist = ticker_yf.history(period="max")
+                    hist = get_cached_ticker_data(benchmark_ticker, period="max")
                     if not hist.empty:
                         print(f"DEBUG: Benchmark Ticker {benchmark_ticker} starts on {hist.index.min().date()}")
                     else:
