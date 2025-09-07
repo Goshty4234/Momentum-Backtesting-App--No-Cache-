@@ -581,7 +581,8 @@ def generate_simple_pdf_report(custom_name=""):
                 ['Beta Exclude', f"{config.get('exclude_days_beta', 0)} days", 'Days excluded from beta calculation'],
                 ['Volatility Lookback', f"{config.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
                 ['Volatility Exclude', f"{config.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
-                ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 2.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold']
+                ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 2.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
+                ['Maximum Allocation', f"{config.get('max_allocation_percent', 10.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
             ]
             
             # Add momentum windows if they exist
@@ -1964,6 +1965,8 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
             'minimal_threshold_percent': 2.0,
+            'use_max_allocation': False,
+            'max_allocation_percent': 10.0,
         },
         # 2) Momentum-based portfolio using SPY, QQQ, GLD, TLT
         {
@@ -2000,6 +2003,8 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
             'minimal_threshold_percent': 2.0,
+            'use_max_allocation': False,
+            'max_allocation_percent': 10.0,
         },
         # 3) Equal weight (No Momentum) using the same tickers
         {
@@ -2032,6 +2037,8 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
             'minimal_threshold_percent': 2.0,
+            'use_max_allocation': False,
+            'max_allocation_percent': 10.0,
         },
     ]
     st.session_state.multi_backtest_active_portfolio_index = 0
@@ -2917,34 +2924,110 @@ def single_backtest(config, sim_index, reindexed_data):
             if ssum > 0:
                 weights = {t: filtered[t] / ssum for t in filtered}
 
-        # Apply minimal threshold filter if enabled
+        # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+        use_max_allocation = config.get('use_max_allocation', False)
+        max_allocation_percent = config.get('max_allocation_percent', 10.0)
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
+        if use_max_allocation and weights:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # FIRST PASS: Apply maximum allocation filter
+            capped_weights = {}
+            excess_weight = 0.0
+            
+            for ticker, weight in weights.items():
+                if weight > max_allocation_decimal:
+                    # Cap the weight and collect excess
+                    capped_weights[ticker] = max_allocation_decimal
+                    excess_weight += (weight - max_allocation_decimal)
+                else:
+                    # Keep original weight
+                    capped_weights[ticker] = weight
+            
+            # Redistribute excess weight proportionally among stocks that are below the cap
+            if excess_weight > 0:
+                # Find stocks that can receive more weight (below the cap)
+                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
+                                 if weight < max_allocation_decimal}
+                
+                if eligible_stocks:
+                    # Calculate total weight of eligible stocks
+                    total_eligible_weight = sum(eligible_stocks.values())
+                    
+                    if total_eligible_weight > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_weight
+                            additional_weight = excess_weight * proportion
+                            new_weight = capped_weights[ticker] + additional_weight
+                            
+                            # Make sure we don't exceed the cap
+                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+            
+            weights = capped_weights
+        
+        # Apply minimal threshold filter if enabled
         if use_threshold and weights:
             threshold_decimal = threshold_percent / 100.0
             
-            # STEP 1: Complete rebalancing simulation is already done above
-            # (momentum calculation, beta/volatility filtering, etc. - weights are the "simulation" result)
-            
-            # STEP 2: Check which stocks are below threshold in the simulation
+            # Check which stocks are below threshold after max allocation redistribution
             filtered_weights = {}
             for ticker, weight in weights.items():
                 if weight >= threshold_decimal:
                     # Keep stocks above or equal to threshold (remove stocks below threshold)
                     filtered_weights[ticker] = weight
             
-            # STEP 3: Do the actual rebalancing with only the remaining stocks
+            # Normalize remaining stocks to sum to 1.0
             if filtered_weights:
                 total_weight = sum(filtered_weights.values())
                 if total_weight > 0:
-                    # Normalize remaining stocks to sum to 1.0
                     weights = {ticker: weight / total_weight for ticker, weight in filtered_weights.items()}
                 else:
                     weights = {}
             else:
                 # If no stocks meet threshold, keep original weights
                 weights = weights
+        
+        # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+        if use_max_allocation and weights:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # Check if any stocks exceed the cap after threshold filtering and normalization
+            capped_weights = {}
+            excess_weight = 0.0
+            
+            for ticker, weight in weights.items():
+                if weight > max_allocation_decimal:
+                    # Cap the weight and collect excess
+                    capped_weights[ticker] = max_allocation_decimal
+                    excess_weight += (weight - max_allocation_decimal)
+                else:
+                    # Keep original weight
+                    capped_weights[ticker] = weight
+            
+            # Redistribute excess weight proportionally among stocks that are below the cap
+            if excess_weight > 0:
+                # Find stocks that can receive more weight (below the cap)
+                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
+                                 if weight < max_allocation_decimal}
+                
+                if eligible_stocks:
+                    # Calculate total weight of eligible stocks
+                    total_eligible_weight = sum(eligible_stocks.values())
+                    
+                    if total_eligible_weight > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_weight
+                            additional_weight = excess_weight * proportion
+                            new_weight = capped_weights[ticker] + additional_weight
+                            
+                            # Make sure we don't exceed the cap
+                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+            
+            weights = capped_weights
 
         # Attach calculated weights to metrics and return
         for t in weights:
@@ -2970,10 +3053,51 @@ def single_backtest(config, sim_index, reindexed_data):
     if not use_momentum:
         current_allocations = {t: allocations.get(t,0) for t in tickers}
         
-        # Apply minimal threshold filter for non-momentum strategies
+        # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+        use_max_allocation = config.get('use_max_allocation', False)
+        max_allocation_percent = config.get('max_allocation_percent', 10.0)
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
+        if use_max_allocation and current_allocations:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # FIRST PASS: Apply maximum allocation filter
+            capped_allocations = {}
+            excess_allocation = 0.0
+            
+            for ticker, allocation in current_allocations.items():
+                if allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
+                else:
+                    # Keep original allocation
+                    capped_allocations[ticker] = allocation
+            
+            # Redistribute excess allocation proportionally among stocks that are below the cap
+            if excess_allocation > 0:
+                # Find stocks that can receive more allocation (below the cap)
+                eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                 if allocation < max_allocation_decimal}
+                
+                if eligible_stocks:
+                    # Calculate total allocation of eligible stocks
+                    total_eligible_allocation = sum(eligible_stocks.values())
+                    
+                    if total_eligible_allocation > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_allocation
+                            additional_allocation = excess_allocation * proportion
+                            new_allocation = capped_allocations[ticker] + additional_allocation
+                            
+                            # Make sure we don't exceed the cap
+                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+            
+            current_allocations = capped_allocations
+        
+        # Apply minimal threshold filter for non-momentum strategies
         if use_threshold and current_allocations:
             threshold_decimal = threshold_percent / 100.0
             
@@ -2994,6 +3118,45 @@ def single_backtest(config, sim_index, reindexed_data):
             else:
                 # If no stocks meet threshold, keep original allocations
                 current_allocations = current_allocations
+        
+        # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+        if use_max_allocation and current_allocations:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # Check if any stocks exceed the cap after threshold filtering and normalization
+            capped_allocations = {}
+            excess_allocation = 0.0
+            
+            for ticker, allocation in current_allocations.items():
+                if allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
+                else:
+                    # Keep original allocation
+                    capped_allocations[ticker] = allocation
+            
+            # Redistribute excess allocation proportionally among stocks that are below the cap
+            if excess_allocation > 0:
+                # Find stocks that can receive more allocation (below the cap)
+                eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                 if allocation < max_allocation_decimal}
+                
+                if eligible_stocks:
+                    # Calculate total allocation of eligible stocks
+                    total_eligible_allocation = sum(eligible_stocks.values())
+                    
+                    if total_eligible_allocation > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_allocation
+                            additional_allocation = excess_allocation * proportion
+                            new_allocation = capped_allocations[ticker] + additional_allocation
+                            
+                            # Make sure we don't exceed the cap
+                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+            
+            current_allocations = capped_allocations
     else:
         returns, valid_assets = calculate_momentum(sim_index[0], set(tickers), momentum_windows)
         current_allocations, metrics_on_rebal = calculate_momentum_weights(
@@ -3129,22 +3292,90 @@ def single_backtest(config, sim_index, reindexed_data):
                         unallocated_cash[-1] = current_total
                         unreinvested_cash[-1] = 0
                     else:
-                        for t in tickers:
-                            values[t][-1] = current_total * weights.get(t, 0)
-                        unreinvested_cash[-1] = 0
-                        unallocated_cash[-1] = 0
+                        # For Buy & Hold strategies with momentum, only distribute new cash
+                        if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+                            # Calculate current proportions for Buy & Hold, or use momentum weights for Buy & Hold (Target)
+                            if rebalancing_frequency == "Buy & Hold":
+                                # Use current proportions from existing holdings
+                                current_total_value = sum(values[t][-1] for t in tickers)
+                                if current_total_value > 0:
+                                    current_proportions = {t: values[t][-1] / current_total_value for t in tickers}
+                                else:
+                                    # If no current holdings, use equal weights
+                                    current_proportions = {t: 1.0 / len(tickers) for t in tickers}
+                            else:  # "Buy & Hold (Target)"
+                                # Use momentum weights
+                                current_proportions = weights
+                            
+                            # Only distribute the new cash (unallocated_cash + unreinvested_cash)
+                            cash_to_distribute = unallocated_cash[-1] + unreinvested_cash[-1]
+                            for t in tickers:
+                                # Add new cash proportionally to existing holdings
+                                values[t][-1] += cash_to_distribute * current_proportions.get(t, 0)
+                            unreinvested_cash[-1] = 0
+                            unallocated_cash[-1] = 0
+                        else:
+                            # Normal momentum rebalancing: replace all holdings
+                            for t in tickers:
+                                values[t][-1] = current_total * weights.get(t, 0)
+                            unreinvested_cash[-1] = 0
+                            unallocated_cash[-1] = 0
             else:
-                # Apply threshold filter for non-momentum strategies during rebalancing
+                # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+                use_max_allocation = config.get('use_max_allocation', False)
+                max_allocation_percent = config.get('max_allocation_percent', 10.0)
                 use_threshold = config.get('use_minimal_threshold', False)
                 threshold_percent = config.get('minimal_threshold_percent', 2.0)
                 
-                if use_threshold:
+                # Start with original allocations
+                rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                
+                if use_max_allocation and rebalance_allocations:
+                    max_allocation_decimal = max_allocation_percent / 100.0
+                    
+                    # FIRST PASS: Apply maximum allocation filter
+                    capped_allocations = {}
+                    excess_allocation = 0.0
+                    
+                    for ticker, allocation in rebalance_allocations.items():
+                        if allocation > max_allocation_decimal:
+                            # Cap the allocation and collect excess
+                            capped_allocations[ticker] = max_allocation_decimal
+                            excess_allocation += (allocation - max_allocation_decimal)
+                        else:
+                            # Keep original allocation
+                            capped_allocations[ticker] = allocation
+                    
+                    # Redistribute excess allocation proportionally among stocks that are below the cap
+                    if excess_allocation > 0:
+                        # Find stocks that can receive more allocation (below the cap)
+                        eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                         if allocation < max_allocation_decimal}
+                        
+                        if eligible_stocks:
+                            # Calculate total allocation of eligible stocks
+                            total_eligible_allocation = sum(eligible_stocks.values())
+                            
+                            if total_eligible_allocation > 0:
+                                # Redistribute excess proportionally
+                                for ticker in eligible_stocks:
+                                    proportion = eligible_stocks[ticker] / total_eligible_allocation
+                                    additional_allocation = excess_allocation * proportion
+                                    new_allocation = capped_allocations[ticker] + additional_allocation
+                                    
+                                    # Make sure we don't exceed the cap
+                                    capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                    
+                    rebalance_allocations = capped_allocations
+                
+                # Apply minimal threshold filter for non-momentum strategies during rebalancing
+                if use_threshold and rebalance_allocations:
                     threshold_decimal = threshold_percent / 100.0
                     
                     # First: Filter out stocks below threshold
                     filtered_allocations = {}
                     for t in tickers:
-                        allocation = allocations.get(t, 0)
+                        allocation = rebalance_allocations.get(t, 0)
                         if allocation >= threshold_decimal:
                             # Keep stocks above or equal to threshold
                             filtered_allocations[t] = allocation
@@ -3159,17 +3390,77 @@ def single_backtest(config, sim_index, reindexed_data):
                     else:
                         # If no stocks meet threshold, use original allocations
                         rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
-                else:
-                    # Use original allocations if threshold filter is disabled
-                    rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                
+                # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+                if use_max_allocation and rebalance_allocations:
+                    max_allocation_decimal = max_allocation_percent / 100.0
+                    
+                    # Check if any stocks exceed the cap after threshold filtering and normalization
+                    capped_allocations = {}
+                    excess_allocation = 0.0
+                    
+                    for ticker, allocation in rebalance_allocations.items():
+                        if allocation > max_allocation_decimal:
+                            # Cap the allocation and collect excess
+                            capped_allocations[ticker] = max_allocation_decimal
+                            excess_allocation += (allocation - max_allocation_decimal)
+                        else:
+                            # Keep original allocation
+                            capped_allocations[ticker] = allocation
+                    
+                    # Redistribute excess allocation proportionally among stocks that are below the cap
+                    if excess_allocation > 0:
+                        # Find stocks that can receive more allocation (below the cap)
+                        eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                         if allocation < max_allocation_decimal}
+                        
+                        if eligible_stocks:
+                            # Calculate total allocation of eligible stocks
+                            total_eligible_allocation = sum(eligible_stocks.values())
+                            
+                            if total_eligible_allocation > 0:
+                                # Redistribute excess proportionally
+                                for ticker in eligible_stocks:
+                                    proportion = eligible_stocks[ticker] / total_eligible_allocation
+                                    additional_allocation = excess_allocation * proportion
+                                    new_allocation = capped_allocations[ticker] + additional_allocation
+                                    
+                                    # Make sure we don't exceed the cap
+                                    capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                    
+                    rebalance_allocations = capped_allocations
                 
                 sum_alloc = sum(rebalance_allocations.values())
                 if sum_alloc > 0:
-                    for t in tickers:
-                        weight = rebalance_allocations.get(t, 0) / sum_alloc
-                        values[t][-1] = current_total * weight
-                    unreinvested_cash[-1] = 0
-                    unallocated_cash[-1] = 0
+                    # For Buy & Hold strategies, only distribute new cash without touching existing holdings
+                    if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+                        # Calculate current proportions for Buy & Hold, or use target allocations for Buy & Hold (Target)
+                        if rebalancing_frequency == "Buy & Hold":
+                            # Use current proportions from existing holdings
+                            current_total_value = sum(values[t][-1] for t in tickers)
+                            if current_total_value > 0:
+                                current_proportions = {t: values[t][-1] / current_total_value for t in tickers}
+                            else:
+                                # If no current holdings, use equal weights
+                                current_proportions = {t: 1.0 / len(tickers) for t in tickers}
+                        else:  # "Buy & Hold (Target)"
+                            # Use target allocations
+                            current_proportions = {t: rebalance_allocations.get(t, 0) / sum_alloc for t in tickers}
+                        
+                        # Only distribute the new cash (unallocated_cash + unreinvested_cash)
+                        cash_to_distribute = unallocated_cash[-1] + unreinvested_cash[-1]
+                        for t in tickers:
+                            # Add new cash proportionally to existing holdings
+                            values[t][-1] += cash_to_distribute * current_proportions.get(t, 0)
+                        unreinvested_cash[-1] = 0
+                        unallocated_cash[-1] = 0
+                    else:
+                        # Normal rebalancing: replace all holdings
+                        for t in tickers:
+                            weight = rebalance_allocations.get(t, 0) / sum_alloc
+                            values[t][-1] = current_total * weight
+                        unreinvested_cash[-1] = 0
+                        unallocated_cash[-1] = 0
             
             # Store allocations at rebalancing date
             current_total_after_rebal = sum(values[t][-1] for t in tickers) + unallocated_cash[-1] + unreinvested_cash[-1]
@@ -3278,6 +3569,10 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
         portfolio['use_minimal_threshold'] = False
     if 'minimal_threshold_percent' not in portfolio:
         portfolio['minimal_threshold_percent'] = 2.0
+    if 'use_max_allocation' not in portfolio:
+        portfolio['use_max_allocation'] = False
+    if 'max_allocation_percent' not in portfolio:
+        portfolio['max_allocation_percent'] = 10.0
 
 if 'multi_backtest_paste_json_text' not in st.session_state:
     st.session_state.multi_backtest_paste_json_text = ""
@@ -3716,6 +4011,10 @@ def paste_json_callback():
             json_data['use_minimal_threshold'] = False
         if 'minimal_threshold_percent' not in json_data:
             json_data['minimal_threshold_percent'] = 2.0
+        if 'use_max_allocation' not in json_data:
+            json_data['use_max_allocation'] = False
+        if 'max_allocation_percent' not in json_data:
+            json_data['max_allocation_percent'] = 10.0
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -3839,6 +4138,8 @@ def paste_json_callback():
             'momentum_windows': momentum_windows,
             'use_minimal_threshold': json_data.get('use_minimal_threshold', False),
             'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 2.0),
+            'use_max_allocation': json_data.get('use_max_allocation', False),
+            'max_allocation_percent': json_data.get('max_allocation_percent', 10.0),
             'calc_beta': json_data.get('calc_beta', True),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -3925,6 +4226,8 @@ def update_active_portfolio_index():
         st.session_state['multi_backtest_active_variant_expanded'] = active_portfolio.get('variant_expander_expanded', False)
         st.session_state['multi_backtest_active_use_threshold'] = active_portfolio.get('use_minimal_threshold', False)
         st.session_state['multi_backtest_active_threshold_percent'] = active_portfolio.get('minimal_threshold_percent', 2.0)
+        st.session_state['multi_backtest_active_use_max_allocation'] = active_portfolio.get('use_max_allocation', False)
+        st.session_state['multi_backtest_active_max_allocation_percent'] = active_portfolio.get('max_allocation_percent', 10.0)
         
         # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
         if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
@@ -4163,6 +4466,12 @@ def update_use_threshold():
 
 def update_threshold_percent():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['minimal_threshold_percent'] = st.session_state.multi_backtest_active_threshold_percent
+
+def update_use_max_allocation():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['use_max_allocation'] = st.session_state.multi_backtest_active_use_max_allocation
+
+def update_max_allocation_percent():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['max_allocation_percent'] = st.session_state.multi_backtest_active_max_allocation_percent
 
 def update_start_with():
     st.session_state.multi_backtest_start_with = st.session_state.multi_backtest_start_with_radio
@@ -4743,9 +5052,91 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             variant_params["minimal_threshold"] = threshold_options
         elif not disable_threshold and not enable_threshold:
             st.error("⚠️ **At least one threshold value must be provided when Enable is selected!**")
+    
+    # Maximum Allocation Filter Section - Only show when momentum is enabled
+    if use_momentum_vary:
+        st.markdown("---")
+        st.markdown("**Maximum Allocation Filter:**")
+        
+        # Initialize session state for max allocation filters if not exists
+        if f"max_allocation_filters_{portfolio_index}" not in st.session_state:
+            st.session_state[f"max_allocation_filters_{portfolio_index}"] = []
+        
+        # Checkboxes for enable/disable
+        col_max_left, col_max_right = st.columns(2)
+        
+        with col_max_left:
+            disable_max_allocation = st.checkbox(
+                "Disable Maximum Allocation Filter", 
+                value=True, 
+                key=f"disable_max_allocation_{portfolio_index}",
+                help="Keeps the maximum allocation filter disabled"
+            )
+        
+        with col_max_right:
+            enable_max_allocation = st.checkbox(
+                "Enable Maximum Allocation Filter", 
+                value=False, 
+                key=f"enable_max_allocation_{portfolio_index}",
+                help="Enables the maximum allocation filter with customizable values"
+            )
+        
+        # Validation: At least one must be selected
+        if not disable_max_allocation and not enable_max_allocation:
+            st.error("⚠️ **At least one Maximum Allocation Filter option must be selected!**")
+        
+        # Build max allocation options list
+        max_allocation_options = []
+        
+        # If disable is selected, add None to options
+        if disable_max_allocation:
+            max_allocation_options.append(None)
+        
+        # If enable is selected, show max allocation input options
+        if enable_max_allocation:
+            st.markdown("**Maximum Allocation Values:**")
+            
+            # Add new max allocation button
+            if st.button("➕ Add Max Allocation Value", key=f"add_max_allocation_{portfolio_index}"):
+                st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
+                st.rerun()
+            
+            # Display existing max allocation inputs
+            for i, max_allocation in enumerate(st.session_state[f"max_allocation_filters_{portfolio_index}"]):
+                col_input, col_remove = st.columns([3, 1])
+                
+                with col_input:
+                    max_allocation_value = st.number_input(
+                        f"Max Allocation {i+1} (%)",
+                        min_value=0.1,
+                        max_value=100.0,
+                        value=max_allocation,
+                        step=0.1,
+                        format="%.2f",
+                        key=f"max_allocation_input_{portfolio_index}_{i}",
+                        help="Maximum allocation percentage per stock"
+                    )
+                    max_allocation_options.append(max_allocation_value)
+                
+                with col_remove:
+                    if st.button("🗑️", key=f"remove_max_allocation_{portfolio_index}_{i}", help="Remove this max allocation"):
+                        st.session_state[f"max_allocation_filters_{portfolio_index}"].pop(i)
+                        st.rerun()
+            
+            # If no max allocations exist, add a default one
+            if not st.session_state[f"max_allocation_filters_{portfolio_index}"]:
+                st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
+                st.rerun()
+        
+        # Store max allocation options in variant params if any are selected
+        if max_allocation_options:
+            variant_params["max_allocation"] = max_allocation_options
+        elif not disable_max_allocation and not enable_max_allocation:
+            st.error("⚠️ **At least one max allocation value must be provided when Enable is selected!**")
     else:
         # When momentum is not enabled, add None as default
         variant_params["minimal_threshold"] = [None]
+        variant_params["max_allocation"] = [None]
     
     # Calculate total combinations
     total_variants = 1
@@ -4783,6 +5174,10 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         # Check if minimal threshold filter is missing (only required when momentum is enabled)
         if use_momentum_vary and "minimal_threshold" not in variant_params:
             validation_errors.append("⚠️ Select at least one **Minimal Threshold Filter** option when momentum is enabled")
+        
+        # Check if maximum allocation filter is missing (only required when momentum is enabled)
+        if use_momentum_vary and "max_allocation" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **Maximum Allocation Filter** option when momentum is enabled")
         
         # Show validation errors
         if validation_errors:
@@ -4852,6 +5247,13 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                                 else:
                                     variant["use_minimal_threshold"] = False
                                     variant["minimal_threshold_percent"] = 2.0  # Default value
+                            elif param == "max_allocation":
+                                if value is not None:
+                                    variant["use_max_allocation"] = True
+                                    variant["max_allocation_percent"] = value
+                                else:
+                                    variant["use_max_allocation"] = False
+                                    variant["max_allocation_percent"] = 10.0  # Default value
                             else:
                                 # For any other parameters, use the original name
                                 variant[param] = value
@@ -4958,6 +5360,11 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     if variant.get('use_minimal_threshold', False):
                         threshold_percent = variant.get('minimal_threshold_percent', 2.0)
                         clear_name_parts.append(f"- Min {threshold_percent:.2f}%")
+                    
+                    # Add max allocation information (only show when enabled)
+                    if variant.get('use_max_allocation', False):
+                        max_allocation_percent = variant.get('max_allocation_percent', 10.0)
+                        clear_name_parts.append(f"- Max {max_allocation_percent:.2f}%")
                     
                     # Create the new clear name
                     clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
@@ -5405,6 +5812,35 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             key="multi_backtest_active_threshold_percent", 
             on_change=update_threshold_percent,
             help="Stocks with allocations below this percentage will be excluded and their weight redistributed to remaining stocks"
+        )
+    
+    # Maximum Allocation Filter Section
+    st.markdown("---")
+    st.subheader("Maximum Allocation Filter")
+    
+    # Initialize max allocation settings if not present
+    if "multi_backtest_active_use_max_allocation" not in st.session_state:
+        st.session_state["multi_backtest_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
+    if "multi_backtest_active_max_allocation_percent" not in st.session_state:
+        st.session_state["multi_backtest_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
+    
+    st.checkbox(
+        "Enable Maximum Allocation Filter", 
+        key="multi_backtest_active_use_max_allocation", 
+        on_change=update_use_max_allocation,
+        help="Cap individual stock allocations at the maximum percentage and redistribute excess weight proportionally"
+    )
+    
+    if st.session_state.get("multi_backtest_active_use_max_allocation", False):
+        st.number_input(
+            "Maximum Allocation (%)", 
+            min_value=0.1, 
+            max_value=100.0, 
+            value=10.0, 
+            step=0.1,
+            key="multi_backtest_active_max_allocation_percent", 
+            on_change=update_max_allocation_percent,
+            help="Individual stocks cannot exceed this allocation percentage. Excess weight will be redistributed proportionally to other stocks"
         )
     
     st.markdown("---")
@@ -6534,6 +6970,10 @@ def paste_all_json_callback():
                     portfolio['use_minimal_threshold'] = False
                 if 'minimal_threshold_percent' not in portfolio:
                     portfolio['minimal_threshold_percent'] = 2.0
+                if 'use_max_allocation' not in portfolio:
+                    portfolio['use_max_allocation'] = False
+                if 'max_allocation_percent' not in portfolio:
+                    portfolio['max_allocation_percent'] = 10.0
         
         if isinstance(obj, list):
             # Clear widget keys to force re-initialization
@@ -6754,6 +7194,8 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             # Ensure threshold settings are included (read from current config)
             cleaned_config['use_minimal_threshold'] = config.get('use_minimal_threshold', False)
             cleaned_config['minimal_threshold_percent'] = config.get('minimal_threshold_percent', 2.0)
+            cleaned_config['use_max_allocation'] = config.get('use_max_allocation', False)
+            cleaned_config['max_allocation_percent'] = config.get('max_allocation_percent', 10.0)
             
             # Convert date objects to strings for JSON serialization
             if cleaned_config.get('start_date_user') is not None:
@@ -7628,7 +8070,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 'Volatility Window': f"{cfg.get('vol_window_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
                 'Beta Exclude Days': f"{cfg.get('beta_exclude_days', 0)} days" if cfg.get('use_beta', False) else 'N/A',
                 'Volatility Exclude Days': f"{cfg.get('vol_exclude_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
-                'Minimal Threshold': f"{cfg.get('minimal_threshold_percent', 2.0):.1f}%" if cfg.get('use_minimal_threshold', False) else 'Disabled'
+                'Minimal Threshold': f"{cfg.get('minimal_threshold_percent', 2.0):.1f}%" if cfg.get('use_minimal_threshold', False) else 'Disabled',
+                'Maximum Allocation': f"{cfg.get('max_allocation_percent', 10.0):.1f}%" if cfg.get('use_max_allocation', False) else 'Disabled'
             }
         
         config_df = pd.DataFrame(config_data).T
