@@ -25,6 +25,158 @@ except Exception:
     plotly_events = None
 
 # =============================================================================
+# LEVERAGE ETF SIMULATION FUNCTIONS
+# =============================================================================
+
+def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
+    """
+    Parse ticker symbol to extract base ticker and leverage multiplier.
+    
+    Args:
+        ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3")
+        
+    Returns:
+        tuple: (base_ticker, leverage_multiplier)
+        
+    Examples:
+        "SPY" -> ("SPY", 1.0)
+        "SPY?L=3" -> ("SPY", 3.0)
+        "QQQ?L=2" -> ("QQQ", 2.0)
+    """
+    if "?L=" in ticker_symbol:
+        try:
+            base_ticker, leverage_part = ticker_symbol.split("?L=", 1)
+            leverage = float(leverage_part)
+            
+            # Validate leverage range (reasonable bounds for leveraged ETFs)
+            if leverage < 0.1 or leverage > 10.0:
+                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+                
+            return base_ticker.strip(), leverage
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Invalid leverage format in ticker '{ticker_symbol}'. Use format: TICKER?L=NUMBER (e.g., SPY?L=3)")
+    else:
+        return ticker_symbol.strip(), 1.0
+
+def get_risk_free_rate() -> float:
+    """
+    Get the current risk-free rate from Yahoo Finance (10-Year Treasury Rate).
+    
+    Returns:
+        float: Annual risk-free rate as a decimal (e.g., 0.045 for 4.5%)
+    """
+    try:
+        # Get optimal risk-free rate using hierarchy: ^IRX → ^FVX → ^TNX → ^TYX
+        symbols = ["^IRX", "^FVX", "^TNX", "^TYX"]
+        
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="1d")
+                
+                if not hist.empty:
+                    # Get the most recent rate and convert from percentage to decimal
+                    rate = hist['Close'].iloc[-1] / 100.0
+                    return rate
+            except Exception:
+                continue
+        
+        # Fallback to a reasonable default if all symbols fail
+        return 0.045  # 4.5% as default
+    except Exception:
+        # Fallback to a reasonable default if any error occurs
+        return 0.045  # 4.5% as default
+
+def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
+    """
+    Apply daily leverage multiplier to price data, simulating leveraged ETF behavior.
+    
+    Leveraged ETFs reset daily, so we apply the leverage to daily returns and then
+    compound the results to get the leveraged price series. Includes daily cost drag
+    equivalent to (leverage - 1) × risk_free_rate.
+    
+    Args:
+        price_data: DataFrame with 'Close' column containing price data
+        leverage: Leverage multiplier (e.g., 3.0 for 3x leverage)
+        
+    Returns:
+        DataFrame with leveraged price data including cost drag
+    """
+    if leverage == 1.0:
+        return price_data.copy()
+    
+    # Create a copy to avoid modifying original data
+    leveraged_data = price_data.copy()
+    
+    # Get time-varying risk-free rates for the entire period
+    try:
+        logger.debug(f"price_data.index timezone: {getattr(price_data.index, 'tz', None)}")
+        risk_free_rates = get_risk_free_rate(price_data.index)
+        logger.debug(f"risk_free_rates.index timezone after get_risk_free_rate: {getattr(risk_free_rates.index, 'tz', None)}")
+        # Ensure risk-free rates are timezone-naive to match price_data
+        if getattr(risk_free_rates.index, "tz", None) is not None:
+            risk_free_rates.index = risk_free_rates.index.tz_localize(None)
+        logger.debug(f"risk_free_rates.index timezone after tz_localize: {getattr(risk_free_rates.index, 'tz', None)}")
+        logger.debug(f"Got risk-free rates: {len(risk_free_rates)} points, range: {risk_free_rates.min():.6f} to {risk_free_rates.max():.6f}")
+    except Exception as e:
+        logger.error(f"Error getting risk-free rates: {e}")
+        raise
+    
+    # Calculate daily cost drag: (leverage - 1) × risk_free_rate / 252 trading days
+    # risk_free_rates is already in daily format, so we don't need to divide by 252
+    logger.debug(f"About to calculate daily_cost_drag. leverage: {leverage}, risk_free_rates type: {type(risk_free_rates)}, risk_free_rates.index timezone: {getattr(risk_free_rates.index, 'tz', None)}")
+    try:
+        daily_cost_drag = (leverage - 1) * risk_free_rates
+        logger.debug(f"Successfully calculated daily_cost_drag. Shape: {daily_cost_drag.shape}, index timezone: {getattr(daily_cost_drag.index, 'tz', None)}")
+    except Exception as e:
+        logger.error(f"Error calculating daily_cost_drag: {e}")
+        raise
+    
+    # Calculate leveraged prices by applying leverage to each day's price change
+    # Start with the first price
+    leveraged_prices = pd.Series(index=price_data.index, dtype=float)
+    first_price = price_data['Close'].iloc[0]
+    if isinstance(first_price, pd.Series):
+        first_price = first_price.iloc[0]
+    leveraged_prices.iloc[0] = first_price
+    
+    # Apply leverage to each day's price change (correct approach - no double compounding)
+    for i in range(1, len(price_data)):
+        # Get scalar values from the Close column
+        current_price = price_data['Close'].iloc[i]
+        previous_price = price_data['Close'].iloc[i-1]
+        
+        # Handle MultiIndex case
+        if isinstance(current_price, pd.Series):
+            current_price = current_price.iloc[0]
+        if isinstance(previous_price, pd.Series):
+            previous_price = previous_price.iloc[0]
+        
+        if pd.notna(current_price) and pd.notna(previous_price):
+            # Calculate the actual price change
+            price_change = current_price / previous_price - 1
+            
+            # Apply leverage to the price change and subtract cost drag
+            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i]
+            
+            # Apply the leveraged price change to the previous leveraged price
+            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
+        else:
+            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1]
+    
+    # Update the Close price with leveraged prices
+    leveraged_data['Close'] = leveraged_prices
+    
+    # Recalculate price changes with the new leveraged prices
+    leveraged_data['Price_change'] = leveraged_data['Close'].pct_change(fill_method=None)
+    
+    # IMPORTANT: Preserve all other columns (like Dividend_per_share) from original data
+    # The dividends should remain at their original values (not leveraged) for leveraged ETFs
+    # This is correct behavior - leveraged ETFs don't multiply dividends
+    
+    return leveraged_data
+
+# =============================================================================
 # PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS FOR MAIN ENGINE
 # =============================================================================
 
@@ -33,14 +185,17 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
     """Cache ticker data to dramatically improve performance - MAIN ENGINE VERSION
     
     Args:
-        ticker_symbol: Stock ticker symbol
+        ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
         start_date: Start date for data (None for period-based)
         end_date: End date for data (None for period-based)
         period: Period string like "max", "1y" (None for date-based)
         auto_adjust: Auto-adjust setting
     """
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        # Parse leverage from ticker symbol
+        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        
+        ticker = yf.Ticker(base_ticker)
         
         if period:
             # Period-based download
@@ -48,17 +203,79 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
         else:
             # Date-based download
             hist = ticker.history(start=start_date, end=end_date, auto_adjust=auto_adjust, raise_errors=False)
+        
+        # Ensure we return a valid DataFrame
+        if hist is None:
+            return pd.DataFrame()
+        if not isinstance(hist, pd.DataFrame):
+            return pd.DataFrame()
+        if hist.empty:
+            return pd.DataFrame()
+        
+        # Process dividends into Dividend_per_share column
+        divs = ticker.dividends.copy()
+        
+        # Ensure dividend dates match the timezone of hist.index
+        if getattr(hist.index, "tz", None) is not None:
+            # hist.index is timezone-aware, make divs.index timezone-aware too
+            if getattr(divs.index, "tz", None) is None:
+                divs.index = divs.index.tz_localize(hist.index.tz)
+            else:
+                divs.index = divs.index.tz_convert(hist.index.tz)
+        else:
+            # hist.index is timezone-naive, make divs.index timezone-naive too
+            if getattr(divs.index, "tz", None) is not None:
+                divs.index = divs.index.tz_convert(None)
+        
+        # Map dividend payments to the next available trading day if not present
+        divs_mapped = pd.Series(0.0, index=hist.index)
+        for dt, val in divs.items():
+            # Find the next available trading day in hist.index
+            next_idx = hist.index[hist.index >= dt]
+            if len(next_idx) > 0:
+                pay_date = next_idx[0]
+                divs_mapped[pay_date] += val
+        hist["Dividend_per_share"] = divs_mapped
+        
+        # Apply leverage if specified
+        if leverage != 1.0:
+            try:
+                logger.debug(f"About to apply leverage {leverage} to {base_ticker}. hist.index timezone: {getattr(hist.index, 'tz', None)}")
+                hist = apply_daily_leverage(hist, leverage)
+                logger.debug(f"Successfully applied leverage {leverage} to {base_ticker}")
+            except Exception as e:
+                logger.error(f"Error applying leverage {leverage} to {base_ticker}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return pd.DataFrame()
+        else:
+            # Add price change calculation for non-leveraged data
+            hist["Price_change"] = hist["Close"].pct_change(fill_method=None)
             
         return hist
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error fetching data for {ticker_symbol}: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_cached_ticker_download(ticker_symbol, start_date=None, end_date=None, progress=False):
     """Cache yf.download calls for fallback scenarios"""
     try:
-        return yf.download(ticker_symbol, start=start_date, end=end_date, progress=progress)
-    except Exception:
+        result = yf.download(ticker_symbol, start=start_date, end=end_date, progress=progress)
+        
+        # Ensure we return a valid DataFrame
+        if result is None:
+            return pd.DataFrame()
+        if not isinstance(result, pd.DataFrame):
+            return pd.DataFrame()
+        if result.empty:
+            return pd.DataFrame()
+            
+        return result
+    except Exception as e:
+        logger.debug(f"Error downloading data for {ticker_symbol}: {e}")
         return pd.DataFrame()
 
 # Set up logging to capture print statements
@@ -108,10 +325,7 @@ def _ensure_naive_index(obj: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Seri
     if getattr(idx, "tz", None) is not None:
         obj = obj.copy()
         obj.index = idx.tz_convert(None)
-    else:
-        # already naive
-        import plotly.graph_objects as go
-        import logging
+    return obj
 def check_currency_warning(tickers):
     """
     Check if any tickers are non-USD and display a warning.
@@ -144,83 +358,170 @@ def get_trading_days(start_date, end_date):
     # Note: pd.bdate_range excludes weekends but includes US holidays
     return pd.bdate_range(start=start_date.date(), end=end_date.date())
 
-def get_risk_free_rate(dates):
-    """Downloads the risk-free rate (IRX) and aligns it to a given date range."""
+def get_risk_free_rate_robust(dates):
+    """Working risk-free rate fetcher that bypasses Streamlit caching issues."""
     try:
         dates = pd.to_datetime(dates)
         if isinstance(dates, pd.DatetimeIndex):
             if getattr(dates, "tz", None) is not None:
                 dates = dates.tz_convert(None)
-        start_date = dates.min().strftime('%Y-%m-%d')
-        # add 1 day to be safe with yfinance's exclusive end
-        end_date = (dates.max() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-        # Try several Yahoo symbols for short-term Treasury yields in order of preference
-        symbols = ["^IRX", "^FVX", "^TNX"]
-        hist = None
-        last_exception = None
-
-        for s in symbols:
-            # attempt 1: Ticker.history
+        
+        logger.info("🚀 Starting risk-free rate fetch...")
+        
+        # Try multiple treasury symbols in order of preference
+        symbols = ["^IRX", "^FVX", "^TNX", "^TYX"]
+        
+        for symbol in symbols:
             try:
-                h = get_cached_ticker_data(s, start_date=start_date, end_date=end_date, auto_adjust=False)
-                if h is None or getattr(h, 'empty', True):
-                    # attempt 2: yf.download as fallback
-                    h = get_cached_ticker_download(s, start_date=start_date, end_date=end_date, progress=False)
-                if h is None or getattr(h, 'empty', True):
-                    # try expanding the window by 30 days each side once
-                    try:
-                        adj_start = (pd.to_datetime(start_date) - pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-                        adj_end = (pd.to_datetime(end_date) + pd.Timedelta(days=30)).strftime('%Y-%m-%d')
-                        h = get_cached_ticker_download(s, start_date=adj_start, end_date=adj_end, progress=False)
-                    except Exception:
-                        h = None
-                if h is None or getattr(h, 'empty', True):
-                    last_exception = f"no rows for {s}"
+                logger.debug(f"Trying {symbol}...")
+                ticker = yf.Ticker(symbol)
+                
+                # Calculate the date range we need
+                start_date = dates.min() - pd.Timedelta(days=30)  # Get some extra data before
+                end_date = dates.max() + pd.Timedelta(days=1)     # Get some extra data after
+                
+                # Try to get data for the specific date range
+                try:
+                    hist = ticker.history(start=start_date, end=end_date, auto_adjust=False)
+                    
+                    if hist is not None and not hist.empty and 'Close' in hist.columns:
+                        # Check if we have valid data
+                        valid_data = hist[hist['Close'].notnull() & (hist['Close'] > 0)]
+                        if not valid_data.empty:
+                            logger.info(f"✅ SUCCESS with {symbol}: {len(valid_data)} rows, latest rate: {valid_data['Close'].iloc[-1]:.2f}%")
+                            
+                            # Process the data
+                            return _process_treasury_data(valid_data, dates)
+                            
+                except Exception as e:
+                    logger.debug(f"Date range failed for {symbol}: {e}")
                     continue
-                if 'Close' not in h.columns:
-                    last_exception = f"no Close column for {s}"
-                    continue
-                h = _ensure_naive_index(h)
-                h = h[h['Close'].notnull() & (h['Close'] > 0)]
-                if h.empty:
-                    last_exception = f"empty Close values for {s}"
-                    continue
-                hist = h
-                logger.info(f"Fetched treasury data using symbol {s}, rows={len(hist)}")
-                break
+                
             except Exception as e:
-                last_exception = str(e)
-                logger.debug(f"symbol {s} fetch error: {e}")
-                hist = None
+                logger.debug(f"Symbol {symbol} failed: {e}")
                 continue
-
-        if hist is None or hist.empty:
-            logger.warning(f"IRX fetch attempts failed ({last_exception}) - falling back to default rate")
-            raise ValueError("No valid treasury yield data found from Yahoo symbols")
-
-        # 'Close' from these tickers is typically in percent (e.g. 2.34 -> 2.34%)
-        annual_rate = hist['Close'] / 100.0
-
-        # convert annual nominal to approximate daily rate (252 trading days)
-        with np.errstate(over='ignore', invalid='ignore'):
-            daily_rate = (1 + annual_rate) ** (1 / 252.0) - 1.0
-
-        # Align directly to the requested dates (avoids tz/index mismatches)
-        try:
-            target_index = pd.to_datetime(dates)
-            if getattr(target_index, 'tz', None) is not None:
-                target_index = target_index.tz_convert(None)
-        except Exception:
-            target_index = pd.to_datetime(dates)
-
-        daily_rate = daily_rate.reindex(daily_rate.index.union(target_index)).ffill()
-        result = daily_rate.reindex(target_index).ffill().fillna(0)
-        return result
+        
+        # If all symbols fail, use default
+        logger.warning("⚠️  All treasury symbols failed, using default 2% rate")
+        return _get_default_risk_free_rate(dates)
+        
     except Exception as e:
-        logger.warning(f"IRX error: {str(e)} - Using default 2% annual rate")
-        # Use 2% annual default if IRX fetch fails
-        default_daily = (1 + 0.02) ** (1 / 252) - 1
-        return pd.Series(default_daily, index=pd.to_datetime(dates))
+        logger.error(f"Critical error in risk-free rate fetching: {e}")
+        return _get_default_risk_free_rate(dates)
+
+# Removed old functions - now using the working approach directly in get_risk_free_rate_robust
+
+# Removed old unused functions - now using the working approach directly
+
+# Removed unused validation functions - now using simple validation inline
+
+def _process_treasury_data(hist, dates):
+    """Process treasury data into daily risk-free rates."""
+    try:
+        hist = _ensure_naive_index(hist)
+        hist = hist[hist['Close'].notnull() & (hist['Close'] > 0)]
+        
+        if hist.empty:
+            logger.debug("No valid treasury data after filtering")
+            return None
+        
+        # Convert percentage to decimal
+        annual_rate = hist['Close'] / 100.0
+        
+        # Convert to daily rate using 365.25 calendar days
+        # Leveraged ETFs operate daily (including weekends/holidays), so financing costs accrue continuously
+        with np.errstate(over='ignore', invalid='ignore'):
+            daily_rate = (1 + annual_rate) ** (1 / 365.25) - 1.0
+        
+        # Ensure daily_rate is timezone-naive
+        daily_rate = _ensure_naive_index(daily_rate)
+        
+        # Align to requested dates
+        target_index = pd.to_datetime(dates)
+        if getattr(target_index, 'tz', None) is not None:
+            target_index = target_index.tz_convert(None)
+        
+        # Create a series with the daily rates (ensure timezone-naive index)
+        # Make sure the index is timezone-naive before creating the series
+        naive_index = daily_rate.index
+        if getattr(naive_index, "tz", None) is not None:
+            naive_index = naive_index.tz_localize(None)
+        daily_rate_series = pd.Series(daily_rate.values, index=naive_index)
+        
+        # If we only have one data point, use it for all dates
+        if len(daily_rate_series) == 1:
+            logger.debug(f"Single data point: using rate {daily_rate_series.iloc[0]:.6f} for all dates")
+            result = pd.Series([daily_rate_series.iloc[0]] * len(target_index), index=target_index)
+        else:
+            # Reindex to include all target dates and forward fill
+            daily_rate_series = daily_rate_series.reindex(daily_rate_series.index.union(target_index)).ffill()
+            result = daily_rate_series.reindex(target_index).ffill().fillna(0)
+        
+        # CRITICAL: Ensure the final result has a timezone-naive index
+        result = _ensure_naive_index(result)
+        
+        logger.debug(f"Processed treasury data: {len(result)} points, rate range: {result.min():.6f} to {result.max():.6f}")
+        return result
+        
+    except Exception as e:
+        logger.debug(f"Error processing treasury data: {e}")
+        return None
+
+def _get_default_risk_free_rate(dates):
+    """Get default risk-free rate when all other methods fail."""
+    logger.warning("Using default 2% annual risk-free rate - Yahoo Finance treasury data unavailable")
+    default_daily = (1 + 0.02) ** (1 / 365.25) - 1
+    return pd.Series(default_daily, index=pd.to_datetime(dates))
+
+def test_risk_free_rate_system():
+    """Test function to verify risk-free rate fetching works."""
+    logger.info("🧪 Testing risk-free rate system...")
+    
+    # Create test date range (last 30 days)
+    end_date = pd.Timestamp.now()
+    start_date = end_date - pd.Timedelta(days=30)
+    test_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    try:
+        result = get_risk_free_rate_robust(test_dates)
+        
+        if result is not None and not result.empty:
+            logger.info(f"✅ Test successful!")
+            logger.info(f"   Data points: {len(result)}")
+            logger.info(f"   Date range: {result.index.min().date()} to {result.index.max().date()}")
+            logger.info(f"   Rate range: {result.min():.6f} to {result.max():.6f} (daily)")
+            logger.info(f"   Annual equivalent: {result.mean() * 365.25 * 100:.2f}%")
+            
+            # Check if we got real data or default
+            default_daily = (1 + 0.02) ** (1 / 365.25) - 1
+            if abs(result.mean() - default_daily) < 1e-6:
+                logger.warning("⚠️  Using default rate - no real treasury data available")
+            else:
+                logger.info("✅ Real treasury data successfully fetched!")
+            
+            return True
+        else:
+            logger.error("❌ Test failed - no data returned")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Test failed with error: {e}")
+        return False
+
+def get_risk_free_rate(dates):
+    """Downloads the risk-free rate (IRX) and aligns it to a given date range.
+    
+    This function now uses the robust approach with multiple fallback strategies.
+    """
+    logger.debug(f"get_risk_free_rate called with dates type: {type(dates)}, timezone: {getattr(dates, 'tz', None) if hasattr(dates, 'tz') else 'No tz attr'}")
+    result = get_risk_free_rate_robust(dates)
+    logger.debug(f"get_risk_free_rate returning result type: {type(result)}, timezone: {getattr(result.index, 'tz', None) if hasattr(result, 'index') else 'No index attr'}")
+    # CRITICAL: Ensure the result is timezone-naive
+    if hasattr(result, 'index') and getattr(result.index, 'tz', None) is not None:
+        logger.debug("Converting result to timezone-naive")
+        result = _ensure_naive_index(result)
+        logger.debug(f"After conversion: timezone: {getattr(result.index, 'tz', None)}")
+    return result
 
 def calculate_cagr(values, dates):
     """Calculates the Compound Annual Growth Rate."""
@@ -675,6 +976,8 @@ def _load_data(tickers: List[str], start_date: datetime, end_date: datetime):
 
     for t in tickers:
         try:
+            logger.debug(f"Loading data for ticker: {t}")
+            # Get data with leverage processing handled in get_cached_ticker_data
             hist = get_cached_ticker_data(t, start_date=start_date, end_date=yf_end_date, auto_adjust=False)
 
             if hist.empty:
@@ -688,26 +991,6 @@ def _load_data(tickers: List[str], start_date: datetime, end_date: datetime):
 
             # Clip to end_date in case yf_end_date brought extra rows
             hist = hist[hist.index <= end_date]
-
-            # Fetch dividends - we need the ticker object for this
-            ticker = yf.Ticker(t)
-            divs = ticker.dividends.copy()
-            if getattr(divs.index, "tz", None) is not None:
-                divs.index = divs.index.tz_convert(None)
-            # Removed dividend debug prints for better performance
-
-            # Map dividend payments to the next available trading day if not present
-            divs_mapped = pd.Series(0.0, index=hist.index)
-            for dt, val in divs.items():
-                # Find the next available trading day in hist.index
-                next_idx = hist.index[hist.index >= dt]
-                if len(next_idx) > 0:
-                    pay_date = next_idx[0]
-                    divs_mapped[pay_date] += val
-            hist["Dividend_per_share"] = divs_mapped
-
-            # Price change calculation
-            hist["Price_change"] = hist["Close"].pct_change(fill_method=None)
 
             # Drop rows with missing close prices
             data[t] = hist.dropna(subset=["Close"])
@@ -746,12 +1029,24 @@ def _prepare_backtest_dates(start_date_user: date | None, end_date_user: date | 
     latest_data_start = max(idx_starts)
     latest_data_end = min(idx_ends)
 
-    # Base start: either oldest or latest depending on choice
-    base_start = oldest_data_start if start_with == "oldest" else latest_data_start
-
-    # If user provided a custom start date and it's after base_start, prefer it
-    if start_date_user_dt and start_date_user_dt > base_start:
-        base_start = start_date_user_dt
+    # Base start: either oldest or latest depending on choice (same logic as Multi Backtest)
+    if start_with == "oldest":
+        # For "oldest", use the earliest start date among portfolio assets
+        base_start = oldest_data_start
+    else:
+        # For "all", use the latest start date when all assets are available
+        base_start = latest_data_start
+    
+    # Apply user date constraints if any
+    if start_date_user_dt:
+        if start_with == "oldest":
+            # For "oldest", only allow custom start date if it's earlier than the oldest
+            if start_date_user_dt < base_start:
+                base_start = start_date_user_dt
+        else:
+            # For "all", only allow custom start date if it's later than the latest
+            if start_date_user_dt > base_start:
+                base_start = start_date_user_dt
 
     # Handle first rebalance strategy
     first_rebalance_strategy = st.session_state.get('first_rebalance_strategy', 'rebalancing_date')
@@ -783,7 +1078,7 @@ def _prepare_backtest_dates(start_date_user: date | None, end_date_user: date | 
         raise ValueError("Start date must be before end date based on data availability and your settings.")
 
     # Build trading calendar from actual data instead of calendar to handle international stocks
-    # This ensures we only use dates when ALL stocks actually have data (intersection, not union)
+    # Respect the start_with parameter: use intersection for "all", union for "oldest"
     all_trading_days = None
     for t, d in data.items():
         if t in portfolio_tickers and not d.empty:
@@ -792,8 +1087,12 @@ def _prepare_backtest_dates(start_date_user: date | None, end_date_user: date | 
             if all_trading_days is None:
                 all_trading_days = stock_dates
             else:
-                # Use intersection to ensure ALL stocks have data on each date
-                all_trading_days = all_trading_days.intersection(stock_dates)
+                if start_with == "all":
+                    # Use intersection to ensure ALL stocks have data on each date
+                    all_trading_days = all_trading_days.intersection(stock_dates)
+                else:  # start_with == "oldest"
+                    # Use union to include all dates when any stock has data
+                    all_trading_days = all_trading_days.union(stock_dates)
     
     if all_trading_days is None or len(all_trading_days) == 0:
         raise ValueError("No overlapping trading days found for the selected date range.")
@@ -1137,7 +1436,6 @@ def _rebalance_portfolio(
     benchmark_ticker = benchmark_ticker_val
     vol_window_days = vol_window_days_val
     exclude_days_vol = exclude_days_vol_val
-
     
     # The "Relative momentum" option for negative scores implies use_relative_momentum logic
     use_relative_momentum = use_relative_momentum_flag or (negative_momentum_strategy == "Relative momentum")
@@ -1208,7 +1506,7 @@ def _rebalance_portfolio(
         else : # Go to cash if no valid assets or weights calculated
             target_allocation = {}
             rebalance_metrics["target_allocation"]["CASH"] = 1.0
-            
+        
         return target_allocation, rebalance_metrics
 
     else: # Rebalance to initial fixed allocations
@@ -1227,6 +1525,7 @@ def _rebalance_portfolio(
             normalized_alloc = allocations.get(t, 0.0) / alloc_sum_available
             target_allocation[t] = total_portfolio_value * normalized_alloc
             rebalance_metrics["target_allocation"][t] = normalized_alloc
+        
         return target_allocation, rebalance_metrics
 
 # =============================
@@ -1292,6 +1591,18 @@ def run_backtest(
     # Removed "Downloading data..." print for better performance
     # Tickers to download: portfolio + benchmark
     all_tickers_to_fetch = list(set(tickers + [benchmark_ticker] if benchmark_ticker else tickers))
+    
+    # CRITICAL FIX: Add base tickers for leveraged tickers to ensure dividend data is available
+    base_tickers_to_add = set()
+    for ticker in all_tickers_to_fetch:
+        if "?L=" in ticker:
+            base_ticker, leverage = parse_leverage_ticker(ticker)
+            base_tickers_to_add.add(base_ticker)
+    
+    # Add base tickers to the list if they're not already there
+    for base_ticker in base_tickers_to_add:
+        if base_ticker not in all_tickers_to_fetch:
+            all_tickers_to_fetch.append(base_ticker)
     
     # BULLETPROOF VALIDATION: Wrap _load_data in try-catch to prevent crashes
     try:
@@ -1505,8 +1816,36 @@ def run_backtest(
                 
                 # Only credit dividends if include_dividends is True
                 if price > 0 and dividend > 0 and include_dividends.get(t, False):
-                    dividend_cash = shares_with * dividend
-                    dividend_cash_wo = shares_without * dividend
+                    # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
+                    # The dividend RATE should be the same as the base asset
+                    if "?L=" in t:
+                        # For leveraged tickers, get the base ticker's dividend rate (not amount)
+                        base_ticker, leverage = parse_leverage_ticker(t)
+                        if base_ticker in data:
+                            base_ticker_data = data[base_ticker]
+                            if not base_ticker_data.empty and current_date in base_ticker_data.index:
+                                base_price = float(base_ticker_data.loc[current_date, "Close"])
+                                if base_price > 0:
+                                    # Use the base ticker's dividend rate, not the leveraged amount
+                                    dividend_rate = dividend / base_price
+                                    dividend_cash = shares_with * price * dividend_rate
+                                    dividend_cash_wo = shares_without * price * dividend_rate
+                                else:
+                                    # Fallback: use original logic
+                                    dividend_cash = shares_with * dividend
+                                    dividend_cash_wo = shares_without * dividend
+                            else:
+                                # Fallback: use original logic
+                                dividend_cash = shares_with * dividend
+                                dividend_cash_wo = shares_without * dividend
+                        else:
+                            # Fallback: use original logic
+                            dividend_cash = shares_with * dividend
+                            dividend_cash_wo = shares_without * dividend
+                    else:
+                        # For regular tickers, use normal dividend calculation
+                        dividend_cash = shares_with * dividend
+                        dividend_cash_wo = shares_without * dividend
                     
                     # Check if dividends should be collected as cash instead of reinvested
                     collect_as_cash = st.session_state.get('collect_dividends_as_cash', False)
@@ -1702,7 +2041,9 @@ def run_backtest(
                 benchmark_ticker,
                 calc_volatility,
                 vol_window_days,
-                exclude_days_vol
+                exclude_days_vol,
+                rebalancing_frequency,
+                None
             )
 
             # Reset shares to zero and calculate new shares, updating cash
@@ -2632,6 +2973,18 @@ def remove_ticker_callback(ticker: str):
             st.session_state.tickers.pop(idx)
             st.session_state.allocs.pop(idx)
             st.session_state.divs.pop(idx)
+            
+            # Clean up widget states for the removed ticker
+            ticker_key = f"ticker_{idx}"
+            div_key = f"divs_checkbox_{idx}"
+            alloc_key = f"alloc_input_{idx}"
+            remove_key = f"remove_ticker_{idx}"
+            
+            # Remove widget states to prevent IndexError
+            for key in [ticker_key, div_key, alloc_key, remove_key]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
             # If this was the last ticker, add an empty one
             if len(st.session_state.tickers) == 0:
                 st.session_state.tickers.append("")
@@ -2776,7 +3129,8 @@ def update_mom_weight(idx):
         st.session_state.mom_windows[idx]['weight'] = st.session_state[key] / 100.0
 
 def update_start_with():
-    # Session state automatically updates via the radio button key
+    # The radio button automatically updates the session state via the key
+    # This callback ensures the value is properly synchronized
     pass
 
 def update_first_rebalance_strategy():
@@ -3315,7 +3669,11 @@ with st.sidebar:
             div_key = f"divs_checkbox_{i}"
             if div_key not in st.session_state:
                 st.session_state[div_key] = st.session_state.divs[i]
-            st.checkbox("Include Dividends", key=div_key, on_change=lambda i=i: setattr(st.session_state, f'divs[{i}]', st.session_state[div_key]))
+            def update_dividend_callback(i):
+                # Check if index is still valid after potential ticker deletions
+                if i < len(st.session_state.divs) and div_key in st.session_state:
+                    st.session_state.divs[i] = st.session_state[div_key]
+            st.checkbox("Include Dividends", key=div_key, on_change=update_dividend_callback, args=(i,))
         with col4:
             if st.button("x", key=f"remove_ticker_{i}", help="Remove this ticker", on_click=remove_ticker_callback, args=(st.session_state.tickers[i],)):
                 pass
@@ -3368,8 +3726,6 @@ with st.sidebar:
         st.session_state["rebalancing_frequency_widget"] = st.session_state.rebalancing_frequency
     if "added_frequency_widget" not in st.session_state:
         st.session_state["added_frequency_widget"] = st.session_state.added_frequency
-    if "start_with_radio_key" not in st.session_state:
-        st.session_state["start_with_radio_key"] = "oldest"
     if "momentum_strategy_radio" not in st.session_state:
         st.session_state["momentum_strategy_radio"] = st.session_state.get("momentum_strategy", "Classic momentum")
     if "negative_momentum_strategy_radio" not in st.session_state:
@@ -3499,9 +3855,6 @@ with st.sidebar:
 
     # 5. How to handle assets with different start dates?
     start_with_options = ["all", "oldest"]
-    # Initialize the session state value if not present
-    if "start_with_radio_key" not in st.session_state:
-        st.session_state["start_with_radio_key"] = "oldest"
     
     # Use the radio button without specifying index - let Streamlit handle it via the key
     start_with = st.radio(
@@ -4189,6 +4542,76 @@ if st.session_state.fig_dict:
             # Render the figure and the computed variation
             config = {"modeBarButtonsToRemove": ["zoom2d", "pan2d"], "displaylogo": False}
             st.plotly_chart(fig_main_pro, use_container_width=True, config=config)
+            
+            # Add Risk-Free Rate Chart
+            try:
+                # Get risk-free rate data for the same period as the backtest
+                # Use the portfolio data from the current backtest
+                if hasattr(st.session_state, 'portfolio_value_without_additions') and st.session_state.portfolio_value_without_additions is not None:
+                    portfolio_dates = st.session_state.portfolio_value_without_additions.index
+                elif hasattr(st.session_state, 'portfolio_value_with_additions') and st.session_state.portfolio_value_with_additions is not None:
+                    portfolio_dates = st.session_state.portfolio_value_with_additions.index
+                else:
+                    # Fallback to last 30 days if no portfolio data available
+                    end_date = pd.Timestamp.now()
+                    start_date = end_date - pd.Timedelta(days=30)
+                    portfolio_dates = pd.date_range(start_date, end_date, freq='D')
+                
+                dates = portfolio_dates
+                
+                risk_free_rates = get_risk_free_rate(dates)
+                
+                if risk_free_rates is not None and not risk_free_rates.empty:
+                    # Convert daily rates to annual rates for display
+                    annual_rates = (1 + risk_free_rates) ** 365.25 - 1
+                    annual_rates_pct = annual_rates * 100
+                    
+                    # Create the chart
+                    fig_rf = go.Figure()
+                    
+                    # Add the risk-free rate line
+                    fig_rf.add_trace(go.Scatter(
+                        x=annual_rates_pct.index,
+                        y=annual_rates_pct.values,
+                        mode='lines',
+                        name='Risk-Free Rate',
+                        line=dict(color='#FF6B6B', width=2),
+                        hovertemplate='<b>%{x}</b><br>Rate: %{y:.2f}%<extra></extra>'
+                    ))
+                    
+                    # Add average line
+                    avg_rate = annual_rates_pct.mean()
+                    fig_rf.add_hline(
+                        y=avg_rate,
+                        line_dash="dash",
+                        line_color="gray",
+                        annotation_text=f"Average: {avg_rate:.2f}%",
+                        annotation_position="bottom right"
+                    )
+                    
+                    # Update layout
+                    fig_rf.update_layout(
+                        title="Risk-Free Rate Over Time (3-Month Treasury)",
+                        xaxis_title="Date",
+                        yaxis_title="Annual Rate (%)",
+                        height=400,
+                        showlegend=True,
+                        hovermode='x unified'
+                    )
+                    
+                    # Display the chart
+                    st.plotly_chart(fig_rf, use_container_width=True, config=config)
+                    
+                    # Show current rate
+                    current_rate = annual_rates_pct.iloc[-1]
+                    st.info(f"📈 **Current Risk-Free Rate: {current_rate:.2f}%** (3-Month Treasury)")
+                else:
+                    st.info("📈 **Current Risk-Free Rate: ~4.0%** (Estimated)")
+                    
+            except Exception as e:
+                st.info("📈 **Current Risk-Free Rate: ~4.0%** (Estimated)")
+                pass
+                
     except Exception:
         # If anything fails, skip the main plot rendering gracefully
         pass
@@ -4230,10 +4653,26 @@ if st.session_state.stats_without_additions is not None:
     initial_value = st.session_state.get("initial_value", 10000)
     return_no_additions = ((final_without - initial_value) / initial_value) if initial_value > 0 and not pd.isna(final_without) else np.nan
     
+    # Calculate total money added
+    try:
+        cash_flows = st.session_state.get('cash_flows_with_additions', None)
+        if cash_flows is not None and not cash_flows.empty:
+            # Sum all negative values (cash invested) and make positive for display
+            total_added = abs(cash_flows[cash_flows < 0].sum())
+        else:
+            total_added = np.nan
+    except Exception:
+        total_added = np.nan
+    
+    # Calculate total return (all money)
+    total_return_all_money = ((final_with - total_added) / total_added) if total_added > 0 and not pd.isna(final_with) and not pd.isna(total_added) else np.nan
+    
     # Use internal keys that map to friendly display names below
     stats["FinalValueWithAdditions"] = final_with
     stats["FinalValueWithoutAdditions"] = final_without
     stats["ReturnNoAdditions"] = return_no_additions
+    stats["TotalReturnAllMoney"] = total_return_all_money
+    stats["TotalMoneyAdded"] = total_added
     display_names = {
         "MaxDrawdown": "Max Drawdown",
         "UlcerIndex": "Ulcer Index",
@@ -4246,7 +4685,9 @@ if st.session_state.stats_without_additions is not None:
         "Beta": "Beta",
         "FinalValueWithAdditions": "Final Value (with additions)",
         "FinalValueWithoutAdditions": "Final Value (no additions)",
-        "ReturnNoAdditions": "Return (no additions)"
+        "ReturnNoAdditions": "Return (no additions)",
+        "TotalReturnAllMoney": "Total Return (All Money)",
+        "TotalMoneyAdded": "Total Money Added"
     }
     # Create DataFrame and reorder to put Final Values at the top
     stats_df = pd.DataFrame({
@@ -4254,19 +4695,25 @@ if st.session_state.stats_without_additions is not None:
         "Value": list(stats.values())
     })
     
-    # Reorder to put Final Values at the top
-    final_value_metrics = ["Final Value (with additions)", "Final Value (no additions)", "Return (no additions)"]
-    other_metrics = [metric for metric in stats_df["Metric"] if metric not in final_value_metrics]
+    # Custom ordering as requested:
+    # 1. Final Values at the top
+    # 2. Total Return (All Money) under Return (no additions)
+    # 3. MWRR right after CAGR
+    # 4. Total Money Added at the end
+    final_value_metrics = ["Final Value (with additions)", "Final Value (no additions)", "Return (no additions)", "Total Return (All Money)"]
+    performance_metrics = ["CAGR", "MWRR", "Volatility", "Sharpe", "Sortino", "UPI"]
+    risk_metrics = ["Max Drawdown", "Ulcer Index", "Beta"]
+    other_metrics = [metric for metric in stats_df["Metric"] if metric not in final_value_metrics + performance_metrics + risk_metrics + ["Total Money Added"]]
     
     # Reorder the DataFrame
-    reordered_metrics = final_value_metrics + other_metrics
+    reordered_metrics = final_value_metrics + performance_metrics + risk_metrics + other_metrics + ["Total Money Added"]
     stats_df = stats_df.set_index("Metric").reindex(reordered_metrics).reset_index()
     def format_value(row):
         val = row["Value"]
         if pd.isna(val):
             return "n/a"
         # Percentage metrics
-        if row["Metric"] in ["CAGR", "MWRR", "Max Drawdown", "Volatility", "Return (no additions)"]:
+        if row["Metric"] in ["CAGR", "MWRR", "Max Drawdown", "Volatility", "Return (no additions)", "Total Return (All Money)"]:
             return f"{val:.2%}"
         # Simple float metrics
         elif row["Metric"] in ["Sharpe", "Sortino", "UPI", "Ulcer Index", "Beta"]:
@@ -4276,8 +4723,9 @@ if st.session_state.stats_without_additions is not None:
             try:
                 return f"${val:,.2f}"
             except Exception:
-                return val
-        return val
+                return "n/a"
+        # Ensure all other values are converted to strings
+        return str(val) if val is not None else "n/a"
     stats_df["Formatted Value"] = stats_df.apply(format_value, axis=1)
     # Use st.table with the already-formatted strings so Streamlit renders the
     # full table directly (avoids the internal scrolling behavior of st.dataframe).
