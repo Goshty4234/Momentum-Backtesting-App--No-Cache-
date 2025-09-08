@@ -7,6 +7,87 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import json
 import io
+
+# =============================================================================
+# RISK-FREE RATE FUNCTIONS
+# =============================================================================
+
+def _get_default_risk_free_rate(dates):
+    """Get default risk-free rate when all other methods fail."""
+    default_daily = (1 + 0.02) ** (1 / 365.25) - 1
+    result = pd.Series(default_daily, index=pd.to_datetime(dates))
+    # Ensure the result is timezone-naive
+    if getattr(result.index, "tz", None) is not None:
+        result.index = result.index.tz_convert(None)
+    return result
+
+def get_risk_free_rate_robust(dates):
+    """Simple risk-free rate fetcher using Yahoo Finance treasury data."""
+    try:
+        dates = pd.to_datetime(dates)
+        if isinstance(dates, pd.DatetimeIndex):
+            if getattr(dates, "tz", None) is not None:
+                dates = dates.tz_convert(None)
+        
+        # Get treasury data - use ^IRX (13-week treasury) as primary for leverage calculations
+        # Fallback hierarchy: ^IRX → ^FVX → ^TNX → ^TYX
+        symbols = ["^IRX", "^FVX", "^TNX", "^TYX"]
+        ticker = None
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="max", auto_adjust=False)
+                if hist is not None and not hist.empty and 'Close' in hist.columns:
+                    break
+            except Exception:
+                continue
+        
+        if ticker is None:
+            # Final fallback to ^TNX
+            ticker = yf.Ticker("^TNX")
+        hist = ticker.history(period="max", auto_adjust=False)
+        
+        if hist is not None and not hist.empty and 'Close' in hist.columns:
+            # Filter valid data
+            valid_data = hist[hist['Close'].notnull() & (hist['Close'] > 0)]
+            
+            if not valid_data.empty:
+                # Convert annual percentage to daily rate
+                annual_rates = valid_data['Close'] / 100.0
+                daily_rates = (1 + annual_rates) ** (1 / 365.25) - 1.0
+                
+                # Create series with timezone-naive index
+                daily_rate_series = pd.Series(daily_rates.values, index=daily_rates.index)
+                if getattr(daily_rate_series.index, "tz", None) is not None:
+                    daily_rate_series.index = daily_rate_series.index.tz_convert(None)
+                
+                # For each target date, use the most recent available rate
+                result = pd.Series(index=dates, dtype=float)
+                
+                for i, target_date in enumerate(dates):
+                    # Find the most recent treasury date <= target_date
+                    valid_dates = daily_rate_series.index[daily_rate_series.index <= target_date]
+                    
+                    if len(valid_dates) > 0:
+                        closest_date = valid_dates.max()
+                        result.iloc[i] = daily_rate_series.loc[closest_date]
+                    else:
+                        # If no data before target date, use the earliest available
+                        result.iloc[i] = daily_rate_series.iloc[0]
+                
+                # Handle any remaining NaN values
+                if result.isna().any():
+                    result = result.fillna(method='ffill').fillna(method='bfill')
+                    if result.isna().any():
+                        result = result.fillna(0.000105)  # Default daily rate
+                
+                return result
+        
+        # Fallback to default if all else fails
+        return _get_default_risk_free_rate(dates)
+        
+    except Exception:
+        return _get_default_risk_free_rate(dates)
 import contextlib
 from datetime import datetime, timedelta, date
 import warnings
@@ -18,17 +99,284 @@ warnings.filterwarnings('ignore')
 # PERFORMANCE OPTIMIZATION: NO CACHING VERSION
 # =============================================================================
 
+# =============================================================================
+# STANDALONE LEVERAGE FUNCTIONS (Independent from Backtest_Engine)
+# =============================================================================
+
+def _ensure_naive_index(obj: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
+    """Return a copy of obj with a tz-naive DatetimeIndex."""
+    if not isinstance(obj.index, pd.DatetimeIndex):
+        return obj
+    idx = obj.index
+    if getattr(idx, "tz", None) is not None:
+        obj = obj.copy()
+        obj.index = idx.tz_convert(None)
+    return obj
+
+def _get_default_risk_free_rate(dates):
+    """Get default risk-free rate when all other methods fail."""
+    default_daily = (1 + 0.02) ** (1 / 365.25) - 1
+    result = pd.Series(default_daily, index=pd.to_datetime(dates))
+    # Ensure the result is timezone-naive
+    if getattr(result.index, "tz", None) is not None:
+        result.index = result.index.tz_convert(None)
+    return result
+
+def get_risk_free_rate_robust(dates):
+    """Simple risk-free rate fetcher using Yahoo Finance treasury data."""
+    try:
+        dates = pd.to_datetime(dates)
+        if isinstance(dates, pd.DatetimeIndex):
+            if getattr(dates, "tz", None) is not None:
+                dates = dates.tz_convert(None)
+        
+        # Get treasury data - use ^IRX (13-week treasury) as primary for leverage calculations
+        # Fallback hierarchy: ^IRX → ^FVX → ^TNX → ^TYX
+        symbols = ["^IRX", "^FVX", "^TNX", "^TYX"]
+        ticker = None
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="max", auto_adjust=False)
+                if hist is not None and not hist.empty and 'Close' in hist.columns:
+                    break
+            except Exception:
+                continue
+        
+        if ticker is None:
+            # Final fallback to ^TNX
+            ticker = yf.Ticker("^TNX")
+        hist = ticker.history(period="max", auto_adjust=False)
+        
+        if hist is not None and not hist.empty and 'Close' in hist.columns:
+            # Filter valid data
+            valid_data = hist[hist['Close'].notnull() & (hist['Close'] > 0)]
+            
+            if not valid_data.empty:
+                # Convert annual percentage to daily rate
+                annual_rates = valid_data['Close'] / 100.0
+                daily_rates = (1 + annual_rates) ** (1 / 365.25) - 1.0
+                
+                # Create series with timezone-naive index
+                daily_rate_series = pd.Series(daily_rates.values, index=daily_rates.index)
+                if getattr(daily_rate_series.index, "tz", None) is not None:
+                    daily_rate_series.index = daily_rate_series.index.tz_convert(None)
+                
+                # For each target date, use the most recent available rate
+                result = pd.Series(index=dates, dtype=float)
+                
+                for i, target_date in enumerate(dates):
+                    # Find the most recent treasury date <= target_date
+                    valid_dates = daily_rate_series.index[daily_rate_series.index <= target_date]
+                    
+                    if len(valid_dates) > 0:
+                        closest_date = valid_dates.max()
+                        result.iloc[i] = daily_rate_series.loc[closest_date]
+                    else:
+                        # If no data before target date, use the earliest available
+                        result.iloc[i] = daily_rate_series.iloc[0]
+                
+                # Handle any remaining NaN values
+                if result.isna().any():
+                    result = result.fillna(method='ffill').fillna(method='bfill')
+                    if result.isna().any():
+                        result = result.fillna(0.000105)  # Default daily rate
+                
+                return result
+        
+        # Fallback to default if all else fails
+        return _get_default_risk_free_rate(dates)
+        
+    except Exception:
+        return _get_default_risk_free_rate(dates)
+
+def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
+    """
+    Parse ticker symbol to extract base ticker and leverage multiplier.
+    
+    Args:
+        ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3")
+        
+    Returns:
+        tuple: (base_ticker, leverage_multiplier)
+        
+    Examples:
+        "SPY" -> ("SPY", 1.0)
+        "SPY?L=3" -> ("SPY", 3.0)
+        "QQQ?L=2" -> ("QQQ", 2.0)
+    """
+    if "?L=" in ticker_symbol:
+        try:
+            base_ticker, leverage_part = ticker_symbol.split("?L=", 1)
+            leverage = float(leverage_part)
+            
+            # Validate leverage range (reasonable bounds for leveraged ETFs)
+            if leverage < 0.1 or leverage > 10.0:
+                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+                
+            return base_ticker.strip(), leverage
+        except (ValueError, IndexError) as e:
+            # If parsing fails, treat as regular ticker with no leverage
+            return ticker_symbol.strip(), 1.0
+    else:
+        return ticker_symbol.strip(), 1.0
+
+def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
+    """
+    Apply daily leverage multiplier to price data, simulating leveraged ETF behavior.
+    
+    Leveraged ETFs reset daily, so we apply the leverage to daily returns and then
+    compound the results to get the leveraged price series. Includes daily cost drag
+    equivalent to (leverage - 1) × risk_free_rate.
+    
+    Args:
+        price_data: DataFrame with 'Close' column containing price data
+        leverage: Leverage multiplier (e.g., 3.0 for 3x leverage)
+        
+    Returns:
+        DataFrame with leveraged price data including cost drag
+    """
+    if leverage == 1.0:
+        return price_data.copy()
+    
+    # Create a copy to avoid modifying original data
+    leveraged_data = price_data.copy()
+    
+    # Get time-varying risk-free rates for the entire period
+    try:
+        risk_free_rates = get_risk_free_rate_robust(price_data.index)
+        # Ensure risk-free rates are timezone-naive to match price_data
+        if getattr(risk_free_rates.index, "tz", None) is not None:
+            risk_free_rates.index = risk_free_rates.index.tz_localize(None)
+    except Exception as e:
+        raise
+    
+    # Calculate daily cost drag: (leverage - 1) × risk_free_rate
+    # risk_free_rates is already in daily format, so we don't need to divide by 365.25
+    try:
+        daily_cost_drag = (leverage - 1) * risk_free_rates
+    except Exception as e:
+        raise
+    
+    # Calculate leveraged prices by applying leverage to each day's price change
+    # Start with the first price
+    leveraged_prices = pd.Series(index=price_data.index, dtype=float)
+    first_price = price_data['Close'].iloc[0]
+    if isinstance(first_price, pd.Series):
+        first_price = first_price.iloc[0]
+    leveraged_prices.iloc[0] = first_price
+    
+    # Apply leverage to each day's price change (correct approach - no double compounding)
+    for i in range(1, len(price_data)):
+        # Get scalar values from the Close column
+        current_price = price_data['Close'].iloc[i]
+        previous_price = price_data['Close'].iloc[i-1]
+        
+        # Handle MultiIndex case
+        if isinstance(current_price, pd.Series):
+            current_price = current_price.iloc[0]
+        if isinstance(previous_price, pd.Series):
+            previous_price = previous_price.iloc[0]
+        
+        if pd.notna(current_price) and pd.notna(previous_price):
+            # Calculate the actual price change
+            price_change = current_price / previous_price - 1
+            
+            # Apply leverage to the price change and subtract cost drag
+            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i]
+            
+            # Apply the leveraged price change to the previous leveraged price
+            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
+        else:
+            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1]
+    
+    # Update the Close price with leveraged prices
+    leveraged_data['Close'] = leveraged_prices
+    
+    # Recalculate price changes with the new leveraged prices
+    leveraged_data['Price_change'] = leveraged_data['Close'].pct_change(fill_method=None)
+    
+    # IMPORTANT: Preserve all other columns (like Dividend_per_share) from original data
+    # The dividends should remain at their original values (not leveraged) for leveraged ETFs
+    # This is correct behavior - leveraged ETFs don't multiply dividends
+    
+    return leveraged_data
+
+def get_ticker_aliases():
+    """Define ticker aliases for easier entry"""
+    return {
+        # Stock Market Indices
+        'SPX': '^GSPC',           # S&P 500 (price only, no dividends)
+        'SPXTR': '^SP500TR',      # S&P 500 Total Return (with dividends)
+        'SP500': '^GSPC',         # S&P 500 (price only, no dividends)
+        'SP500TR': '^SP500TR',    # S&P 500 Total Return (with dividends)
+        'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends)
+        'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends)
+        'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends)
+        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends)
+        'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends)
+        
+        # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
+        'TNX': '^TNX',           # 10-Year Treasury Yield (1962+) - Price only, no coupons
+        'TYX': '^TYX',           # 30-Year Treasury Yield (1977+) - Price only, no coupons
+        'FVX': '^FVX',           # 5-Year Treasury Yield (1962+) - Price only, no coupons
+        'IRX': '^IRX',           # 3-Month Treasury Yield (1982+) - Price only, no coupons
+        
+        # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
+        'TLTTR': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFTR': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'ZROZX': 'ZROZ',         # 25+ Year Zero Coupon Treasury ETF (2009+) - With coupons
+        'GOVZTR': 'GOVZ',        # 25+ Year Treasury STRIPS ETF (2019+) - With coupons
+        'EDVTR': 'EDV',          # Extended Duration Treasury ETF (2007+) - With coupons
+        
+        # Short-Term Treasury (LONGEST HISTORY)
+        'TBILL': '^IRX',         # 3-Month Treasury Yield (1982+) - Longest T-bill history
+        'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
+        'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
+        'SGOV': 'SGOV',          # 0-3 Month T-Bill ETF (2020+) - With coupons
+        'ZEROX': 'ZERO',         # Zero-cost portfolio (literally cash doing nothing)
+        
+        # Gold & Commodities (LONGEST HISTORY - 1970s+)
+        'GOLDX': 'GC=F',         # Gold Futures (1975+) - Longest gold history
+        'GOLD': 'GC=F',          # Gold Futures (1975+) - Longest gold history
+        'GOLDF': 'GC=F',         # Gold Futures (1975+) - Longest gold history
+        'XAUUSD': 'XAUUSD=X',    # Gold vs USD (1971+) - Longest forex gold history
+        'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - Most accurate gold ETF
+        'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - Alternative gold ETF
+        'XAU': '^XAU',           # Gold & Silver Index (1983+) - Price only, no dividends
+        'CRB': '^CRB',           # Commodity Research Bureau Index (1957+) - Price only, no dividends
+    }
+
+def resolve_ticker_alias(ticker):
+    """Resolve ticker alias to actual ticker symbol"""
+    aliases = get_ticker_aliases()
+    return aliases.get(ticker.upper(), ticker)
+
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
     """Get ticker data without caching (NO_CACHE version)
     
     Args:
-        ticker_symbol: Stock ticker symbol
+        ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
         period: Data period
         auto_adjust: Auto-adjust setting
     """
     try:
-        ticker = yf.Ticker(ticker_symbol)
+        # Parse leverage from ticker symbol
+        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        
+        # Resolve ticker alias if it exists
+        resolved_ticker = resolve_ticker_alias(base_ticker)
+        
+        ticker = yf.Ticker(resolved_ticker)
         hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+        
+        if hist.empty:
+            return hist
+            
+        # Apply leverage if specified
+        if leverage != 1.0:
+            hist = apply_daily_leverage(hist, leverage)
+            
         return hist
     except Exception:
         return pd.DataFrame()
@@ -750,6 +1098,41 @@ def generate_simple_pdf_report(custom_name=""):
             except Exception as e:
                 story.append(Paragraph(f"Error converting drawdown plot: {str(e)}", styles['Normal']))
         
+        # Add Risk-Free Rate plot (Annualized)
+        if 'fig4' in st.session_state:
+            try:
+                fig4 = st.session_state.fig4
+                # Convert Plotly figure to matplotlib
+                mpl_fig = plotly_to_matplotlib_figure(fig4, title="Annualized Risk-Free Rate (13-Week Treasury)", width_inches=10, height_inches=6)
+                
+                # Save matplotlib figure to buffer
+                img_buffer = io.BytesIO()
+                mpl_fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                img_buffer.seek(0)
+                plt.close(mpl_fig)  # Close to free memory
+                
+                # Add to PDF
+                story.append(Image(img_buffer, width=7.5*inch, height=4.5*inch))
+                story.append(Spacer(1, 15))
+                
+                # Add legend below the plot if available
+                if hasattr(mpl_fig, 'legend_info') and mpl_fig.legend_info:
+                    try:
+                        legend_figures = create_paginated_legends(mpl_fig.legend_info, "Risk-Free Rate Legend", width_inches=10)
+                        for legend_fig in legend_figures:
+                            legend_buffer = io.BytesIO()
+                            legend_fig.savefig(legend_buffer, format='png', dpi=300, bbox_inches='tight')
+                            legend_buffer.seek(0)
+                            plt.close(legend_fig)
+                            
+                            # Add legend to PDF
+                            story.append(Image(legend_buffer, width=7.5*inch, height=2*inch))
+                            story.append(Spacer(1, 10))
+                    except Exception as e:
+                        story.append(Paragraph(f"Error creating legend: {str(e)}", styles['Normal']))
+            except Exception as e:
+                story.append(Paragraph(f"Error converting risk-free rate plot: {str(e)}", styles['Normal']))
+        
         # Update progress
         progress_bar.progress(60)
         status_text.text("📋 Adding performance statistics...")
@@ -1264,10 +1647,14 @@ def generate_simple_pdf_report(custom_name=""):
                         # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
                         # Wrap headers for better display
                         wrapped_headers = []
+                        common_words = ['Portfolio', 'Volatility', 'Drawdown', 'Sharpe', 'Sortino', 'Ulcer', 'Index', 'Return', 'Value', 'Money', 'Added', 'Contributions']
+                        
                         for header in headers:
-                            if len(header) > 15:  # Wrap long headers
+                            if len(header) > 8:  # More aggressive wrapping for better readability
+                                # Split on spaces and create multi-line header
                                 words = header.split()
                                 if len(words) > 1:
+                                    # Smart splitting: try to balance lines
                                     if len(words) == 2:
                                         wrapped_header = '\n'.join(words)
                                     elif len(words) == 3:
@@ -1275,10 +1662,12 @@ def generate_simple_pdf_report(custom_name=""):
                                     elif len(words) == 4:
                                         wrapped_header = '\n'.join([' '.join(words[:2]), ' '.join(words[2:])])
                                     else:
+                                        # For longer headers, split more aggressively
                                         mid = len(words) // 2
                                         wrapped_header = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
                                 else:
-                                    if len(header) > 10:
+                                    # Single long word - split more aggressively
+                                    if header not in common_words and len(header) > 10:
                                         mid = len(header) // 2
                                         wrapped_header = header[:mid] + '\n' + header[mid:]
                                     else:
@@ -2456,7 +2845,7 @@ def calculate_beta(returns, benchmark_returns):
 def calculate_sortino(returns, risk_free_rate):
     """Calculates the Sortino ratio."""
     # Create a constant risk-free rate series aligned with returns
-    daily_rf_rate = risk_free_rate / 252
+    daily_rf_rate = risk_free_rate / 365.25
     rf_series = pd.Series(daily_rf_rate, index=returns.index)
     
     aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
@@ -2663,7 +3052,7 @@ def calculate_ulcer_index(series):
 def calculate_sharpe(returns, risk_free_rate):
     """Calculates the Sharpe ratio."""
     # Create a constant risk-free rate series aligned with returns
-    daily_rf_rate = risk_free_rate / 252
+    daily_rf_rate = risk_free_rate / 365.25
     rf_series = pd.Series(daily_rf_rate, index=returns.index)
     
     aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
@@ -3194,15 +3583,30 @@ def single_backtest(config, sim_index, reindexed_data):
                 nb_shares = val_prev / price_prev if price_prev > 0 else 0
                 # --- Dividend fix: find the correct trading day for dividend ---
                 div = 0.0
-                if "Dividends" in df.columns:
-                    # If dividend is not on a trading day, roll forward to next available trading day
-                    if date in df.index:
-                        div = df.loc[date, "Dividends"]
-                    else:
-                        # Find next trading day in index after 'date'
-                        future_dates = df.index[df.index > date]
-                        if len(future_dates) > 0:
-                            div = df.loc[future_dates[0], "Dividends"]
+                # CRITICAL FIX: For leveraged tickers, get dividends from the base ticker, not the leveraged ticker
+                if "?L=" in t:
+                    # For leveraged tickers, get dividend data from the base ticker
+                    base_ticker, leverage = parse_leverage_ticker(t)
+                    if base_ticker in reindexed_data:
+                        base_df = reindexed_data[base_ticker]
+                        if "Dividends" in base_df.columns:
+                            if date in base_df.index:
+                                div = base_df.loc[date, "Dividends"]
+                            else:
+                                # Find next trading day in index after 'date'
+                                future_dates = base_df.index[base_df.index > date]
+                                if len(future_dates) > 0:
+                                    div = base_df.loc[future_dates[0], "Dividends"]
+                else:
+                    # For regular tickers, get dividend data normally
+                    if "Dividends" in df.columns:
+                        if date in df.index:
+                            div = df.loc[date, "Dividends"]
+                        else:
+                            # Find next trading day in index after 'date'
+                            future_dates = df.index[df.index > date]
+                            if len(future_dates) > 0:
+                                div = df.loc[future_dates[0], "Dividends"]
                 var = df.loc[date, "Price_change"] if date in df.index else 0.0
                 if include_dividends.get(t, False):
                     # Check if dividends should be collected as cash instead of reinvested
@@ -3217,7 +3621,25 @@ def single_backtest(config, sim_index, reindexed_data):
                         val_new = val_prev * (1 + rate_of_return)
                     else:
                         # Reinvest dividends (original behavior)
-                        rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                        # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
+                        # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
+                        if "?L=" in t:
+                            # For leveraged tickers, get the base ticker's dividend rate (not amount)
+                            base_ticker, leverage = parse_leverage_ticker(t)
+                            if base_ticker in reindexed_data:
+                                base_df = reindexed_data[base_ticker]
+                                base_price_prev = base_df.loc[date_prev, "Close"]
+                                # Use the base ticker's dividend rate, not the leveraged amount
+                                dividend_rate = div / base_price_prev if base_price_prev > 0 else 0
+                                rate_of_return = var + dividend_rate
+                            else:
+                                # Fallback: use leveraged price (may cause issues)
+                                rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                        else:
+                            # For regular tickers, use normal dividend reinvestment
+                            rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                        
+                        # Calculate val_new for both leveraged and regular tickers
                         val_new = val_prev * (1 + rate_of_return)
                 else:
                     val_new = val_prev * (1 + var)
@@ -3231,13 +3653,30 @@ def single_backtest(config, sim_index, reindexed_data):
             val_prev = values[t][-1]
             # --- Dividend fix: find the correct trading day for dividend ---
             div = 0.0
-            if "Dividends" in df.columns:
-                if date in df.index:
-                    div = df.loc[date, "Dividends"]
-                else:
-                    future_dates = df.index[df.index > date]
-                    if len(future_dates) > 0:
-                        div = df.loc[future_dates[0], "Dividends"]
+            # CRITICAL FIX: For leveraged tickers, get dividends from the base ticker, not the leveraged ticker
+            if "?L=" in t:
+                # For leveraged tickers, get dividend data from the base ticker
+                base_ticker, leverage = parse_leverage_ticker(t)
+                if base_ticker in reindexed_data:
+                    base_df = reindexed_data[base_ticker]
+                    if "Dividends" in base_df.columns:
+                        if date in base_df.index:
+                            div = base_df.loc[date, "Dividends"]
+                        else:
+                            # Find next trading day in index after 'date'
+                            future_dates = base_df.index[base_df.index > date]
+                            if len(future_dates) > 0:
+                                div = base_df.loc[future_dates[0], "Dividends"]
+            else:
+                # For regular tickers, get dividend data normally
+                if "Dividends" in df.columns:
+                    if date in df.index:
+                        div = df.loc[date, "Dividends"]
+                    else:
+                        # Find next trading day in index after 'date'
+                        future_dates = df.index[df.index > date]
+                        if len(future_dates) > 0:
+                            div = df.loc[future_dates[0], "Dividends"]
             var = df.loc[date, "Price_change"] if date in df.index else 0.0
             if include_dividends.get(t, False):
                 # Check if dividends should be collected as cash instead of reinvested
@@ -3252,7 +3691,25 @@ def single_backtest(config, sim_index, reindexed_data):
                     val_new = val_prev * (1 + rate_of_return)
                 else:
                     # Reinvest dividends (original behavior)
-                    rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                    # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
+                    # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
+                    if "?L=" in t:
+                        # For leveraged tickers, get the base ticker's dividend rate (not amount)
+                        base_ticker, leverage = parse_leverage_ticker(t)
+                        if base_ticker in reindexed_data:
+                            base_df = reindexed_data[base_ticker]
+                            base_price_prev = base_df.loc[date_prev, "Close"]
+                            # Use the base ticker's dividend rate, not the leveraged amount
+                            dividend_rate = div / base_price_prev if base_price_prev > 0 else 0
+                            rate_of_return = var + dividend_rate
+                        else:
+                            # Fallback: use leveraged price (may cause issues)
+                            rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                    else:
+                        # For regular tickers, use normal dividend reinvestment
+                        rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
+                    
+                    # Calculate val_new for both leveraged and regular tickers
                     val_new = val_prev * (1 + rate_of_return)
             else:
                 val_new = val_prev * (1 + var)
@@ -5634,6 +6091,7 @@ for i in range(len(active_portfolio['stocks'])):
         st.checkbox("Include Dividends", key=div_key)
         if st.session_state[div_key] != stock['include_dividends']:
             st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['include_dividends'] = st.session_state[div_key]
+        
     with col_b:
         st.write("")
         if st.button("Remove", key=f"multi_backtest_rem_stock_{st.session_state.multi_backtest_active_portfolio_index}_{i}", on_click=remove_stock_callback, args=(stock['ticker'],)):
@@ -5641,6 +6099,111 @@ for i in range(len(active_portfolio['stocks'])):
 
 if st.button("Add Ticker", on_click=add_stock_callback):
     pass
+
+# Special tickers and leverage guide sections
+with st.expander("🚀 Special Long-Term Tickers", expanded=False):
+    st.markdown("""
+    **Recommended tickers for long-term strategies:**
+    
+    **Core ETFs:**
+    - **SPY** - S&P 500 (0.09% expense ratio)
+    - **QQQ** - NASDAQ-100 (0.20% expense ratio)  
+    - **VTI** - Total Stock Market (0.03% expense ratio)
+    - **VEA** - Developed Markets (0.05% expense ratio)
+    - **VWO** - Emerging Markets (0.10% expense ratio)
+    
+    **Sector ETFs:**
+    - **XLK** - Technology (0.10% expense ratio)
+    - **XLF** - Financials (0.10% expense ratio)
+    - **XLE** - Energy (0.10% expense ratio)
+    - **XLV** - Healthcare (0.10% expense ratio)
+    - **XLI** - Industrials (0.10% expense ratio)
+    
+    **Bond ETFs:**
+    - **TLT** - 20+ Year Treasury (0.15% expense ratio)
+    - **IEF** - 7-10 Year Treasury (0.15% expense ratio)
+    - **LQD** - Investment Grade Corporate (0.14% expense ratio)
+    - **HYG** - High Yield Corporate (0.49% expense ratio)
+    
+    **Commodity ETFs:**
+    - **GLD** - Gold (0.40% expense ratio)
+    - **SLV** - Silver (0.50% expense ratio)
+    - **DBA** - Agriculture (0.93% expense ratio)
+    - **USO** - Oil (0.60% expense ratio)
+    """)
+
+# Ticker Aliases Section
+st.markdown("---")
+st.markdown("**💡 Ticker Aliases:** You can also use these shortcuts in the text input below:")
+st.markdown("- `SPX` → `^GSPC` (S&P 500, 1957+), `SPXTR` → `^SP500TR` (S&P 500 with dividends, 1957+)")
+st.markdown("- `SPYTR` → `^SP500TR` (S&P 500 Total Return, 1957+), `QQQTR` → `^NDX` (NASDAQ 100, 1985+)")
+st.markdown("- `TLTTR` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFTR` → `IEF` (7-10 Year Treasury ETF, 2002+)")
+st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2019+)")
+st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
+st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
+st.markdown("- `ZEROX` → `ZERO` (Cash doing nothing), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
+
+with st.expander("⚡ Leverage Guide", expanded=False):
+    st.markdown("""
+    **Leverage Format:** Use `TICKER?L=N` where N is the leverage multiplier
+    
+    **Examples:**
+    - **SPY?L=2** - 2x leveraged S&P 500
+    - **QQQ?L=3** - 3x leveraged NASDAQ-100  
+    - **TLT?L=2** - 2x leveraged 20+ Year Treasury
+    
+    **Important Notes:**
+    - **Daily Reset:** Leverage resets daily (like real leveraged ETFs)
+    - **Cost Drag:** Includes daily cost drag = (leverage - 1) × risk-free rate
+    - **Volatility Decay:** High volatility can cause significant decay over time
+    - **Risk Warning:** Leveraged products are high-risk and can lose value quickly
+    
+    **Real Leveraged ETFs for Reference:**
+    - **SSO** - 2x S&P 500 (ProShares)
+    - **UPRO** - 3x S&P 500 (ProShares)
+    - **TQQQ** - 3x NASDAQ-100 (ProShares)
+    - **TMF** - 3x 20+ Year Treasury (Direxion)
+    
+    **Best Practices:**
+    - Use for short-term strategies or hedging
+    - Avoid holding for extended periods due to decay
+    - Consider the underlying asset's volatility
+    - Monitor risk-free rate changes affecting cost drag
+    """)
+
+# Leverage Summary Section
+leveraged_tickers = []
+for stock in active_portfolio['stocks']:
+    if "?L=" in stock['ticker']:
+        try:
+            base_ticker, leverage = parse_leverage_ticker(stock['ticker'])
+            leveraged_tickers.append((base_ticker, leverage))
+        except:
+            pass
+
+if leveraged_tickers:
+    st.markdown("---")
+    st.markdown("### ⚡ Leverage Summary")
+    
+    # Get risk-free rate for drag calculation
+    try:
+        risk_free_rates = get_risk_free_rate_robust([pd.Timestamp.now()])
+        daily_rf = risk_free_rates.iloc[0] if len(risk_free_rates) > 0 else 0.000105
+    except:
+        daily_rf = 0.000105  # fallback
+    
+    # Group by leverage level
+    leverage_groups = {}
+    for base_ticker, leverage in leveraged_tickers:
+        if leverage not in leverage_groups:
+            leverage_groups[leverage] = []
+        leverage_groups[leverage].append(base_ticker)
+    
+    for leverage in sorted(leverage_groups.keys()):
+        base_tickers = leverage_groups[leverage]
+        daily_drag = (leverage - 1) * daily_rf * 100
+        st.markdown(f"🚀 **{leverage}x leverage** on {', '.join(base_tickers)}")
+        st.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {daily_rf*100:.1f}%)")
 
 # Bulk ticker input section - FIXED VERSION
 with st.expander("📝 Bulk Ticker Input", expanded=False):
@@ -6162,6 +6725,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         # Get all tickers first
         all_tickers = sorted(list(set(s['ticker'] for cfg in st.session_state.multi_backtest_portfolio_configs for s in cfg['stocks'] if s['ticker']) | set(cfg['benchmark_ticker'] for cfg in st.session_state.multi_backtest_portfolio_configs if 'benchmark_ticker' in cfg)))
         all_tickers = [t for t in all_tickers if t]
+        
+        # CRITICAL FIX: Add base tickers for leveraged tickers to ensure dividend data is available
+        base_tickers_to_add = set()
+        for ticker in all_tickers:
+            if "?L=" in ticker:
+                base_ticker, leverage = parse_leverage_ticker(ticker)
+                base_tickers_to_add.add(base_ticker)
+
+        # Add base tickers to the list if they're not already there
+        for base_ticker in base_tickers_to_add:
+            if base_ticker not in all_tickers:
+                all_tickers.append(base_ticker)
         
         # BULLETPROOF VALIDATION: Check for empty ticker list first
         if not all_tickers:
@@ -7489,6 +8064,158 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         # Store in session state for PDF export
         st.session_state.fig2 = fig2
 
+        # Third plot: Daily Risk-Free Rate (13-Week Treasury)
+        fig3 = go.Figure()
+        try:
+            # Get risk-free rate data for the same date range
+            risk_free_rates = get_risk_free_rate_robust(pd.date_range(start=first_date, end=last_date, freq='D'))
+            
+            # Convert timestamp index to proper datetime for plotting
+            if hasattr(risk_free_rates.index, 'to_pydatetime'):
+                x_dates = risk_free_rates.index.to_pydatetime()
+            else:
+                x_dates = pd.to_datetime(risk_free_rates.index)
+            
+            # Convert to daily basis points for display (multiply by 10000)
+            daily_rates_bp = risk_free_rates * 10000
+            
+            fig3.add_trace(go.Scatter(
+                x=x_dates, 
+                y=daily_rates_bp.values, 
+                mode='lines', 
+                name='Daily Risk-Free Rate', 
+                line=dict(color='#00ff88'),
+                hovertemplate='<b>Daily Risk-Free Rate</b><br>' +
+                             'Date: %{x}<br>' +
+                             'Rate: %{y:.2f} bps<br>' +
+                             '<extra></extra>'
+            ))
+            
+        except Exception as e:
+            # Fallback: create a simple line at default rate if risk-free rate fetching fails
+            x_dates = pd.date_range(start=first_date, end=last_date, freq='D')
+            default_daily_bp = 0.02 / 365.25 * 10000  # Convert 2% annual to daily basis points
+            fig3.add_trace(go.Scatter(
+                x=x_dates, 
+                y=[default_daily_bp] * len(x_dates), 
+                mode='lines', 
+                name='Daily Risk-Free Rate (Default)', 
+                line=dict(color='#00ff88')
+            ))
+        
+        fig3.update_layout(
+            title="Daily Risk-Free Rate (13-Week Treasury)",
+            xaxis_title="Date",
+            legend_title="Rate",
+            hovermode="x unified",
+            template="plotly_dark",
+            # EXACT same formatting as the other two plots
+            xaxis=dict(
+                type='date',  # Explicitly set as date type
+                tickformat="%Y-%m-%d",  # Proper date format
+                tickmode="auto",
+                nticks=10,  # Reasonable number of ticks
+                tickangle=45,  # Angle labels for better readability
+                automargin=True,  # Ensure labels fit
+                range=None  # Let Plotly auto-range to ensure perfect alignment
+            ),
+            legend=dict(
+                orientation="h",  # Horizontal legend
+                yanchor="top",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            ),
+            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            height=600,  # Same height as the other plots
+            yaxis=dict(
+                title="Daily Risk-Free Rate (basis points)", 
+                title_standoff=20,
+                side="left",
+                position=0.0,  # Force left alignment for perfect positioning
+                range=[0, max(daily_rates_bp) * 1.1] if 'daily_rates_bp' in locals() and len(daily_rates_bp) > 0 else [0, 2]
+            )
+        )
+        st.plotly_chart(fig3, use_container_width=True, key="multi_daily_risk_free_chart")
+        # Store in session state for PDF export
+        st.session_state.fig3 = fig3
+
+        # Fourth plot: Annualized Risk-Free Rate (13-Week Treasury)
+        fig4 = go.Figure()
+        try:
+            # Get risk-free rate data for the same date range
+            risk_free_rates = get_risk_free_rate_robust(pd.date_range(start=first_date, end=last_date, freq='D'))
+            
+            # Convert timestamp index to proper datetime for plotting
+            if hasattr(risk_free_rates.index, 'to_pydatetime'):
+                x_dates = risk_free_rates.index.to_pydatetime()
+            else:
+                x_dates = pd.to_datetime(risk_free_rates.index)
+            
+            # Convert to annualized percentage for display
+            # Daily rate to annual: (1 + daily_rate)^365.25 - 1
+            annual_rates = ((1 + risk_free_rates) ** 365.25 - 1) * 100
+            
+            fig4.add_trace(go.Scatter(
+                x=x_dates, 
+                y=annual_rates.values, 
+                mode='lines', 
+                name='Annualized Risk-Free Rate', 
+                line=dict(color='#ff8800'),
+                hovertemplate='<b>Annualized Risk-Free Rate</b><br>' +
+                             'Date: %{x}<br>' +
+                             'Rate: %{y:.2f}%<br>' +
+                             '<extra></extra>'
+            ))
+            
+        except Exception as e:
+            # Fallback: create a simple line at 2% if risk-free rate fetching fails
+            x_dates = pd.date_range(start=first_date, end=last_date, freq='D')
+            fig4.add_trace(go.Scatter(
+                x=x_dates, 
+                y=[2.0] * len(x_dates), 
+                mode='lines', 
+                name='Annualized Risk-Free Rate (Default)', 
+                line=dict(color='#ff8800')
+            ))
+        
+        fig4.update_layout(
+            title="Annualized Risk-Free Rate (13-Week Treasury)",
+            xaxis_title="Date",
+            legend_title="Rate",
+            hovermode="x unified",
+            template="plotly_dark",
+            # EXACT same formatting as the other plots
+            xaxis=dict(
+                type='date',  # Explicitly set as date type
+                tickformat="%Y-%m-%d",  # Proper date format
+                tickmode="auto",
+                nticks=10,  # Reasonable number of ticks
+                tickangle=45,  # Angle labels for better readability
+                automargin=True,  # Ensure labels fit
+                range=None  # Let Plotly auto-range to ensure perfect alignment
+            ),
+            legend=dict(
+                orientation="h",  # Horizontal legend
+                yanchor="top",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            ),
+            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            height=600,  # Same height as the other plots
+            yaxis=dict(
+                title="Annualized Risk-Free Rate (%)", 
+                title_standoff=20,
+                side="left",
+                position=0.0,  # Force left alignment for perfect positioning
+                range=[0, max(annual_rates) * 1.1] if 'annual_rates' in locals() and len(annual_rates) > 0 else [0, 6]
+            )
+        )
+        st.plotly_chart(fig4, use_container_width=True, key="multi_annual_risk_free_chart")
+        # Store in session state for PDF export
+        st.session_state.fig4 = fig4
+
         # --- Variation summary chart: compares total return, CAGR, volatility and max drawdown across portfolios ---
         try:
             def get_no_additions_series(obj):
@@ -7825,11 +8552,23 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 'Final Value (no_additions)': 'Final Value (No Contributions)',
                 'Total Return (Contributed)': 'Total Return (All Money)'
             }, inplace=True)
-            # Ensure ordering: Beta then MWRR at end, Total Return columns and Total Money Added at the very end
+            # Ensure ordering: MWRR after CAGR, Total Return columns after MWRR, then risk metrics, then Beta and Total Money Added at the end
             cols = list(stats_df_display.columns)
-            if 'Beta' in cols and 'MWRR' in cols and 'Total Return' in cols and 'Total Return (All Money)' in cols and 'Total Money Added' in cols:
-                cols.remove('Beta'); cols.remove('MWRR'); cols.remove('Total Return'); cols.remove('Total Return (All Money)'); cols.remove('Total Money Added')
-                cols.extend(['Beta','MWRR','Total Return','Total Return (All Money)','Total Money Added'])
+            if 'MWRR' in cols and 'Total Return' in cols and 'Total Return (All Money)' in cols and 'Beta' in cols and 'Total Money Added' in cols:
+                # Remove the columns we want to reorder
+                cols.remove('MWRR'); cols.remove('Total Return'); cols.remove('Total Return (All Money)'); cols.remove('Beta'); cols.remove('Total Money Added')
+                
+                # Find the position after CAGR to insert MWRR and Total Return columns
+                cagr_index = cols.index('CAGR') if 'CAGR' in cols else 0
+                insert_position = cagr_index + 1
+                
+                # Insert MWRR and Total Return columns after CAGR
+                cols.insert(insert_position, 'MWRR')
+                cols.insert(insert_position + 1, 'Total Return')
+                cols.insert(insert_position + 2, 'Total Return (All Money)')
+                
+                # Add Beta and Total Money Added at the end
+                cols.extend(['Beta', 'Total Money Added'])
                 stats_df_display = stats_df_display[cols]
 
             # Display start and end dates next to the title
@@ -8064,12 +8803,12 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 'Stocks': ', '.join([s.get('ticker', '') for s in cfg.get('stocks', [])]),
                 'Benchmark': cfg.get('benchmark_ticker', 'N/A'),
                 'Momentum Windows': str(cfg.get('momentum_windows', [])),
-                'Beta Enabled': 'Yes' if cfg.get('use_beta', False) else 'No',
-                'Volatility Enabled': 'Yes' if cfg.get('use_vol', False) else 'No',
-                'Beta Window': f"{cfg.get('beta_window_days', 0)} days" if cfg.get('use_beta', False) else 'N/A',
-                'Volatility Window': f"{cfg.get('vol_window_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
-                'Beta Exclude Days': f"{cfg.get('beta_exclude_days', 0)} days" if cfg.get('use_beta', False) else 'N/A',
-                'Volatility Exclude Days': f"{cfg.get('vol_exclude_days', 0)} days" if cfg.get('use_vol', False) else 'N/A',
+                'Beta Enabled': 'Yes' if cfg.get('calc_beta', False) else 'No',
+                'Volatility Enabled': 'Yes' if cfg.get('calc_volatility', False) else 'No',
+                'Beta Window': f"{cfg.get('beta_window_days', 0)} days" if cfg.get('calc_beta', False) else 'N/A',
+                'Volatility Window': f"{cfg.get('vol_window_days', 0)} days" if cfg.get('calc_volatility', False) else 'N/A',
+                'Beta Exclude Days': f"{cfg.get('exclude_days_beta', 0)} days" if cfg.get('calc_beta', False) else 'N/A',
+                'Volatility Exclude Days': f"{cfg.get('exclude_days_vol', 0)} days" if cfg.get('calc_volatility', False) else 'N/A',
                 'Minimal Threshold': f"{cfg.get('minimal_threshold_percent', 2.0):.1f}%" if cfg.get('use_minimal_threshold', False) else 'Disabled',
                 'Maximum Allocation': f"{cfg.get('max_allocation_percent', 10.0):.1f}%" if cfg.get('use_max_allocation', False) else 'Disabled'
             }
