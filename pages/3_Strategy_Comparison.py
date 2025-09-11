@@ -12,9 +12,6 @@ import io
 import contextlib
 import os
 import plotly.io as pio
-from numba import jit
-import concurrent.futures
-from functools import lru_cache
 
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
@@ -158,7 +155,7 @@ def get_risk_free_rate_robust(dates):
         return _get_default_risk_free_rate(dates)
 
 # =============================================================================
-# PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
+# PERFORMANCE OPTIMIZATION: NO CACHE VERSION
 # =============================================================================
 
 # =============================================================================
@@ -333,84 +330,9 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
         
     Returns:
         tuple: (base_ticker, leverage_multiplier)
-        
-    Examples:
-        "SPY" -> ("SPY", 1.0)
-        "SPY?L=3" -> ("SPY", 3.0)
-        "QQQ?L=2" -> ("QQQ", 2.0)
     """
     base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
     return base_ticker, leverage
-
-def apply_daily_expense_ratio(price_data: pd.DataFrame, expense_ratio: float) -> pd.DataFrame:
-    """
-    Apply daily expense ratio drag to price data, simulating ETF management fees.
-    
-    Uses the same approach as leverage: build up the price series step by step
-    with daily expense drag applied to each day's return.
-    
-    Args:
-        price_data: DataFrame with 'Close' column containing price data
-        expense_ratio: Annual expense ratio as a percentage (e.g., 0.84 for 0.84%)
-        
-    Returns:
-        DataFrame with expense ratio drag applied to price data
-    """
-    if expense_ratio == 0.0:
-        return price_data.copy()
-    
-    # Create a copy to avoid modifying original data
-    result = price_data.copy()
-    
-    # Calculate daily expense drag: annual_expense_ratio / 365.25
-    daily_expense_drag = expense_ratio / 100.0 / 365.25
-    
-    # Debug: Print the daily drag for verification
-    print(f"DEBUG: Applying {expense_ratio}% annual expense ratio")
-    print(f"DEBUG: Daily expense drag: {daily_expense_drag * 100:.6f}%")
-    
-    # Build up the price series step by step (same approach as leverage)
-    adjusted_prices = pd.Series(index=price_data.index, dtype=float)
-    first_price = price_data['Close'].iloc[0]
-    if isinstance(first_price, pd.Series):
-        first_price = first_price.iloc[0]
-    adjusted_prices.iloc[0] = first_price
-    
-    # Apply expense drag to each day's return
-    for i in range(1, len(price_data)):
-        # Get scalar values from the Close column
-        current_price = price_data['Close'].iloc[i]
-        previous_price = price_data['Close'].iloc[i-1]
-        
-        if isinstance(current_price, pd.Series):
-            current_price = current_price.iloc[0]
-        if isinstance(previous_price, pd.Series):
-            previous_price = previous_price.iloc[0]
-        
-        if previous_price > 0:
-            # Calculate the price change
-            price_change = current_price / previous_price - 1
-            
-            # Apply expense drag to the price change (subtract daily drag)
-            adjusted_price_change = price_change - daily_expense_drag
-            
-            # Apply the adjusted price change to the previous adjusted price
-            adjusted_prices.iloc[i] = adjusted_prices.iloc[i-1] * (1 + adjusted_price_change)
-        else:
-            adjusted_prices.iloc[i] = adjusted_prices.iloc[i-1]
-    
-    # Update the Close price with adjusted prices
-    result['Close'] = adjusted_prices
-    
-    # Recalculate price changes with the new adjusted prices
-    result['Price_change'] = result['Close'].pct_change(fill_method=None)
-    
-    # Debug: Show the impact
-    if len(result) > 1:
-        original_return = (result['Close'].iloc[-1] / result['Close'].iloc[0] - 1) * 100
-        print(f"DEBUG: Final return with {expense_ratio}% expense ratio: {original_return:.4f}%")
-    
-    return result
 
 def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
     """
@@ -549,34 +471,55 @@ def resolve_ticker_alias(ticker):
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
 
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
-    """Cache ticker data with proper cache keys including all parameters"""
-    # Resolve ticker alias if it exists
-    resolved_ticker = resolve_ticker_alias(base_ticker)
+def generate_zero_return_data(period="max"):
+    """Generate synthetic zero return data for ZEROX ticker
     
-    ticker = yf.Ticker(resolved_ticker)
-    hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+    Args:
+        period: Data period (max, 1y, 5y, etc.)
     
-    if hist.empty:
-        return hist
+    Returns:
+        pandas.DataFrame with Close and Dividends columns, constant price of $100
+    """
+    try:
+        # Get a reference ticker to determine date range
+        ref_ticker = yf.Ticker("SPY")
+        ref_hist = ref_ticker.history(period=period)
         
-    # Apply leverage if specified
-    if leverage != 1.0:
-        hist = apply_daily_leverage(hist, leverage)
+        if ref_hist.empty:
+            # Fallback: create 1 year of data
+            end_date = pd.Timestamp.now()
+            start_date = end_date - pd.Timedelta(days=365)
+            dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        else:
+            dates = ref_hist.index
         
-    # Note: Expense ratio is applied during backtest calculation, not here
+        # Create zero return data: constant price of $100, no dividends
+        zero_data = pd.DataFrame({
+            'Close': [100.0] * len(dates),
+            'Dividends': [0.0] * len(dates)
+        }, index=dates)
         
-    return hist
+        return zero_data
+    except Exception:
+        # Ultimate fallback: create minimal data
+        end_date = pd.Timestamp.now()
+        start_date = end_date - pd.Timedelta(days=30)
+        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        
+        zero_data = pd.DataFrame({
+            'Close': [100.0] * len(dates),
+            'Dividends': [0.0] * len(dates)
+        }, index=dates)
+        
+        return zero_data
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Cache ticker data to improve performance across multiple tabs
+    """Get ticker data without caching (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage and expense ratio format like SPY?L=3?E=0.84)
-        period: Data period (used in cache key to prevent conflicts)
-        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
+        period: Data period
+        auto_adjust: Auto-adjust setting
     """
     try:
         # Parse parameters from ticker symbol
@@ -586,8 +529,26 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         if leverage != 1.0 or expense_ratio != 0.0:
             print(f"DEBUG: Parsed {ticker_symbol} -> Base: {base_ticker}, Leverage: {leverage}, Expense: {expense_ratio}%")
         
-        # Use cached function with parsed parameters as separate cache keys
-        return get_ticker_data_cached(base_ticker, leverage, expense_ratio, period, auto_adjust)
+        # Resolve ticker alias if it exists
+        resolved_ticker = resolve_ticker_alias(base_ticker)
+        
+        # Special handling for ZEROX - generate zero return data
+        if resolved_ticker == "ZEROX":
+            return generate_zero_return_data(period)
+        
+        ticker = yf.Ticker(resolved_ticker)
+        hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+        
+        if hist.empty:
+            return hist
+            
+        # Apply leverage if specified
+        if leverage != 1.0:
+            hist = apply_daily_leverage(hist, leverage)
+            
+        # Note: Expense ratio is applied during backtest calculation, not here
+            
+        return hist
     except Exception:
         return pd.DataFrame()
 
@@ -797,6 +758,11 @@ def create_matplotlib_table(data, headers, title="", width_inches=10, height_inc
         
     except Exception as e:
         pass
+        # Return a simple error figure
+        fig, ax = plt.subplots(figsize=(width_inches, height_inches))
+        ax.text(0.5, 0.5, f'Error creating table: {str(e)}', 
+                ha='center', va='center', transform=ax.transAxes)
+        return fig
 
 
 def create_legend_figure(legend_info, title="Legend", width_inches=10, height_inches=2):
@@ -931,66 +897,6 @@ def create_paginated_legends(legend_info, title="Legend", width_inches=10, max_i
     
     return legends
 
-
-def create_matplotlib_table(data, headers, title="", width_inches=10, height_inches=4):
-    """
-    Create a matplotlib table for PDF generation
-    """
-    try:
-        # Ensure data is properly formatted
-        if not data or not headers:
-            raise ValueError("Data or headers are empty")
-        
-        # Convert data to strings and ensure proper format
-        formatted_data = []
-        for row in data:
-            formatted_row = []
-            for cell in row:
-                if cell is None:
-                    formatted_row.append('')
-                else:
-                    formatted_row.append(str(cell))
-            formatted_data.append(formatted_row)
-        
-        fig, ax = plt.subplots(figsize=(width_inches, height_inches))
-        ax.axis('tight')
-        ax.axis('off')
-        
-        # Create table
-        table = ax.table(cellText=formatted_data, colLabels=headers, 
-                        cellLoc='center', loc='center',
-                        bbox=[0, 0, 1, 1])
-        
-        # Style the table
-        table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1, 2)
-        
-        # Color header row
-        for i in range(len(headers)):
-            table[(0, i)].set_facecolor('#4CAF50')
-            table[(0, i)].set_text_props(weight='bold', color='white')
-        
-        # Color alternating rows
-        for i in range(1, len(formatted_data) + 1):
-            for j in range(len(headers)):
-                if i % 2 == 0:
-                    table[(i, j)].set_facecolor('#f0f0f0')
-        
-        # Add title
-        if title:
-            ax.set_title(title, fontsize=12, fontweight='bold', pad=20)
-        
-        plt.tight_layout()
-        return fig
-        
-    except Exception as e:
-        # Return a simple error figure
-        fig, ax = plt.subplots(figsize=(width_inches, height_inches))
-        ax.text(0.5, 0.5, f'Error creating table: {str(e)}', 
-                ha='center', va='center', transform=ax.transAxes)
-        return fig
-
 # PDF Generation imports
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle, Image
@@ -1037,7 +943,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading1'],
-            fontSize=16,  # Keep original size for consistency
+            fontSize=16,
             spaceAfter=20,
             textColor=reportlab_colors.Color(0.2, 0.4, 0.6)
         )
@@ -1177,6 +1083,25 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
             story.append(Paragraph(f"Portfolio: {config.get('name', 'Unknown')}", subheading_style))
             story.append(Spacer(1, 10))
             
+            # Get final portfolio value from backtest results if available
+            portfolio_value_str = "N/A"
+            if 'strategy_comparison_all_results' in st.session_state and st.session_state.strategy_comparison_all_results:
+                portfolio_name = config.get('name', 'Unknown')
+                portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name)
+                if portfolio_results:
+                    if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
+                        final_value = portfolio_results['with_additions'].iloc[-1]
+                        if not pd.isna(final_value) and final_value > 0:
+                            portfolio_value_str = f"${float(final_value):,.2f}"
+                    elif isinstance(portfolio_results, dict) and 'no_additions' in portfolio_results:
+                        final_value = portfolio_results['no_additions'].iloc[-1]
+                        if not pd.isna(final_value) and final_value > 0:
+                            portfolio_value_str = f"${float(final_value):,.2f}"
+                    elif isinstance(portfolio_results, pd.Series):
+                        latest_value = portfolio_results.iloc[-1]
+                        if not pd.isna(latest_value) and latest_value > 0:
+                            portfolio_value_str = f"${float(latest_value):,.2f}"
+            
             # Create configuration table with all parameters
             config_data = [
                 ['Parameter', 'Value', 'Description'],
@@ -1184,6 +1109,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                 ['Added Amount', f"${config.get('added_amount', 0):,.2f}", 'Regular contribution amount'],
                 ['Added Frequency', config.get('added_frequency', 'N/A'), 'How often contributions are made'],
                 ['Rebalancing Frequency', config.get('rebalancing_frequency', 'N/A'), 'How often portfolio is rebalanced'],
+                ['Portfolio Value', portfolio_value_str, 'Current portfolio value (if backtest completed)'],
                 ['Benchmark', config.get('benchmark_ticker', 'N/A'), 'Performance comparison index'],
                 ['Use Momentum', 'Yes' if config.get('use_momentum', False) else 'No', 'Whether momentum strategy is enabled'],
                 ['Momentum Strategy', config.get('momentum_strategy', 'N/A'), 'Type of momentum calculation'],
@@ -1202,7 +1128,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                 ['Volatility Lookback', f"{config.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
                 ['Volatility Exclude', f"{config.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
                 ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 2.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
-                ['Max Allocation', f"{config.get('max_allocation_percent', 10.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
+                ['Maximum Allocation', f"{config.get('max_allocation_percent', 10.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
             ]
             
             # Add momentum windows if they exist
@@ -1807,9 +1733,10 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
             story.append(Spacer(1, 15))
         
         # SECTION 3.1: Top 5 Best and Worst Performing Portfolios
-        # Extract data from the Final Performance Statistics table that was just created
-        if table_created and 'fig_stats' in st.session_state:
+        if 'strategy_comparison_all_results' in st.session_state and st.session_state.strategy_comparison_all_results:
             try:
+                all_results = st.session_state.strategy_comparison_all_results
+                
                 fig_stats = st.session_state.fig_stats
                 if hasattr(fig_stats, 'data') and fig_stats.data:
                     for trace in fig_stats.data:
@@ -1857,223 +1784,222 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                         # Sort by final value ascending to get worst first, then take top 10
                                         worst_sorted = sorted(table_rows, key=get_final_value, reverse=False)
                                         top_10_worst = worst_sorted[:min(10, num_portfolios)]
-                                        
-                                        # Add page break before the new tables
-                                        story.append(PageBreak())
-                                        
-                                        # Top 10 Best Performing Portfolios
-                                        story.append(Paragraph("3.1. Top 10 Best Performing Portfolios by Final Value", heading_style))
-                                        story.append(Spacer(1, 10))
-                                        
-                                        if len(top_10_best) > 0:
-                                            # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
-                                            # Wrap headers for better display
-                                            wrapped_headers = []
-                                            common_words = ['Portfolio', 'Volatility', 'Drawdown', 'Sharpe', 'Sortino', 'Ulcer', 'Index', 'Return', 'Value', 'Money', 'Added', 'Contributions']
-                                            
-                                            for header in headers:
-                                                if len(header) > 8:  # More aggressive wrapping for better readability
-                                                    # Split on spaces and create multi-line header
-                                                    words = header.split()
-                                                    if len(words) > 1:
-                                                        # Smart splitting: try to balance lines
-                                                        if len(words) == 2:
-                                                            wrapped_header = '\n'.join(words)
-                                                        elif len(words) == 3:
-                                                            wrapped_header = '\n'.join([words[0], ' '.join(words[1:])])
-                                                        elif len(words) == 4:
-                                                            wrapped_header = '\n'.join([' '.join(words[:2]), ' '.join(words[2:])])
-                                                        else:
-                                                            # For longer headers, split more aggressively
-                                                            mid = len(words) // 2
-                                                            wrapped_header = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
-                                                    else:
-                                                        # Single long word - split more aggressively
-                                                        if header not in common_words and len(header) > 10:
-                                                            mid = len(header) // 2
-                                                            wrapped_header = header[:mid] + '\n' + header[mid:]
-                                                        else:
-                                                            wrapped_header = header
-                                                else:
-                                                    wrapped_header = header
-                                                wrapped_headers.append(wrapped_header)
-                                            
-                                            # Wrap portfolio names in the first column for best performers
-                                            wrapped_best_rows = []
-                                            for row in top_10_best:
-                                                wrapped_row = row.copy()
-                                                if len(str(row[0])) > 25:  # Wrap long portfolio names
-                                                    words = str(row[0]).split()
-                                                    if len(words) > 5:
-                                                        if len(words) <= 8:
-                                                            mid = len(words) // 2
-                                                            wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
-                                                        else:
-                                                            third = len(words) // 3
-                                                            wrapped_row[0] = '\n'.join([
-                                                                ' '.join(words[:third]),
-                                                                ' '.join(words[third:2*third]),
-                                                                ' '.join(words[2*third:])
-                                                            ])
-                                                    elif len(words) > 3:
-                                                        mid = len(words) // 2
-                                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
-                                                wrapped_best_rows.append(wrapped_row)
-                                            
-                                            best_table_data = [wrapped_headers] + wrapped_best_rows
-                                            
-                                            # EXACT SAME COLUMN WIDTH LOGIC AS FINAL PERFORMANCE STATISTICS TABLE
-                                            page_width = 8.2*inch  # Same as Final Performance Statistics
-                                            
-                                            # Optimized column width distribution - EXACT SAME LOGIC
-                                            if len(headers) > 8:  # If we have many columns, use optimized widths
-                                                portfolio_width = 2.1*inch
-                                                remaining_width = page_width - portfolio_width
-                                                
-                                                col_widths = [portfolio_width]
-                                                for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
-                                                    header_lower = header.lower()
-                                                    if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
-                                                        col_widths.append(1.6 * (remaining_width / (len(headers) - 1)))
-                                                    else:
-                                                        col_widths.append(remaining_width / (len(headers) - 1))
-                                                
-                                                total_allocated = sum(col_widths)
-                                                if total_allocated > page_width:
-                                                    scale_factor = page_width / total_allocated
-                                                    col_widths = [w * scale_factor for w in col_widths]
-                                                    
-                                            elif len(headers) > 6:  # Medium number of columns
-                                                portfolio_width = 2.3*inch
-                                                remaining_width = page_width - portfolio_width
-                                                
-                                                col_widths = [portfolio_width]
-                                                for i, header in enumerate(headers[1:], 1):
-                                                    header_lower = header.lower()
-                                                    if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
-                                                        col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
-                                                    else:
-                                                        col_widths.append(remaining_width / (len(headers) - 1))
-                                                
-                                                total_allocated = sum(col_widths)
-                                                if total_allocated > page_width:
-                                                    scale_factor = page_width / total_allocated
-                                                    col_widths = [w * scale_factor for w in col_widths]
-                                                    
-                                            else:  # Few columns
-                                                portfolio_width = 2.0*inch
-                                                remaining_width = page_width - portfolio_width
-                                                
-                                                col_widths = [portfolio_width]
-                                                for i, header in enumerate(headers[1:], 1):
-                                                    header_lower = header.lower()
-                                                    if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
-                                                        col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
-                                                    else:
-                                                        col_widths.append(remaining_width / (len(headers) - 1))
-                                                
-                                                total_allocated = sum(col_widths)
-                                                if total_allocated > page_width:
-                                                    scale_factor = page_width / total_allocated
-                                                    col_widths = [w * scale_factor for w in col_widths]
-                                            
-                                            # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
-                                            best_table = Table(best_table_data, colWidths=col_widths)
-                                            
-                                            # Dynamic font sizing - EXACT SAME LOGIC
-                                            num_columns = len(headers)
-                                            max_header_length = max(len(header) for header in headers)
-                                            
-                                            if num_columns > 14:
-                                                font_size = 5
-                                            elif num_columns > 12:
-                                                font_size = 6
-                                            elif num_columns > 10:
-                                                font_size = 7
-                                            elif num_columns > 8:
-                                                font_size = 8
-                                            else:
-                                                font_size = 9
-                                            
-                                            if max_header_length > 20:
-                                                font_size = max(4, font_size - 1)
-                                            
-                                            best_table.setStyle(TableStyle([
-                                                ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
-                                                ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
-                                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                                ('FONTSIZE', (0, 0), (-1, 0), font_size),
-                                                ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
-                                                ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
-                                                ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
-                                                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                                ('LEFTPADDING', (0, 0), (-1, -1), 1),
-                                                ('RIGHTPADDING', (0, 0), (-1, -1), 1),
-                                                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                                                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                                                ('TOPPADDING', (0, 1), (-1, -1), 2),
-                                                ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
-                                                ('WORDWRAP', (0, 0), (-1, -1), True)
-                                            ]))
-                                            story.append(best_table)
-                                            story.append(Spacer(1, 15))
-                                        
-                                        # Top 10 Worst Performing Portfolios
-                                        story.append(PageBreak())
-                                        story.append(Paragraph("3.2. Top 10 Worst Performing Portfolios by Final Value", heading_style))
-                                        story.append(Spacer(1, 10))
-                                        
-                                        if len(top_10_worst) > 0:
-                                            # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
-                                            # Wrap portfolio names in the first column for worst performers
-                                            wrapped_worst_rows = []
-                                            for row in top_10_worst:
-                                                wrapped_row = row.copy()
-                                                if len(str(row[0])) > 25:  # Wrap long portfolio names
-                                                    words = str(row[0]).split()
-                                                    if len(words) > 5:
-                                                        if len(words) <= 8:
-                                                            mid = len(words) // 2
-                                                            wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
-                                                        else:
-                                                            third = len(words) // 3
-                                                            wrapped_row[0] = '\n'.join([
-                                                                ' '.join(words[:third]),
-                                                                ' '.join(words[third:2*third]),
-                                                                ' '.join(words[2*third:])
-                                                            ])
-                                                    elif len(words) > 3:
-                                                        mid = len(words) // 2
-                                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
-                                                wrapped_worst_rows.append(wrapped_row)
-                                            
-                                            worst_table_data = [wrapped_headers] + wrapped_worst_rows
-                                            
-                                            # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
-                                            worst_table = Table(worst_table_data, colWidths=col_widths)
-                                            worst_table.setStyle(TableStyle([
-                                                ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.7, 0.3, 0.3)),  # Red header for worst
-                                                ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
-                                                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                                                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                                                ('FONTSIZE', (0, 0), (-1, 0), font_size),
-                                                ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
-                                                ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
-                                                ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
-                                                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                                                ('LEFTPADDING', (0, 0), (-1, -1), 1),
-                                                ('RIGHTPADDING', (0, 0), (-1, -1), 1),
-                                                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                                                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                                                ('TOPPADDING', (0, 1), (-1, -1), 2),
-                                                ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
-                                                ('WORDWRAP', (0, 0), (-1, -1), True)
-                                            ]))
-                                            story.append(worst_table)
-                                            story.append(Spacer(1, 15))
-                                        
-                                        break  # Exit the loop after processing the first table
+                    
+                    # Add page break before the new tables
+                    story.append(PageBreak())
+                    
+                    # Top 10 Best Performing Portfolios
+                    story.append(Paragraph("3.1. Top 10 Best Performing Portfolios by Final Value", heading_style))
+                    story.append(Spacer(1, 10))
+                    
+                    if len(top_10_best) > 0:
+                        # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
+                        # Wrap headers for better display
+                        wrapped_headers = []
+                        common_words = ['Portfolio', 'Volatility', 'Drawdown', 'Sharpe', 'Sortino', 'Ulcer', 'Index', 'Return', 'Value', 'Money', 'Added', 'Contributions']
+                        
+                        for header in headers:
+                            if len(header) > 8:  # More aggressive wrapping for better readability
+                                # Split on spaces and create multi-line header
+                                words = header.split()
+                                if len(words) > 1:
+                                    # Smart splitting: try to balance lines
+                                    if len(words) == 2:
+                                        wrapped_header = '\n'.join(words)
+                                    elif len(words) == 3:
+                                        wrapped_header = '\n'.join([words[0], ' '.join(words[1:])])
+                                    elif len(words) == 4:
+                                        wrapped_header = '\n'.join([' '.join(words[:2]), ' '.join(words[2:])])
+                                    else:
+                                        # For longer headers, split more aggressively
+                                        mid = len(words) // 2
+                                        wrapped_header = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                else:
+                                    # Single long word - split more aggressively
+                                    if header not in common_words and len(header) > 10:
+                                        mid = len(header) // 2
+                                        wrapped_header = header[:mid] + '\n' + header[mid:]
+                                    else:
+                                        wrapped_header = header
+                            else:
+                                wrapped_header = header
+                            wrapped_headers.append(wrapped_header)
+                        
+                        # Wrap portfolio names in the first column for best performers
+                        wrapped_best_rows = []
+                        for row in top_10_best:
+                            wrapped_row = row.copy()
+                            if len(str(row[0])) > 25:  # Wrap long portfolio names
+                                words = str(row[0]).split()
+                                if len(words) > 5:
+                                    if len(words) <= 8:
+                                        mid = len(words) // 2
+                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                    else:
+                                        third = len(words) // 3
+                                        wrapped_row[0] = '\n'.join([
+                                            ' '.join(words[:third]),
+                                            ' '.join(words[third:2*third]),
+                                            ' '.join(words[2*third:])
+                                        ])
+                                elif len(words) > 3:
+                                    mid = len(words) // 2
+                                    wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                            wrapped_best_rows.append(wrapped_row)
+                        
+                        # Create table data with wrapped headers and rows
+                        best_table_data = [wrapped_headers] + wrapped_best_rows
+                        
+                        # EXACT SAME COLUMN WIDTH LOGIC AS FINAL PERFORMANCE STATISTICS TABLE
+                        page_width = 8.2*inch  # Same as Final Performance Statistics
+                        
+                        # Optimized column width distribution - EXACT SAME LOGIC
+                        if len(headers) > 8:  # If we have many columns, use optimized widths
+                            portfolio_width = 2.1*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):  # Skip portfolio column
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.6 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
+                        elif len(headers) > 6:  # Medium number of columns
+                            portfolio_width = 2.3*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                                
+                        else:  # Few columns
+                            portfolio_width = 2.0*inch
+                            remaining_width = page_width - portfolio_width
+                            
+                            col_widths = [portfolio_width]
+                            for i, header in enumerate(headers[1:], 1):
+                                header_lower = header.lower()
+                                if any(word in header_lower for word in ['value', 'portfolio', 'money', 'total']):
+                                    col_widths.append(1.7 * (remaining_width / (len(headers) - 1)))
+                                else:
+                                    col_widths.append(remaining_width / (len(headers) - 1))
+                            
+                            total_allocated = sum(col_widths)
+                            if total_allocated > page_width:
+                                scale_factor = page_width / total_allocated
+                                col_widths = [w * scale_factor for w in col_widths]
+                        
+                        # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
+                        best_table = Table(best_table_data, colWidths=col_widths)
+                        
+                        # Dynamic font sizing - EXACT SAME LOGIC
+                        num_columns = len(headers)
+                        max_header_length = max(len(header) for header in headers)
+                        
+                        if num_columns > 14:
+                            font_size = 5
+                        elif num_columns > 12:
+                            font_size = 6
+                        elif num_columns > 10:
+                            font_size = 7
+                        elif num_columns > 8:
+                            font_size = 8
+                        else:
+                            font_size = 9
+                        
+                        if max_header_length > 20:
+                            font_size = max(4, font_size - 1)
+                        
+                        best_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), font_size),
+                            ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
+                            ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                            ('TOPPADDING', (0, 0), (-1, 0), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                            ('TOPPADDING', (0, 1), (-1, -1), 2),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                            ('WORDWRAP', (0, 0), (-1, -1), True)
+                        ]))
+                        story.append(best_table)
+                        story.append(Spacer(1, 15))
+                    
+                    # Top 10 Worst Performing Portfolios
+                    story.append(PageBreak())
+                    story.append(Paragraph("3.2. Top 10 Worst Performing Portfolios by Final Value", heading_style))
+                    story.append(Spacer(1, 10))
+                    
+                    if len(top_10_worst) > 0:
+                        # Create table data with headers - EXACT SAME TEXT WRAPPING AS FINAL PERFORMANCE STATISTICS
+                        # Wrap portfolio names in the first column for worst performers
+                        wrapped_worst_rows = []
+                        for row in top_10_worst:
+                            wrapped_row = row.copy()
+                            if len(str(row[0])) > 25:  # Wrap long portfolio names
+                                words = str(row[0]).split()
+                                if len(words) > 5:
+                                    if len(words) <= 8:
+                                        mid = len(words) // 2
+                                        wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                                    else:
+                                        third = len(words) // 3
+                                        wrapped_row[0] = '\n'.join([
+                                            ' '.join(words[:third]),
+                                            ' '.join(words[third:2*third]),
+                                            ' '.join(words[2*third:])
+                                        ])
+                                elif len(words) > 3:
+                                    mid = len(words) // 2
+                                    wrapped_row[0] = '\n'.join([' '.join(words[:mid]), ' '.join(words[mid:])])
+                            wrapped_worst_rows.append(wrapped_row)
+                        
+                        worst_table_data = [wrapped_headers] + wrapped_worst_rows
+                        
+                        # EXACT SAME TABLE CREATION AND STYLING AS FINAL PERFORMANCE STATISTICS
+                        worst_table = Table(worst_table_data, colWidths=col_widths)
+                        worst_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.7, 0.3, 0.3)),  # Red header for worst
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), font_size),
+                            ('FONTSIZE', (0, 1), (-1, -1), font_size + 2),
+                            ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                            ('TOPPADDING', (0, 0), (-1, 0), 4),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                            ('TOPPADDING', (0, 1), (-1, -1), 2),
+                            ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+                            ('WORDWRAP', (0, 0), (-1, -1), True)
+                        ]))
+                        story.append(worst_table)
+                        story.append(Spacer(1, 15))
                     
             except Exception as e:
                 story.append(Paragraph(f"Error creating top performers tables: {str(e)}", styles['Normal']))
@@ -2087,7 +2013,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
         story.append(PageBreak())
         current_date_str = datetime.now().strftime("%B %d, %Y")
         story.append(Paragraph(f"4. Portfolio Allocations & Rebalancing Timers ({current_date_str})", heading_style))
-        story.append(Spacer(1, 20))
+        story.append(Spacer(1, 5))
         
         # Get snapshot data for allocations
         snapshot_data = st.session_state.get('strategy_comparison_snapshot_data', {})
@@ -2100,7 +2026,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
             
             # Add portfolio header
             story.append(Paragraph(f"Portfolio: {portfolio_name}", subheading_style))
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 2))
             
             # Create pie chart for this portfolio (since we need ALL portfolios, not just the selected one)
             try:
@@ -2177,7 +2103,7 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                     # Add to PDF - increased pie chart size for better visibility
                     story.append(Image(target_img_buffer, width=5.5*inch, height=5.5*inch))
                     
-                    # Add Next Rebalance Timer information - simple text display
+                    # Add Next Rebalance Timer information - enhanced display
                     story.append(Paragraph(f"Next Rebalance Timer - {portfolio_name}", subheading_style))
                     story.append(Spacer(1, 1))
                     
@@ -2211,6 +2137,37 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                             story.append(Paragraph("Next rebalance information not available", styles['Normal']))
                     else:
                         story.append(Paragraph("Next rebalance information not available", styles['Normal']))
+                    
+                    # Add portfolio value to the timer section
+                    try:
+                        portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                        if isinstance(portfolio_results, dict):
+                            if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                latest_value = portfolio_results['with_additions'].iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                latest_value = portfolio_results['no_additions'].iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            elif isinstance(portfolio_results, pd.Series):
+                                latest_value = portfolio_results.iloc[-1]
+                                if pd.notna(latest_value):
+                                    portfolio_value_str = f"${float(latest_value):,.2f}"
+                                else:
+                                    portfolio_value_str = "N/A"
+                            else:
+                                portfolio_value_str = "N/A"
+                        else:
+                            portfolio_value_str = "N/A"
+                        
+                        story.append(Paragraph(f"Portfolio Value: {portfolio_value_str}", styles['Normal']))
+                    except Exception as e:
+                        story.append(Paragraph("Portfolio Value: N/A", styles['Normal']))
                     
                     # Add page break after pie plot + timer to separate from allocation table
                     story.append(PageBreak())
@@ -2285,9 +2242,13 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                                                     ('LEFTPADDING', (0, 0), (-1, -1), 3),
                                                     ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-                                                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                                                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                                                    ('WORDWRAP', (0, 0), (-1, -1), True),
+                                                                                            ('TOPPADDING', (0, 0), (-1, -1), 2),
+                                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                        ('WORDWRAP', (0, 0), (-1, -1), True),
+                                        # Style the total row
+                                        ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
+                                        ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
+                                        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
                                                     # Style the total row
                                                     ('BACKGROUND', (0, -1), (-1, -1), reportlab_colors.Color(0.2, 0.4, 0.6)),
                                                     ('TEXTCOLOR', (0, -1), (-1, -1), reportlab_colors.whitesmoke),
@@ -2295,6 +2256,38 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                                 ]))
                                                 story.append(alloc_table)
                                                 story.append(Spacer(1, 5))
+                                                
+                                                # Add total value line after the allocation table
+                                                try:
+                                                    portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                                                    if isinstance(portfolio_results, dict):
+                                                        if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                                            latest_value = portfolio_results['with_additions'].iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                                            latest_value = portfolio_results['no_additions'].iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        elif isinstance(portfolio_results, pd.Series):
+                                                            latest_value = portfolio_results.iloc[-1]
+                                                            if pd.notna(latest_value):
+                                                                total_value_str = f"${float(latest_value):,.2f}"
+                                                            else:
+                                                                total_value_str = "N/A"
+                                                        else:
+                                                            total_value_str = "N/A"
+                                                    else:
+                                                        total_value_str = "N/A"
+                                                    
+                                                    story.append(Paragraph(f"Total Value: {total_value_str}", styles['Heading4']))
+                                                except Exception as e:
+                                                    story.append(Paragraph("Total Value: N/A", styles['Heading4']))
+                                                
                                                 table_created = True
                                                 break
                         except Exception as e:
@@ -2345,6 +2338,38 @@ def generate_strategy_comparison_pdf_report(custom_name=""):
                                     ]))
                                     story.append(alloc_table)
                                     story.append(Spacer(1, 5))
+                                    
+                                    # Add total value line after the allocation table
+                                    try:
+                                        portfolio_results = st.session_state.strategy_comparison_all_results.get(portfolio_name, {})
+                                        if isinstance(portfolio_results, dict):
+                                            if 'with_additions' in portfolio_results and isinstance(portfolio_results['with_additions'], pd.Series):
+                                                latest_value = portfolio_results['with_additions'].iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            elif 'no_additions' in portfolio_results and isinstance(portfolio_results['no_additions'], pd.Series):
+                                                latest_value = portfolio_results['no_additions'].iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            elif isinstance(portfolio_results, pd.Series):
+                                                latest_value = portfolio_results.iloc[-1]
+                                                if pd.notna(latest_value):
+                                                    total_value_str = f"${float(latest_value):,.2f}"
+                                                else:
+                                                    total_value_str = "N/A"
+                                            else:
+                                                total_value_str = "N/A"
+                                        else:
+                                            total_value_str = "N/A"
+                                        
+                                        story.append(Paragraph(f"Total Value: {total_value_str}", styles['Heading4']))
+                                    except Exception as e:
+                                        story.append(Paragraph("Total Value: N/A", styles['Heading4']))
+                                    
                                     table_created = True
                                 else:
                                     story.append(Paragraph("No allocation data available", styles['Normal']))
@@ -2403,6 +2428,8 @@ def check_currency_warning(tickers):
 # Initialize page-specific session state for Strategy Comparison page
 if 'strategy_comparison_page_initialized' not in st.session_state:
     st.session_state.strategy_comparison_page_initialized = True
+    # Initialize loading state
+    st.session_state.strategy_comparison_is_running = False
     # Initialize strategy-comparison specific session state
     st.session_state.strategy_comparison_portfolio_configs = [
         # 1) Equal weight portfolio (no momentum) - baseline strategy
@@ -2454,7 +2481,6 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'start_date_user': None,
             'end_date_user': None,
             'start_with': 'all',
-            'first_rebalance_strategy': 'momentum_window_complete',
             'use_momentum': True,
             'momentum_strategy': 'Classic',
             'negative_momentum_strategy': 'Cash',
@@ -2491,7 +2517,6 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'start_date_user': None,
             'end_date_user': None,
             'start_with': 'all',
-            'first_rebalance_strategy': 'momentum_window_complete',
             'use_momentum': True,
             'momentum_strategy': 'Classic',
             'negative_momentum_strategy': 'Cash',
@@ -2517,9 +2542,8 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
     # Clean up any existing portfolio configs to remove unused settings
 if 'strategy_comparison_portfolio_configs' in st.session_state:
     for config in st.session_state.strategy_comparison_portfolio_configs:
-        if isinstance(config, dict):
-            config.pop('use_relative_momentum', None)
-            config.pop('equal_if_all_negative', None)
+        config.pop('use_relative_momentum', None)
+        config.pop('equal_if_all_negative', None)
 
 # Note: portfolio selection is initialized later when the selector is created
 
@@ -2572,7 +2596,6 @@ default_configs = [
         'start_date_user': None,
         'end_date_user': None,
         'start_with': 'all',
-        'first_rebalance_strategy': 'momentum_window_complete',
         'use_momentum': True,
         'momentum_strategy': 'Classic',
         'negative_momentum_strategy': 'Cash',
@@ -2605,7 +2628,6 @@ default_configs = [
         'start_date_user': None,
         'end_date_user': None,
         'start_with': 'all',
-        'first_rebalance_strategy': 'momentum_window_complete',
         'use_momentum': True,
         'momentum_strategy': 'Classic',
         'negative_momentum_strategy': 'Cash',
@@ -2886,17 +2908,6 @@ st.set_page_config(layout="wide", page_title="Strategy Performance Comparison")
 st.title("Strategy Comparison")
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
-# Simple performance toggle
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.markdown("### 🚀 Performance Settings")
-with col2:
-    use_parallel = st.checkbox("Parallel Processing", value=True,
-                              help="Process multiple portfolios simultaneously for faster execution")
-    st.session_state.use_parallel_processing = use_parallel
-
-
-
 # Handle rerun flag first (exact same as Multi Backtest)
 active_portfolio = st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index] if 'strategy_comparison_portfolio_configs' in st.session_state and 'strategy_comparison_active_portfolio_index' in st.session_state else None
 if active_portfolio:
@@ -2912,9 +2923,6 @@ def get_trading_days(start_date, end_date):
 
 def get_dates_by_freq(freq, start, end, market_days):
     market_days = sorted(market_days)
-    
-    # Ensure market_days are timezone-naive for consistent comparison
-    market_days_naive = [d.tz_localize(None) if d.tz is not None else d for d in market_days]
     
     if freq == "market_day":
         return set(market_days)
@@ -2957,26 +2965,12 @@ def get_dates_by_freq(freq, start, end, market_days):
 
     dates = []
     for d in base:
-        # Ensure d is timezone-naive for comparison
-        d_naive = d.tz_localize(None) if d.tz is not None else d
-        idx = np.searchsorted(market_days_naive, d_naive, side='right')
-        if idx > 0 and market_days_naive[idx-1] >= d_naive:
-            dates.append(market_days[idx-1])  # Use original market_days for return
-        elif idx < len(market_days_naive):
-            dates.append(market_days[idx])  # Use original market_days for return
+        idx = np.searchsorted(market_days, d, side='right')
+        if idx > 0 and market_days[idx-1] >= d:
+            dates.append(market_days[idx-1])
+        elif idx < len(market_days):
+            dates.append(market_days[idx])
     return set(dates)
-
-def get_cached_rebalancing_dates(portfolio_name, rebalancing_frequency, sim_index):
-    """Get rebalancing dates with caching to avoid recalculation"""
-    cache_key = f"rebalancing_dates_{portfolio_name}_{rebalancing_frequency}"
-    portfolio_rebalancing_dates = st.session_state.get(cache_key)
-    
-    if portfolio_rebalancing_dates is None and sim_index is not None:
-        # Calculate and cache the rebalancing dates
-        portfolio_rebalancing_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
-        st.session_state[cache_key] = portfolio_rebalancing_dates
-    
-    return portfolio_rebalancing_dates
 
 def calculate_cagr(values, dates):
     if len(values) < 2:
@@ -3094,7 +3088,6 @@ def calculate_total_money_added(config, start_date, end_date):
     
     return initial_value + total_additions
 
-
 # -----------------------
 # Single-backtest core (adapted from your code, robust)
 # -----------------------
@@ -3148,9 +3141,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     # Get regular rebalancing dates
     dates_rebal = sorted(get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index))
     
-    # Handle first rebalance strategy - ensure first rebalance happens after momentum window completes
+    # Handle first rebalance strategy - replace first rebalance date if needed
     first_rebalance_strategy = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
-    if use_momentum and momentum_windows:
+    if first_rebalance_strategy == "momentum_window_complete" and use_momentum and momentum_windows:
         try:
             # Calculate when momentum window completes
             window_sizes = [int(w.get('lookback', 0)) for w in momentum_windows if w is not None]
@@ -3160,17 +3153,12 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             # Find the closest trading day to momentum completion
             momentum_completion_trading_day = sim_index[sim_index >= momentum_completion_date][0] if len(sim_index[sim_index >= momentum_completion_date]) > 0 else sim_index[-1]
             
-            if first_rebalance_strategy == "momentum_window_complete":
-                # Replace the first rebalancing date with momentum completion date
-                if len(dates_rebal) > 0:
-                    # Remove the first rebalancing date and add momentum completion date
-                    dates_rebal = dates_rebal[1:] if len(dates_rebal) > 1 else []
-                    dates_rebal.insert(0, momentum_completion_trading_day)
-                    dates_rebal = sorted(dates_rebal)
-            else:  # first_rebalance_strategy == "rebalancing_date"
-                # For rebalancing_date strategy, use the first available rebalancing date
-                # Don't filter out early dates - let it start as soon as possible
-                pass
+            # Replace the first rebalancing date with momentum completion date
+            if len(dates_rebal) > 0:
+                # Remove the first rebalancing date and add momentum completion date
+                dates_rebal = dates_rebal[1:] if len(dates_rebal) > 1 else []
+                dates_rebal.insert(0, momentum_completion_trading_day)
+                dates_rebal = sorted(dates_rebal)
         except Exception:
             pass  # Fall back to regular rebalancing dates
 
@@ -3613,16 +3601,6 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             if len(future_dates) > 0:
                                 div = df.loc[future_dates[0], "Dividends"]
                 var = df.loc[date, "Price_change"] if date in df.index else 0.0
-                
-                # Apply expense ratio drag if ticker has expense ratio parameter
-                if "?E=" in t:
-                    base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                    if expense_ratio > 0.0:
-                        # Apply daily expense drag: subtract daily expense ratio
-                        daily_expense_drag = expense_ratio / 100.0 / 365.25
-                        var = var - daily_expense_drag
-                        print(f"DEBUG: Applied {expense_ratio}% expense ratio to {t}, daily drag: {daily_expense_drag*100:.6f}%, adjusted return: {var*100:.4f}%")
-                
                 if include_dividends.get(t, False):
                     # Check if dividends should be collected as cash instead of reinvested
                     collect_as_cash = config.get('collect_dividends_as_cash', False)
@@ -3691,16 +3669,6 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                         if len(future_dates) > 0:
                             div = df.loc[future_dates[0], "Dividends"]
             var = df.loc[date, "Price_change"] if date in df.index else 0.0
-            
-            # Apply expense ratio drag if ticker has expense ratio parameter
-            if "?E=" in t:
-                base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                if expense_ratio > 0.0:
-                    # Apply daily expense drag: subtract daily expense ratio
-                    daily_expense_drag = expense_ratio / 100.0 / 365.25
-                    var = var - daily_expense_drag
-                    print(f"DEBUG: Applied {expense_ratio}% expense ratio to {t}, daily drag: {daily_expense_drag*100:.6f}%, adjusted return: {var*100:.4f}%")
-            
             if include_dividends.get(t, False):
                 # Check if dividends should be collected as cash instead of reinvested
                 collect_as_cash = config.get('collect_dividends_as_cash', False)
@@ -4050,7 +4018,7 @@ if 'strategy_comparison_portfolio_configs' not in st.session_state:
 if 'strategy_comparison_active_portfolio_index' not in st.session_state:
     st.session_state.strategy_comparison_active_portfolio_index = 0
 
-# Ensure all portfolios have threshold and maximum allocation settings
+# Ensure all portfolios have threshold settings
 for portfolio in st.session_state.strategy_comparison_portfolio_configs:
     if 'use_minimal_threshold' not in portfolio:
         portfolio['use_minimal_threshold'] = False
@@ -4494,8 +4462,11 @@ def update_stock_ticker(index):
             key = f"strategy_comparison_ticker_{active_index}_{index}"
             val = st.session_state.get(key, None)
             if val is not None:
+                # Convert commas to dots for decimal separators (like case conversion)
+                converted_val = val.replace(",", ".")
+                
                 # Convert the input value to uppercase
-                upper_val = val.upper()
+                upper_val = converted_val.upper()
                 portfolio_configs[active_index]['stocks'][index]['ticker'] = upper_val
                 # Update the text box's state to show the uppercase value
                 st.session_state[key] = upper_val
@@ -4989,11 +4960,9 @@ def paste_json_callback():
         
         # Update threshold settings
         st.session_state['strategy_comparison_active_use_threshold'] = strategy_comparison_config.get('use_minimal_threshold', False)
-        st.session_state['strategy_comparison_active_threshold_percent'] = strategy_comparison_config.get('minimal_threshold_percent', 0.0)
-        
-        # Update maximum allocation settings
+        st.session_state['strategy_comparison_active_threshold_percent'] = strategy_comparison_config.get('minimal_threshold_percent', 2.0)
         st.session_state['strategy_comparison_active_use_max_allocation'] = strategy_comparison_config.get('use_max_allocation', False)
-        st.session_state['strategy_comparison_active_max_allocation_percent'] = strategy_comparison_config.get('max_allocation_percent', 0.0)
+        st.session_state['strategy_comparison_active_max_allocation_percent'] = strategy_comparison_config.get('max_allocation_percent', 10.0)
         
         # Update targeted rebalancing settings
         st.session_state['strategy_comparison_active_use_targeted_rebalancing'] = strategy_comparison_config.get('use_targeted_rebalancing', False)
@@ -5284,7 +5253,8 @@ def paste_all_json_callback():
                 st.session_state['strategy_comparison_active_use_targeted_rebalancing'] = bool(processed_configs[0].get('use_targeted_rebalancing', False))
                 st.session_state['strategy_comparison_active_collect_dividends_as_cash'] = bool(processed_configs[0].get('collect_dividends_as_cash', False))
                 st.session_state['strategy_comparison_active_use_threshold'] = bool(processed_configs[0].get('use_minimal_threshold', False))
-                st.session_state['strategy_comparison_active_threshold_percent'] = float(processed_configs[0].get('minimal_threshold_percent', 0.0))
+                st.session_state['strategy_comparison_active_use_max_allocation'] = bool(processed_configs[0].get('use_max_allocation', False))
+                st.session_state['strategy_comparison_active_threshold_percent'] = float(processed_configs[0].get('minimal_threshold_percent', 2.0))
                 
                 # UPDATE GLOBAL TICKERS FROM FIRST PORTFOLIO
                 first_portfolio_stocks = processed_configs[0].get('stocks', [])
@@ -5384,7 +5354,7 @@ def update_active_portfolio_index():
         # Sync expander state (same pattern as other portfolio parameters)
         st.session_state['strategy_comparison_active_variant_expanded'] = active_portfolio.get('variant_expander_expanded', False)
         st.session_state['strategy_comparison_active_use_threshold'] = active_portfolio.get('use_minimal_threshold', False)
-        st.session_state['strategy_comparison_active_threshold_percent'] = active_portfolio.get('minimal_threshold_percent', 0.0)
+        st.session_state['strategy_comparison_active_threshold_percent'] = active_portfolio.get('minimal_threshold_percent', 2.0)
         
         # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
         if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
@@ -5602,6 +5572,8 @@ def update_use_targeted_rebalancing():
         
         st.session_state.strategy_comparison_rerun_flag = True
 
+
+
 def update_calc_beta():
     current_val = st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['calc_beta']
     new_val = st.session_state.strategy_comparison_active_calc_beta
@@ -5732,11 +5704,9 @@ def update_threshold_percent():
 
 def update_use_max_allocation():
     st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['use_max_allocation'] = st.session_state.strategy_comparison_active_use_max_allocation
-    st.session_state.strategy_comparison_rerun_flag = True
 
 def update_max_allocation_percent():
     st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['max_allocation_percent'] = st.session_state.strategy_comparison_active_max_allocation_percent
-    st.session_state.strategy_comparison_rerun_flag = True
 
 def update_collect_dividends_as_cash():
     st.session_state.strategy_comparison_portfolio_configs[st.session_state.strategy_comparison_active_portfolio_index]['collect_dividends_as_cash'] = st.session_state.strategy_comparison_active_collect_dividends_as_cash
@@ -5897,7 +5867,6 @@ if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
                 max-height: 300px;
                 overflow-y: auto;
                 border: 1px solid #ddd;
-                padding: 10px;
                 border-radius: 5px;
             }
             </style>
@@ -6341,43 +6310,32 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
 
-with st.sidebar.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
+with st.sidebar.expander("⚡ Leverage Guide", expanded=False):
     st.markdown("""
     **Leverage Format:** Use `TICKER?L=N` where N is the leverage multiplier
-    **Expense Ratio Format:** Use `TICKER?E=N` where N is the annual expense ratio percentage
     
     **Examples:**
     - **SPY?L=2** - 2x leveraged S&P 500
-    - **QQQ?L=3?E=0.84** - 3x leveraged NASDAQ-100 with 0.84% expense ratio (like TQQQ)
-    - **QQQ?E=1** - QQQ with 1% expense ratio
-    - **TLT?L=2?E=0.5** - 2x leveraged 20+ Year Treasury with 0.5% expense ratio
-    - **SPY?E=2?L=3** - Order doesn't matter: 3x leveraged S&P 500 with 2% expense ratio
-    - **QQQ?E=5** - QQQ with 5% expense ratio (high fee for testing)
-    
-    **Parameter Combinations:**
-    - **QQQ?L=3?E=0.84** - Simulates TQQQ (3x QQQ with 0.84% expense ratio)
-    - **SPY?L=2?E=0.95** - Simulates SSO (2x SPY with 0.95% expense ratio)
-    - **QQQ?E=0.2** - Simulates QQQ with 0.2% expense ratio
+    - **QQQ?L=3** - 3x leveraged NASDAQ-100  
+    - **TLT?L=2** - 2x leveraged 20+ Year Treasury
     
     **Important Notes:**
     - **Daily Reset:** Leverage resets daily (like real leveraged ETFs)
     - **Cost Drag:** Includes daily cost drag = (leverage - 1) × risk-free rate
-    - **Expense Drag:** Daily expense drag = annual_expense_ratio / 365.25
     - **Volatility Decay:** High volatility can cause significant decay over time
     - **Risk Warning:** Leveraged products are high-risk and can lose value quickly
     
     **Real Leveraged ETFs for Reference:**
-    - **SSO** - 2x S&P 500 (0.95% expense ratio)
-    - **UPRO** - 3x S&P 500 (0.95% expense ratio)
-    - **TQQQ** - 3x NASDAQ-100 (0.84% expense ratio)
-    - **TMF** - 3x 20+ Year Treasury (1.05% expense ratio)
+    - **SSO** - 2x S&P 500 (ProShares)
+    - **UPRO** - 3x S&P 500 (ProShares)
+    - **TQQQ** - 3x NASDAQ-100 (ProShares)
+    - **TMF** - 3x 20+ Year Treasury (Direxion)
     
     **Best Practices:**
     - Use for short-term strategies or hedging
     - Avoid holding for extended periods due to decay
     - Consider the underlying asset's volatility
     - Monitor risk-free rate changes affecting cost drag
-    - Factor in expense ratios for realistic performance expectations
     """)
 
 # Start with option
@@ -6416,11 +6374,7 @@ st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.subheader("Date Range Options")
 
-# Initialize session state for custom dates if not exists
-if "strategy_comparison_use_custom_dates" not in st.session_state:
-    st.session_state["strategy_comparison_use_custom_dates"] = False
-
-# Initialize date session state if not exists
+# Ensure date widgets are properly initialized to maintain state across page navigation
 if "strategy_comparison_start_date" not in st.session_state:
     st.session_state["strategy_comparison_start_date"] = date(2010, 1, 1)
 if "strategy_comparison_end_date" not in st.session_state:
@@ -6484,11 +6438,9 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['start_with'] = st.session_state.get('strategy_comparison_start_with', 'all')
             cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
             
-            # Ensure threshold and maximum allocation settings are included (read from current config)
+            # Ensure threshold settings are included (read from current config)
             cleaned_config['use_minimal_threshold'] = config.get('use_minimal_threshold', False)
             cleaned_config['minimal_threshold_percent'] = config.get('minimal_threshold_percent', 2.0)
-            cleaned_config['use_max_allocation'] = config.get('use_max_allocation', False)
-            cleaned_config['max_allocation_percent'] = config.get('max_allocation_percent', 10.0)
             
             # Ensure targeted rebalancing settings are included (read from current config)
             cleaned_config['use_targeted_rebalancing'] = config.get('use_targeted_rebalancing', False)
@@ -6759,10 +6711,10 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     This tool generates multiple portfolio variants by combining your selected options. Each variant will be a complete copy of your current portfolio with the specified changes.
     
     **🏷️ Portfolio Naming Convention:**
-    - **Format**: `Portfolio Name (Rebalancing Frequency - Momentum Strategy : When momentum not all negative and When momentum all negative - Include Beta in weighting - Include Volatility in weighting - Min Threshold - Max Allocation)`
+    - **Format**: `Portfolio Name (Rebalancing Frequency - Momentum Strategy : When momentum not all negative and When momentum all negative - Include Beta in weighting - Include Volatility in weighting)`
     - **Examples**:
-      - `My Portfolio (Quarterly - Momentum : Classic and Cash - Beta - Volatility - Min 2.00% - Max 10.00%)`
-      - `My Portfolio (Monthly - Momentum : Relative and Equal Weight - Beta - Min 3.50% - Max 15.00%)`
+      - `My Portfolio (Quarterly - Momentum : Classic and Cash - Beta - Volatility)`
+      - `My Portfolio (Monthly - Momentum : Relative and Equal Weight - Beta)`
       - `My Portfolio (Quarterly - No Momentum)`
     
     **💡 Tips**: 
@@ -6805,7 +6757,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             rebalance_options.append("Biweekly")
         if st.checkbox("Monthly", key="strategy_rebalance_monthly"):
             rebalance_options.append("Monthly")
-        if st.checkbox("Quarterly", value=True, key="strategy_rebalance_quarterly"):
+        if st.checkbox("Quarterly", key="strategy_rebalance_quarterly"):
             rebalance_options.append("Quarterly")
         if st.checkbox("Semiannually", key="strategy_rebalance_semiannually"):
             rebalance_options.append("Semiannually")
@@ -6977,14 +6929,11 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             variant_params["minimal_threshold"] = threshold_options
         elif not disable_threshold and not enable_threshold:
             st.error("⚠️ **At least one threshold value must be provided when Enable is selected!**")
-    else:
-        # When momentum is not enabled, add None as default
-        variant_params["minimal_threshold"] = [None]
     
-    # Max Allocation Filter Section - Only show when momentum is enabled
+    # Maximum Allocation Filter Section - Only show when momentum is enabled
     if use_momentum_vary:
         st.markdown("---")
-        st.markdown("**Max Allocation Filter:**")
+        st.markdown("**Maximum Allocation Filter:**")
         
         # Initialize session state for max allocation filters if not exists
         if f"max_allocation_filters_{portfolio_index}" not in st.session_state:
@@ -6995,23 +6944,23 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         
         with col_max_left:
             disable_max_allocation = st.checkbox(
-                "Disable Max Allocation Filter", 
+                "Disable Maximum Allocation Filter", 
                 value=True, 
                 key=f"disable_max_allocation_{portfolio_index}",
-                help="Keeps the max allocation filter disabled"
+                help="Keeps the maximum allocation filter disabled"
             )
         
         with col_max_right:
             enable_max_allocation = st.checkbox(
-                "Enable Max Allocation Filter", 
+                "Enable Maximum Allocation Filter", 
                 value=False, 
                 key=f"enable_max_allocation_{portfolio_index}",
-                help="Enables the max allocation filter with customizable values"
+                help="Enables the maximum allocation filter with customizable values"
             )
         
         # Validation: At least one must be selected
         if not disable_max_allocation and not enable_max_allocation:
-            st.error("⚠️ **At least one Max Allocation Filter option must be selected!**")
+            st.error("⚠️ **At least one Maximum Allocation Filter option must be selected!**")
         
         # Build max allocation options list
         max_allocation_options = []
@@ -7022,7 +6971,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         
         # If enable is selected, show max allocation input options
         if enable_max_allocation:
-            st.markdown("**Max Allocation Values:**")
+            st.markdown("**Maximum Allocation Values:**")
             
             # Add new max allocation button
             if st.button("➕ Add Max Allocation Value", key=f"add_max_allocation_{portfolio_index}"):
@@ -7036,7 +6985,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 with col_input:
                     max_allocation_value = st.number_input(
                         f"Max Allocation {i+1} (%)",
-                        min_value=0.0,
+                        min_value=0.1,
                         max_value=100.0,
                         value=max_allocation,
                         step=0.1,
@@ -7063,6 +7012,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             st.error("⚠️ **At least one max allocation value must be provided when Enable is selected!**")
     else:
         # When momentum is not enabled, add None as default
+        variant_params["minimal_threshold"] = [None]
         variant_params["max_allocation"] = [None]
     
     # Calculate total combinations
@@ -7102,9 +7052,9 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         if use_momentum_vary and "minimal_threshold" not in variant_params:
             validation_errors.append("⚠️ Select at least one **Minimal Threshold Filter** option when momentum is enabled")
         
-        # Check if max allocation filter is missing (only required when momentum is enabled)
+        # Check if maximum allocation filter is missing (only required when momentum is enabled)
         if use_momentum_vary and "max_allocation" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **Max Allocation Filter** option when momentum is enabled")
+            validation_errors.append("⚠️ Select at least one **Maximum Allocation Filter** option when momentum is enabled")
         
         # Show validation errors
         if validation_errors:
@@ -7474,7 +7424,7 @@ if "strategy_comparison_active_use_targeted_rebalancing" not in st.session_state
 if "strategy_comparison_active_use_threshold" not in st.session_state:
     st.session_state["strategy_comparison_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
 if "strategy_comparison_active_threshold_percent" not in st.session_state:
-    st.session_state["strategy_comparison_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 0.0)
+    st.session_state["strategy_comparison_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
 # Only show momentum strategy if targeted rebalancing is disabled
 if not st.session_state.get("strategy_comparison_active_use_targeted_rebalancing", False):
     st.checkbox("Use Momentum Strategy", key="strategy_comparison_active_use_momentum", on_change=update_use_momentum, help="Enables momentum-based weighting of stocks.")
@@ -7549,7 +7499,7 @@ if st.session_state.get('strategy_comparison_active_use_momentum', active_portfo
             "Minimal Threshold (%)", 
             min_value=0.1, 
             max_value=50.0, 
-            value=st.session_state.get("strategy_comparison_active_threshold_percent", 0.0), 
+            value=st.session_state.get("strategy_comparison_active_threshold_percent", 2.0), 
             step=0.1,
             key="strategy_comparison_active_threshold_percent", 
             on_change=update_threshold_percent,
@@ -7560,15 +7510,17 @@ if st.session_state.get('strategy_comparison_active_use_momentum', active_portfo
     st.markdown("---")
     st.subheader("Maximum Allocation Filter")
     
-    # Initialize session state for maximum allocation settings - ALWAYS sync with active portfolio
-    st.session_state["strategy_comparison_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
-    st.session_state["strategy_comparison_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 0.0)
+    # Initialize max allocation settings if not present
+    if "strategy_comparison_active_use_max_allocation" not in st.session_state:
+        st.session_state["strategy_comparison_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
+    if "strategy_comparison_active_max_allocation_percent" not in st.session_state:
+        st.session_state["strategy_comparison_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
     
     st.checkbox(
         "Enable Maximum Allocation Filter", 
         key="strategy_comparison_active_use_max_allocation", 
         on_change=update_use_max_allocation,
-        help="Cap individual stock allocations at the maximum percentage and redistribute excess weight to other stocks"
+        help="Cap individual stock allocations at the maximum percentage and redistribute excess weight proportionally"
     )
     
     if st.session_state.get("strategy_comparison_active_use_max_allocation", False):
@@ -7576,10 +7528,11 @@ if st.session_state.get('strategy_comparison_active_use_momentum', active_portfo
             "Maximum Allocation (%)", 
             min_value=0.1, 
             max_value=100.0, 
+            value=st.session_state.get("strategy_comparison_active_max_allocation_percent", 10.0), 
             step=0.1,
             key="strategy_comparison_active_max_allocation_percent", 
             on_change=update_max_allocation_percent,
-            help="Individual stocks will be capped at this maximum allocation percentage"
+            help="Individual stocks cannot exceed this allocation percentage. Excess weight will be redistributed proportionally to other stocks"
         )
     
     st.markdown("---")
@@ -7702,114 +7655,115 @@ if st.session_state.get('strategy_comparison_active_use_momentum', active_portfo
 else:
     # Don't clear momentum_windows - they should persist when momentum is disabled
     # so they're available when momentum is re-enabled or for variant generation
-    active_portfolio['momentum_windows'] = []
-
-# Targeted Rebalancing Section (only when momentum is disabled)
-st.markdown("---")
-st.subheader("Targeted Rebalancing")
-
-# Only show targeted rebalancing if momentum strategy is disabled
-if not st.session_state.get('strategy_comparison_active_use_momentum', False):
+    
+    # Targeted Rebalancing Section (only when momentum is disabled)
+    st.markdown("---")
+    st.subheader("Targeted Rebalancing")
+    
+    # Always show the targeted rebalancing checkbox, but disable it if momentum is enabled
+    momentum_enabled = st.session_state.get('strategy_comparison_active_use_momentum', False)
     st.checkbox(
         "Enable Targeted Rebalancing", 
         key="strategy_comparison_active_use_targeted_rebalancing", 
         on_change=update_use_targeted_rebalancing,
-        help="Automatically rebalance when ticker allocations exceed min/max thresholds"
+        disabled=momentum_enabled,
+        help="Automatically rebalance when ticker allocations exceed min/max thresholds" + (" (disabled when momentum strategy is enabled)" if momentum_enabled else "")
     )
-else:
-    # Hide targeted rebalancing when momentum strategy is enabled
-    st.session_state["strategy_comparison_active_use_targeted_rebalancing"] = False
-
-# Update active portfolio with current targeted rebalancing state
-active_portfolio['use_targeted_rebalancing'] = st.session_state.get("strategy_comparison_active_use_targeted_rebalancing", False)
-
-if st.session_state.get("strategy_comparison_active_use_targeted_rebalancing", False):
-    st.markdown("**Configure per-ticker allocation limits:**")
-    st.markdown("💡 *Example: TQQQ 70-40% means if TQQQ goes above 70%, sell to buy others; if below 40%, buy TQQQ with others*")
     
-    # Get current tickers
-    stocks_list = active_portfolio.get('stocks', [])
-    current_tickers = [s['ticker'] for s in stocks_list if s.get('ticker')]
+    # If momentum is enabled, ensure targeted rebalancing is disabled
+    if momentum_enabled:
+        st.session_state["strategy_comparison_active_use_targeted_rebalancing"] = False
     
-    if current_tickers:
-        # Initialize targeted rebalancing settings for each ticker
-        if 'targeted_rebalancing_settings' not in active_portfolio:
-            active_portfolio['targeted_rebalancing_settings'] = {}
+    # Update active portfolio with current targeted rebalancing state
+    active_portfolio['use_targeted_rebalancing'] = st.session_state.get("strategy_comparison_active_use_targeted_rebalancing", False)
+    
+    if st.session_state.get("strategy_comparison_active_use_targeted_rebalancing", False):
+        st.markdown("**Configure per-ticker allocation limits:**")
+        st.markdown("💡 *Example: TQQQ 70-40% means if TQQQ goes above 70%, sell to buy others; if below 40%, buy TQQQ with others*")
         
-        for ticker in current_tickers:
-            if ticker not in active_portfolio.get('targeted_rebalancing_settings', {}):
-                if 'targeted_rebalancing_settings' not in active_portfolio:
-                    active_portfolio['targeted_rebalancing_settings'] = {}
-                active_portfolio['targeted_rebalancing_settings'][ticker] = {
-                    'enabled': False,
-                    'min_allocation': 0.0,
-                    'max_allocation': 100.0
-                }
+        # Get current tickers
+        stocks_list = active_portfolio.get('stocks', [])
+        current_tickers = [s['ticker'] for s in stocks_list if s.get('ticker')]
         
-        # Create columns for ticker settings
-        cols = st.columns(min(len(current_tickers), 3))
-        
-        for i, ticker in enumerate(current_tickers):
-            with cols[i % 3]:
-                st.markdown(f"**{ticker}**")
-                
-                # Enable/disable for this ticker
-                enabled_key = f"targeted_rebalancing_enabled_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
-                if enabled_key not in st.session_state:
-                    st.session_state[enabled_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['enabled']
-                
-                # Create callback function for this specific ticker
-                def create_ticker_callback(t):
-                    def ticker_callback():
-                        # Update portfolio settings immediately when checkbox changes
-                        active_portfolio['targeted_rebalancing_settings'][t]['enabled'] = st.session_state[enabled_key]
-                    return ticker_callback
-                
-                enabled = st.checkbox(
-                    "Enable", 
-                    key=enabled_key,
-                    on_change=create_ticker_callback(ticker),
-                    help=f"Enable targeted rebalancing for {ticker}"
-                )
-                # ALWAYS update portfolio settings to match session state (even if checkbox wasn't clicked)
-                active_portfolio['targeted_rebalancing_settings'][ticker]['enabled'] = st.session_state[enabled_key]
-                
-                if st.session_state[enabled_key]:
-                    # Max allocation (on top)
-                    max_key = f"targeted_rebalancing_max_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
-                    if max_key not in st.session_state:
-                        st.session_state[max_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['max_allocation']
+        if current_tickers:
+            # Initialize targeted rebalancing settings for each ticker
+            if 'targeted_rebalancing_settings' not in active_portfolio:
+                active_portfolio['targeted_rebalancing_settings'] = {}
+            
+            for ticker in current_tickers:
+                if ticker not in active_portfolio.get('targeted_rebalancing_settings', {}):
+                    if 'targeted_rebalancing_settings' not in active_portfolio:
+                        active_portfolio['targeted_rebalancing_settings'] = {}
+                    active_portfolio['targeted_rebalancing_settings'][ticker] = {
+                        'enabled': False,
+                        'min_allocation': 0.0,
+                        'max_allocation': 100.0
+                    }
+            
+            # Create columns for ticker settings
+            cols = st.columns(min(len(current_tickers), 3))
+            
+            for i, ticker in enumerate(current_tickers):
+                with cols[i % 3]:
+                    st.markdown(f"**{ticker}**")
                     
-                    max_allocation = st.number_input(
-                        "Max %", 
-                        min_value=0.0, 
-                        max_value=100.0, 
-                        step=0.1,
-                        key=max_key,
-                        help=f"Maximum allocation percentage for {ticker}"
+                    # Enable/disable for this ticker
+                    enabled_key = f"targeted_rebalancing_enabled_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
+                    if enabled_key not in st.session_state:
+                        st.session_state[enabled_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['enabled']
+                    
+                    # Create callback function for this specific ticker
+                    def create_ticker_callback(t):
+                        def ticker_callback():
+                            # Update portfolio settings immediately when checkbox changes
+                            active_portfolio['targeted_rebalancing_settings'][t]['enabled'] = st.session_state[enabled_key]
+                        return ticker_callback
+                    
+                    enabled = st.checkbox(
+                        "Enable", 
+                        key=enabled_key,
+                        on_change=create_ticker_callback(ticker),
+                        help=f"Enable targeted rebalancing for {ticker}"
                     )
-                    active_portfolio['targeted_rebalancing_settings'][ticker]['max_allocation'] = max_allocation
+                    # ALWAYS update portfolio settings to match session state (even if checkbox wasn't clicked)
+                    active_portfolio['targeted_rebalancing_settings'][ticker]['enabled'] = st.session_state[enabled_key]
                     
-                    # Min allocation (below)
-                    min_key = f"targeted_rebalancing_min_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
-                    if min_key not in st.session_state:
-                        st.session_state[min_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['min_allocation']
-                    
-                    min_allocation = st.number_input(
-                        "Min %", 
-                        min_value=0.0, 
-                        max_value=100.0, 
-                        step=0.1,
-                        key=min_key,
-                        help=f"Minimum allocation percentage for {ticker}"
-                    )
-                    active_portfolio['targeted_rebalancing_settings'][ticker]['min_allocation'] = min_allocation
-                    
-                    # Validation
-                    if min_allocation >= max_allocation:
-                        st.error(f"Min % must be less than Max % for {ticker}")
-    else:
-        st.info("Add tickers to configure targeted rebalancing settings.")
+                    if st.session_state[enabled_key]:
+                        # Max allocation (on top)
+                        max_key = f"targeted_rebalancing_max_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
+                        if max_key not in st.session_state:
+                            st.session_state[max_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['max_allocation']
+                        
+                        max_allocation = st.number_input(
+                            "Max %", 
+                            min_value=0.0, 
+                            max_value=100.0, 
+                            step=0.1,
+                            key=max_key,
+                            help=f"Maximum allocation percentage for {ticker}"
+                        )
+                        active_portfolio['targeted_rebalancing_settings'][ticker]['max_allocation'] = max_allocation
+                        
+                        # Min allocation (below)
+                        min_key = f"targeted_rebalancing_min_{ticker}_{st.session_state.strategy_comparison_active_portfolio_index}"
+                        if min_key not in st.session_state:
+                            st.session_state[min_key] = active_portfolio['targeted_rebalancing_settings'][ticker]['min_allocation']
+                        
+                        min_allocation = st.number_input(
+                            "Min %", 
+                            min_value=0.0, 
+                            max_value=100.0, 
+                            step=0.1,
+                            key=min_key,
+                            help=f"Minimum allocation percentage for {ticker}"
+                        )
+                        active_portfolio['targeted_rebalancing_settings'][ticker]['min_allocation'] = min_allocation
+                        
+                        # Validation
+                        if min_allocation >= max_allocation:
+                            st.error(f"Min % must be less than Max % for {ticker}")
+        else:
+            st.info("Add tickers to configure targeted rebalancing settings.")
 
 with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     # Clean portfolio config for export by removing unused settings
@@ -8013,6 +7967,9 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
 if st.session_state.get('strategy_comparison_run_backtest', False):
     st.session_state.strategy_comparison_run_backtest = False
     
+    # Set loading state to True
+    st.session_state.strategy_comparison_is_running = True
+    
     # Pre-backtest validation check for all portfolios
     configs_to_run = st.session_state.strategy_comparison_portfolio_configs
     valid_configs = True
@@ -8172,7 +8129,7 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             progress_bar.progress(1.0, text="Executing multi-strategy backtest analysis...")
             
             # =============================================================================
-            # SIMPLE, FAST, AND RELIABLE STRATEGY PROCESSING
+            # SIMPLE, FAST, AND RELIABLE STRATEGY PROCESSING (NO CACHE VERSION)
             # =============================================================================
             
             # Initialize results storage
@@ -8183,7 +8140,7 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             successful_strategies = 0
             failed_strategies = []
             
-            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability...**")
+            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability (NO CACHE)...**")
             
             # Process strategies one by one with robust error handling
             for i, cfg in enumerate(st.session_state.strategy_comparison_portfolio_configs, start=1):
@@ -8390,28 +8347,28 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             def scale_pct(val):
                 if val is None or np.isnan(val):
                     return np.nan
-                # Only scale if value is between -1 and 1 (decimal)
-                if -1.5 < val < 1.5:
-                    return val * 100
-                return val
+                    # Only scale if value is between -1 and 1 (decimal)
+                    if -1.5 < val < 1.5:
+                        return val * 100
+                    return val
 
-            def clamp_stat(val, stat_type):
-                if val is None or np.isnan(val):
-                    return np.nan
-                v = scale_pct(val)
-                # Clamp ranges for each stat type
-                if stat_type in ["CAGR", "Volatility", "Total Return"]:
-                    if v < 0 or v > 100:
+                def clamp_stat(val, stat_type):
+                    if val is None or np.isnan(val):
                         return np.nan
-                elif stat_type == "MWRR":
-                    # MWRR can be negative or exceed 100%, so don't clamp it
-                    pass
-                elif stat_type == "MaxDrawdown":
-                    if v < -100 or v > 0:
-                        return np.nan
-                return f"{v:.2f}%" if stat_type in ["CAGR", "MaxDrawdown", "Volatility", "MWRR", "Total Return"] else f"{v:.3f}" if isinstance(v, float) else v
+                    v = scale_pct(val)
+                    # Clamp ranges for each stat type
+                    if stat_type in ["CAGR", "Volatility", "Total Return"]:
+                        if v < 0 or v > 100:
+                            return np.nan
+                    elif stat_type == "MWRR":
+                        # MWRR can be negative or exceed 100%, so don't clamp it
+                        pass
+                    elif stat_type == "MaxDrawdown":
+                        if v < -100 or v > 0:
+                            return np.nan
+                    return f"{v:.2f}%" if stat_type in ["CAGR", "MaxDrawdown", "Volatility", "MWRR", "Total Return"] else f"{v:.3f}" if isinstance(v, float) else v
 
-            # Calculate total return (no additions)
+                # Calculate total return (no additions)
                 total_return = None
                 if len(stats_values) > 0:
                     initial_val = stats_values[0]
@@ -9841,7 +9798,8 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     key="strategy_comparison_simple_portfolio_selector", 
                     help='Choose which portfolio to inspect in detail', 
                     label_visibility='collapsed',
-                    on_change=update_portfolio_selection
+                    on_change=update_portfolio_selection,
+                    format_func=lambda x: x  # Display full names without truncation
                 )
                 
                 # Use the persisted state value (updated by callback)
@@ -9862,28 +9820,24 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 st.markdown("---")
                 st.markdown(f"**Historical Allocations for {selected_portfolio_detail}**")
                 # Ensure proper DataFrame structure with explicit column names
-                # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
-                allocation_data = st.session_state.strategy_comparison_all_allocations[selected_portfolio_detail]
-                all_tickers = set()
-                for date, alloc_dict in allocation_data.items():
-                    all_tickers.update(alloc_dict.keys())
+                allocations_df_raw = pd.DataFrame(st.session_state.strategy_comparison_all_allocations[selected_portfolio_detail]).T
                 
-                # Create a complete allocation data structure with all tickers for all dates
-                complete_allocation_data = {}
-                for date, alloc_dict in allocation_data.items():
-                    complete_allocation_data[date] = {}
-                    for ticker in all_tickers:
-                        if ticker in alloc_dict:
-                            complete_allocation_data[date][ticker] = alloc_dict[ticker]
-                        else:
-                            # Fill missing tickers with 0
-                            complete_allocation_data[date][ticker] = 0.0
-                
-                allocations_df_raw = pd.DataFrame(complete_allocation_data).T
+                # Handle case where only CASH exists - ensure column name is preserved
+                if allocations_df_raw.empty or (len(allocations_df_raw.columns) == 1 and allocations_df_raw.columns[0] is None):
+                    # Reconstruct DataFrame with proper column names
+                    processed_data = {}
+                    for date, alloc_dict in st.session_state.strategy_comparison_all_allocations[selected_portfolio_detail].items():
+                        processed_data[date] = {}
+                        for ticker, value in alloc_dict.items():
+                            if ticker is None:
+                                processed_data[date]['CASH'] = value
+                            else:
+                                processed_data[date][ticker] = value
+                    allocations_df_raw = pd.DataFrame(processed_data).T
                 
                 allocations_df_raw.index.name = "Date"
                 
-                # Corrected styling logic for alternating row colors (no green background for Historical Allocations)
+                # Corrected styling logic for alternating row colors
                 def highlight_rows_by_index(s):
                     is_even_row = allocations_df_raw.index.get_loc(s.name) % 2 == 0
                     bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
@@ -9899,31 +9853,30 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 st.markdown("---")
                 st.markdown(f"**Momentum Metrics and Calculated Weights for {selected_portfolio_detail}**")
 
-                # Process metrics data directly - EXACT SAME AS PAGE 7
                 metrics_records = []
                 for date, tickers_data in st.session_state.strategy_comparison_all_metrics[selected_portfolio_detail].items():
-                        # Add all asset lines
-                        asset_weights = []
-                        for ticker, data in tickers_data.items():
-                            # Handle None ticker as CASH
-                            display_ticker = 'CASH' if ticker is None else ticker
-                            if display_ticker != 'CASH':
-                                asset_weights.append(data.get('Calculated_Weight', 0))
-                            # Filter out any internal-only keys (e.g., 'Composite') so they don't show in the UI
-                            filtered_data = {k: v for k, v in (data or {}).items() if k != 'Composite'}
-                            
-                            # Check if momentum is used for this portfolio
-                            portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
-                            portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                            use_momentum = portfolio_cfg.get('use_momentum', True) if portfolio_cfg else True
-                            
-                            # If momentum is not used, replace Calculated_Weight with target_allocation
-                            if not use_momentum:
-                                if 'target_allocation' in filtered_data:
-                                    filtered_data['Calculated_Weight'] = filtered_data['target_allocation']
-                                else:
-                                    # If target_allocation is not available, use the entered allocations from portfolio_cfg
-                                    ticker_name = display_ticker if display_ticker != 'CASH' else None
+                    # Add all asset lines
+                    asset_weights = []
+                    for ticker, data in tickers_data.items():
+                        # Handle None ticker as CASH
+                        display_ticker = 'CASH' if ticker is None else ticker
+                        if display_ticker != 'CASH':
+                            asset_weights.append(data.get('Calculated_Weight', 0))
+                        # Filter out any internal-only keys (e.g., 'Composite') so they don't show in the UI
+                        filtered_data = {k: v for k, v in (data or {}).items() if k != 'Composite'}
+                        
+                        # Check if momentum is used for this portfolio
+                        portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
+                        portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                        use_momentum = portfolio_cfg.get('use_momentum', True) if portfolio_cfg else True
+                        
+                        # If momentum is not used, replace Calculated_Weight with target_allocation
+                        if not use_momentum:
+                            if 'target_allocation' in filtered_data:
+                                filtered_data['Calculated_Weight'] = filtered_data['target_allocation']
+                            else:
+                                # If target_allocation is not available, use the entered allocations from portfolio_cfg
+                                ticker_name = display_ticker if display_ticker != 'CASH' else None
                                 if ticker_name and portfolio_cfg:
                                     # Find the stock in portfolio_cfg and use its allocation
                                     for stock in portfolio_cfg.get('stocks', []):
@@ -9935,54 +9888,45 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                     total_alloc = sum(stock.get('allocation', 0) for stock in portfolio_cfg.get('stocks', []))
                                     filtered_data['Calculated_Weight'] = max(0, 1.0 - total_alloc)
                         
-                            record = {'Date': date, 'Ticker': display_ticker, **filtered_data}
-                            metrics_records.append(record)
-                        
-                        # Add CASH row only if it's significant (more than 5% allocation)
-                        # This prevents showing CASH for small cash balances
-                        total_calculated_weight = sum(asset_weights)
-                        cash_allocation = 1.0 - total_calculated_weight
-                        
-                        if cash_allocation > 0.05:  # Only show CASH if it's more than 5%
-                            cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': cash_allocation}
-                            metrics_records.append(cash_record)
+                        record = {'Date': date, 'Ticker': display_ticker, **filtered_data}
+                        metrics_records.append(record)
                     
-                        # Ensure CASH line is added if there's non-zero cash in allocations
-                        allocs_for_portfolio = st.session_state.strategy_comparison_all_allocations.get(selected_portfolio_detail) if 'strategy_comparison_all_allocations' in st.session_state else None
-                        if allocs_for_portfolio and date in allocs_for_portfolio:
-                            cash_alloc = allocs_for_portfolio[date].get('CASH', 0)
-                            if cash_alloc > 0:
-                                # Check if CASH is already in metrics_records for this date
-                                cash_exists = any(record['Date'] == date and record['Ticker'] == 'CASH' for record in metrics_records)
-                                if not cash_exists:
-                                    # Add CASH line to metrics
-                                    # Check if momentum is used to determine which weight to show
-                                    portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
-                                    portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                                    use_momentum = portfolio_cfg.get('use_momentum', True) if portfolio_cfg else True
-                                    
-                                    if not use_momentum:
-                                        # When momentum is not used, calculate CASH allocation from entered allocations
-                                        total_alloc = sum(stock.get('allocation', 0) for stock in portfolio_cfg.get('stocks', []))
-                                        cash_weight = max(0, 1.0 - total_alloc)
-                                        cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': cash_weight}
-                                    else:
-                                        cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': cash_alloc}
-                                    metrics_records.append(cash_record)
+                    # Ensure CASH line is added if there's non-zero cash in allocations
+                    allocs_for_portfolio = st.session_state.strategy_comparison_all_allocations.get(selected_portfolio_detail) if 'strategy_comparison_all_allocations' in st.session_state else None
+                    if allocs_for_portfolio and date in allocs_for_portfolio:
+                        cash_alloc = allocs_for_portfolio[date].get('CASH', 0)
+                        if cash_alloc > 0:
+                            # Check if CASH is already in metrics_records for this date
+                            cash_exists = any(record['Date'] == date and record['Ticker'] == 'CASH' for record in metrics_records)
+                            if not cash_exists:
+                                # Add CASH line to metrics
+                                # Check if momentum is used to determine which weight to show
+                                portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
+                                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                                use_momentum = portfolio_cfg.get('use_momentum', True) if portfolio_cfg else True
+                                
+                                if not use_momentum:
+                                    # When momentum is not used, calculate CASH allocation from entered allocations
+                                    total_alloc = sum(stock.get('allocation', 0) for stock in portfolio_cfg.get('stocks', []))
+                                    cash_weight = max(0, 1.0 - total_alloc)
+                                    cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': cash_weight}
+                                else:
+                                    cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': cash_alloc}
+                                metrics_records.append(cash_record)
                     
-                        # Add CASH line if fully allocated to cash (100%) or all asset weights are 0% (fallback logic)
-                        cash_line_needed = False
-                        if 'CASH' in tickers_data or None in tickers_data:
-                            cash_data = tickers_data.get('CASH', tickers_data.get(None, {}))
-                            cash_weight = cash_data.get('Calculated_Weight', 0)
-                            if abs(cash_weight - 1.0) < 1e-6:  # 100% in decimal
-                                cash_line_needed = True
-                        if all(w == 0 for w in asset_weights) and asset_weights:
+                    # Add CASH line if fully allocated to cash (100%) or all asset weights are 0% (fallback logic)
+                    cash_line_needed = False
+                    if 'CASH' in tickers_data or None in tickers_data:
+                        cash_data = tickers_data.get('CASH', tickers_data.get(None, {}))
+                        cash_weight = cash_data.get('Calculated_Weight', 0)
+                        if abs(cash_weight - 1.0) < 1e-6:  # 100% in decimal
                             cash_line_needed = True
-                        if cash_line_needed and 'CASH' not in [r['Ticker'] for r in metrics_records if r['Date'] == date]:
-                            # If no explicit CASH data, create a default line
-                            cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': 1.0}
-                            metrics_records.append(cash_record)
+                    if all(w == 0 for w in asset_weights) and asset_weights:
+                        cash_line_needed = True
+                    if cash_line_needed and 'CASH' not in [r['Ticker'] for r in metrics_records if r['Date'] == date]:
+                        # If no explicit CASH data, create a default line
+                        cash_record = {'Date': date, 'Ticker': 'CASH', 'Calculated_Weight': 1.0}
+                        metrics_records.append(cash_record)
 
                 if metrics_records:
                     metrics_df = pd.DataFrame(metrics_records)
@@ -10131,45 +10075,18 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     """, unsafe_allow_html=True)
 
                     st.dataframe(styler_metrics, use_container_width=True)
-                    
 
                     # --- Allocation plots: Final allocation and last rebalance allocation ---
                     allocs_for_portfolio = st.session_state.strategy_comparison_all_allocations.get(selected_portfolio_detail) if 'strategy_comparison_all_allocations' in st.session_state else None
                     if allocs_for_portfolio:
                         try:
-                                # Sort allocation dates
-                                alloc_dates = sorted(list(allocs_for_portfolio.keys()))
-                                if len(alloc_dates) == 0:
-                                    st.info("No allocation history available to plot.")
-                                else:
-                                    final_date = alloc_dates[-1]
-                                    
-                                    # Find the actual last rebalance date by looking at the backtest results
-                                    # The last rebalance date should be from the actual rebalancing dates, not just any date
-                                    last_rebal_date = None
-                                    if 'strategy_comparison_all_results' in st.session_state and selected_portfolio_detail in st.session_state.strategy_comparison_all_results:
-                                        portfolio_results = st.session_state.strategy_comparison_all_results[selected_portfolio_detail]
-                                        if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
-                                            # Get the simulation index (actual trading days)
-                                            sim_index = portfolio_results['with_additions'].index
-                                            # Get the rebalancing frequency to calculate actual rebalance dates
-                                            portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
-                                            portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                                            if portfolio_cfg:
-                                                rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'none')
-                                                # Get actual rebalancing dates
-                                                actual_rebal_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
-                                                if actual_rebal_dates:
-                                                    # Find the most recent actual rebalance date that's in our allocation data
-                                                    actual_rebal_dates_sorted = sorted(list(actual_rebal_dates))
-                                                    for rebal_date in reversed(actual_rebal_dates_sorted):
-                                                        if rebal_date in allocs_for_portfolio:
-                                                            last_rebal_date = rebal_date
-                                                            break
-                                    
-                                    # Fallback to second-to-last date if we couldn't find an actual rebalance date
-                                    if last_rebal_date is None:
-                                        last_rebal_date = alloc_dates[-2] if len(alloc_dates) > 1 else alloc_dates[-1]
+                            # Sort allocation dates
+                            alloc_dates = sorted(list(allocs_for_portfolio.keys()))
+                            if len(alloc_dates) == 0:
+                                st.info("No allocation history available to plot.")
+                            else:
+                                final_date = alloc_dates[-1]
+                                last_rebal_date = alloc_dates[-2] if len(alloc_dates) > 1 else alloc_dates[-1]
 
                                 # Keep original dates for data retrieval
                                 final_date_original = final_date
@@ -10211,31 +10128,11 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
 
                                 # Add timer for next rebalance date
                                 try:
-                                    # Get the actual last rebalance date from the backtest results
-                                    last_rebal_date_for_timer = None
-                                    if 'strategy_comparison_all_results' in st.session_state and selected_portfolio_detail in st.session_state.strategy_comparison_all_results:
-                                        portfolio_results = st.session_state.strategy_comparison_all_results[selected_portfolio_detail]
-                                        if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
-                                            # Get the simulation index (actual trading days)
-                                            sim_index = portfolio_results['with_additions'].index
-                                            # Get the rebalancing frequency to calculate actual rebalance dates
-                                            portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
-                                            portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                                            if portfolio_cfg:
-                                                rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'none')
-                                                # Get actual rebalancing dates
-                                                actual_rebal_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
-                                                if actual_rebal_dates:
-                                                    # Find the most recent actual rebalance date that's in our allocation data
-                                                    actual_rebal_dates_sorted = sorted(list(actual_rebal_dates))
-                                                    for rebal_date in reversed(actual_rebal_dates_sorted):
-                                                        if rebal_date in allocs_for_portfolio:
-                                                            last_rebal_date_for_timer = rebal_date
-                                                            break
-                                    
-                                    # Fallback to last allocation date if we couldn't find an actual rebalance date
-                                    if last_rebal_date_for_timer is None and len(alloc_dates) >= 1:
-                                        last_rebal_date_for_timer = alloc_dates[-1]
+                                    # Get the last rebalance date from allocation history
+                                    if len(alloc_dates) > 1:
+                                        last_rebal_date_for_timer = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
+                                    else:
+                                        last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
                                     
                                     # Get rebalancing frequency from portfolio config
                                     portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
@@ -10387,31 +10284,10 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                                     allocs_for_portfolio = st.session_state.strategy_comparison_all_allocations.get(portfolio_name) if 'strategy_comparison_all_allocations' in st.session_state else None
                                                     if allocs_for_portfolio:
                                                         alloc_dates = sorted(list(allocs_for_portfolio.keys()))
-                                                        # Get the actual last rebalance date from the backtest results
-                                                        last_rebal_date_for_timer = None
-                                                        if 'strategy_comparison_all_results' in st.session_state and portfolio_name in st.session_state.strategy_comparison_all_results:
-                                                            portfolio_results = st.session_state.strategy_comparison_all_results[portfolio_name]
-                                                            if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
-                                                                # Get the simulation index (actual trading days)
-                                                                sim_index = portfolio_results['with_additions'].index
-                                                                # Get the rebalancing frequency to calculate actual rebalance dates
-                                                                portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
-                                                                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
-                                                                if portfolio_cfg:
-                                                                    rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'none')
-                                                                    # Get actual rebalancing dates
-                                                                    actual_rebal_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
-                                                                    if actual_rebal_dates:
-                                                                        # Find the most recent actual rebalance date that's in our allocation data
-                                                                        actual_rebal_dates_sorted = sorted(list(actual_rebal_dates))
-                                                                        for rebal_date in reversed(actual_rebal_dates_sorted):
-                                                                            if rebal_date in allocs_for_portfolio:
-                                                                                last_rebal_date_for_timer = rebal_date
-                                                                                break
-                                                        
-                                                        # Fallback to last allocation date if we couldn't find an actual rebalance date
-                                                        if last_rebal_date_for_timer is None and len(alloc_dates) >= 1:
-                                                            last_rebal_date_for_timer = alloc_dates[-1]
+                                                        if len(alloc_dates) > 1:
+                                                            last_rebal_date_for_timer = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
+                                                        else:
+                                                            last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
                                                     else:
                                                         last_rebal_date_for_timer = None
                                                     
@@ -11341,41 +11217,22 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                             # Get last rebalance date for this portfolio
                                             last_rebal_date = last_rebalance_dates.get(portfolio_name)
                                             
-                                            if rebal_freq != 'none':
+                                            if last_rebal_date and rebal_freq != 'none':
                                                 # Calculate next rebalance date for this portfolio
-                                                if last_rebal_date:
-                                                    # Use last rebalance date if available
-                                                    if rebal_freq == '1 week':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(weeks=1)
-                                                    elif rebal_freq == '2 weeks':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(weeks=2)
-                                                    elif rebal_freq == '1 month':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(days=30)
-                                                    elif rebal_freq == '3 months':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(days=90)
-                                                    elif rebal_freq == '6 months':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(days=180)
-                                                    elif rebal_freq == '1 year':
-                                                        next_rebalance_datetime_port = last_rebal_date + timedelta(days=365)
-                                                    else:
-                                                        next_rebalance_datetime_port = None
+                                                if rebal_freq == '1 week':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(weeks=1)
+                                                elif rebal_freq == '2 weeks':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(weeks=2)
+                                                elif rebal_freq == '1 month':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(days=30)
+                                                elif rebal_freq == '3 months':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(days=90)
+                                                elif rebal_freq == '6 months':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(days=180)
+                                                elif rebal_freq == '1 year':
+                                                    next_rebalance_datetime_port = last_rebal_date + timedelta(days=365)
                                                 else:
-                                                    # No last rebalance date, calculate from today
-                                                    today = datetime.now()
-                                                    if rebal_freq == '1 week':
-                                                        next_rebalance_datetime_port = today + timedelta(weeks=1)
-                                                    elif rebal_freq == '2 weeks':
-                                                        next_rebalance_datetime_port = today + timedelta(weeks=2)
-                                                    elif rebal_freq == '1 month':
-                                                        next_rebalance_datetime_port = today + timedelta(days=30)
-                                                    elif rebal_freq == '3 months':
-                                                        next_rebalance_datetime_port = today + timedelta(days=90)
-                                                    elif rebal_freq == '6 months':
-                                                        next_rebalance_datetime_port = today + timedelta(days=180)
-                                                    elif rebal_freq == '1 year':
-                                                        next_rebalance_datetime_port = today + timedelta(days=365)
-                                                    else:
-                                                        next_rebalance_datetime_port = None
+                                                    next_rebalance_datetime_port = None
                                                 
                                                 if next_rebalance_datetime_port:
                                                     time_until_port = next_rebalance_datetime_port - datetime.now()
@@ -11885,11 +11742,99 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                     all_tickers.add(ticker)
                         all_tickers = sorted(list(all_tickers))
                         
-                        # Fill missing values with 0 for unavailable assets (instead of forward fill)
-                        alloc_df = alloc_df.fillna(0)
+                        # Calculate actual daily drifted allocations based on portfolio values and asset performance
+                        # Get the date range from the backtest results
+                        if 'strategy_comparison_all_results' in st.session_state and selected_portfolio_evolution in st.session_state.strategy_comparison_all_results:
+                            portfolio_results = st.session_state.strategy_comparison_all_results[selected_portfolio_evolution]
+                            if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
+                                # Get the full date range from the portfolio results
+                                full_date_range = portfolio_results['with_additions'].index
+                                portfolio_values = portfolio_results['with_additions']
+                            else:
+                                # Fallback to allocation dates
+                                full_date_range = pd.to_datetime(list(allocs_data.keys())).sort_values()
+                                portfolio_values = None
+                        else:
+                            # Fallback to allocation dates
+                            full_date_range = pd.to_datetime(list(allocs_data.keys())).sort_values()
+                            portfolio_values = None
                         
-                        # Convert to percentages - same as page 1
-                        alloc_df = alloc_df * 100
+                        # Get raw price data for calculating daily allocations
+                        raw_data = st.session_state.get('strategy_comparison_raw_data', {})
+                        
+                        # Create a DataFrame with all dates
+                        daily_alloc_df = pd.DataFrame(index=full_date_range)
+                        
+                        # Get the most recent rebalancing date and allocations
+                        most_recent_rebal_date = None
+                        most_recent_allocations = {}
+                        
+                        for date, allocs in allocs_data.items():
+                            date_obj = pd.to_datetime(date)
+                            if most_recent_rebal_date is None or date_obj > most_recent_rebal_date:
+                                most_recent_rebal_date = date_obj
+                                most_recent_allocations = allocs.copy()
+                        
+                        if most_recent_rebal_date is not None and portfolio_values is not None:
+                            # Calculate shares for each ticker at the most recent rebalancing
+                            ticker_shares = {}
+                            portfolio_value_at_rebal = portfolio_values[most_recent_rebal_date]
+                            
+                            for ticker, allocation in most_recent_allocations.items():
+                                if ticker is not None and ticker != 'CASH' and allocation > 0:
+                                    if ticker in raw_data and isinstance(raw_data[ticker], pd.DataFrame) and 'Close' in raw_data[ticker].columns:
+                                        price_data = raw_data[ticker]['Close']
+                                        if most_recent_rebal_date in price_data.index:
+                                            price_at_rebal = price_data[most_recent_rebal_date]
+                                            if price_at_rebal > 0:
+                                                allocation_value = portfolio_value_at_rebal * allocation
+                                                ticker_shares[ticker] = allocation_value / price_at_rebal
+                            
+                            # Calculate daily allocations for each ticker
+                            for ticker in all_tickers:
+                                if ticker == 'CASH':
+                                    continue
+                                
+                                if ticker in ticker_shares and ticker in raw_data:
+                                    price_data = raw_data[ticker]['Close']
+                                    price_data = price_data.reindex(full_date_range, method='ffill')
+                                    
+                                    daily_allocations = []
+                                    for date in full_date_range:
+                                        if date >= most_recent_rebal_date and date in price_data.index:
+                                            current_price = price_data[date]
+                                            if current_price > 0 and ticker_shares[ticker] > 0:
+                                                # Calculate current value of this ticker
+                                                current_value = ticker_shares[ticker] * current_price
+                                                
+                                                # Calculate current portfolio value
+                                                if date in portfolio_values.index:
+                                                    current_portfolio_value = portfolio_values[date]
+                                                    
+                                                    # Calculate current allocation percentage
+                                                    if current_portfolio_value > 0:
+                                                        current_allocation = current_value / current_portfolio_value
+                                                    else:
+                                                        current_allocation = 0
+                                                else:
+                                                    current_allocation = 0
+                                            else:
+                                                current_allocation = 0
+                                        else:
+                                            current_allocation = 0
+                                        
+                                        daily_allocations.append(current_allocation)
+                                    
+                                    # Add to daily allocation DataFrame
+                                    daily_alloc_df[ticker] = daily_allocations
+                        
+                        # Calculate CASH allocation as the remainder
+                        if 'CASH' in all_tickers:
+                            # Sum all non-cash allocations
+                            non_cash_allocations = daily_alloc_df.sum(axis=1)
+                            # CASH is the remainder
+                            daily_alloc_df['CASH'] = 1.0 - non_cash_allocations
+                            daily_alloc_df['CASH'] = daily_alloc_df['CASH'].clip(lower=0)  # Ensure non-negative
                         
                         # Create the evolution chart
                         fig_evolution = go.Figure()
@@ -11901,11 +11846,11 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                             '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
                         ]
                         
-                        # Add a trace for each ticker - same as page 1
+                        # Add a trace for each ticker using the daily data
                         for i, ticker in enumerate(all_tickers):
-                            if ticker in alloc_df.columns:
-                                # Get the allocation data for this ticker
-                                ticker_data = alloc_df[ticker].dropna()
+                            if ticker in daily_alloc_df.columns:
+                                # Get the daily allocation data for this ticker
+                                ticker_data = daily_alloc_df[ticker].dropna() * 100  # Convert to percentage
                                 
                                 if not ticker_data.empty:  # Only add if we have data
                                     fig_evolution.add_trace(go.Scatter(
@@ -11967,7 +11912,142 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
         else:
             st.info("No portfolios available for allocation evolution chart.")
     
-    # Removed duplicate section - using strategy_comparison_all_allocations above
+    # Allocation Evolution Chart Section
+    if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
+        st.markdown("---")
+        st.markdown("**📈 Portfolio Allocation Evolution**")
+        
+        # Get all available portfolio names
+        available_portfolio_names = [cfg.get('name', 'Portfolio') for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])]
+        extra_names = [n for n in st.session_state.get('multi_all_results', {}).keys() if n not in available_portfolio_names]
+        all_portfolio_names = available_portfolio_names + extra_names
+        
+        # Generate allocation evolution charts for ALL portfolios (not just selected one)
+        if all_portfolio_names:
+            # Generate charts for all portfolios and store in session state
+            for portfolio_name in all_portfolio_names:
+                if portfolio_name in st.session_state.multi_all_allocations:
+                    try:
+                        # Get allocation data for this portfolio
+                        allocs_data = st.session_state.multi_all_allocations[portfolio_name]
+                        
+                        if allocs_data:
+                            # Convert to DataFrame for easier processing
+                            alloc_df = pd.DataFrame(allocs_data).T
+                            alloc_df.index = pd.to_datetime(alloc_df.index)
+                            alloc_df = alloc_df.sort_index()
+                            
+                            # Get all unique tickers (excluding None)
+                            all_tickers = set()
+                            for date, allocs in allocs_data.items():
+                                for ticker in allocs.keys():
+                                    if ticker is not None:
+                                        all_tickers.add(ticker)
+                            all_tickers = sorted(list(all_tickers))
+                            
+                            # Fill missing values with forward fill (last known allocation)
+                            alloc_df = alloc_df.fillna(method='ffill')
+                            
+                            # Convert to percentages
+                            alloc_df = alloc_df * 100
+                            
+                            # Create the evolution chart
+                            fig_evolution = go.Figure()
+                            
+                            # Color palette for different tickers
+                            colors = [
+                                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                                '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+                            ]
+                            
+                            # Add a trace for each ticker
+                            for i, ticker in enumerate(all_tickers):
+                                if ticker in alloc_df.columns:
+                                    # Get the allocation data for this ticker
+                                    ticker_data = alloc_df[ticker].dropna()
+                                    
+                                    if not ticker_data.empty:  # Only add if we have data
+                                        fig_evolution.add_trace(go.Scatter(
+                                            x=ticker_data.index,
+                                            y=ticker_data.values,
+                                            mode='lines+markers',
+                                            name=ticker,
+                                            line=dict(color=colors[i % len(colors)], width=2),
+                                            marker=dict(size=4),
+                                            hovertemplate=f'<b>{ticker}</b><br>' +
+                                                        'Date: %{x}<br>' +
+                                                        'Allocation: %{y:.1f}%<br>' +
+                                                        '<extra></extra>'
+                                        ))
+                            
+                            # Update layout
+                            fig_evolution.update_layout(
+                                title=f"Portfolio Allocation Evolution - {portfolio_name}",
+                                xaxis_title="Date",
+                                yaxis_title="Allocation (%)",
+                                template='plotly_dark',
+                                height=600,
+                                hovermode='x unified',
+                                legend=dict(
+                                    orientation="v",
+                                    yanchor="top",
+                                    y=1,
+                                    xanchor="left",
+                                    x=1.01
+                                )
+                            )
+                            
+                            # Store the chart in session state for PDF export
+                            st.session_state[f'multi_allocation_evolution_chart_{portfolio_name}'] = fig_evolution
+                            
+                    except Exception as e:
+                        st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
+            
+            # Now show the selector and display the selected portfolio's chart
+            selected_portfolio_evolution = st.selectbox(
+                "Select portfolio for allocation evolution chart",
+                all_portfolio_names,
+                key="allocation_evolution_portfolio_selector",
+                help="Choose which portfolio to show allocation evolution over time"
+            )
+            
+            # Display the selected portfolio's chart
+            chart_key = f'multi_allocation_evolution_chart_{selected_portfolio_evolution}'
+            if chart_key in st.session_state:
+                st.plotly_chart(st.session_state[chart_key], use_container_width=True)
+                
+                # Show proper visual legend with colors and dotted lines
+                if selected_portfolio_evolution in st.session_state.multi_all_allocations:
+                    allocs_data = st.session_state.multi_all_allocations[selected_portfolio_evolution]
+                    if allocs_data:
+                        # Get all unique tickers (excluding None)
+                        all_tickers = set()
+                        for date, allocs in allocs_data.items():
+                            for ticker in allocs.keys():
+                                if ticker is not None:
+                                    all_tickers.add(ticker)
+                        all_tickers = sorted(list(all_tickers))
+                        
+                        if all_tickers:
+                            st.info(f"📊 **Legend**: {len(all_tickers)} tickers in this portfolio")
+                            # Show ticker list with colors and dotted lines
+                            colors = [
+                                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                                '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+                            ]
+                            
+                            # Create columns for ticker legend
+                            cols = st.columns(4)
+                            for i, ticker in enumerate(all_tickers):
+                                with cols[i % 4]:
+                                    color = colors[i % len(colors)]
+                                    st.markdown(f"<span style='color: {color}; font-weight: bold;'>━━━</span> {ticker}", unsafe_allow_html=True)
+            else:
+                st.info("No allocation evolution data available for the selected portfolio.")
+        else:
+            st.info("No portfolios available for allocation evolution chart.")
     
     # PDF Export Section
     st.markdown("---")
