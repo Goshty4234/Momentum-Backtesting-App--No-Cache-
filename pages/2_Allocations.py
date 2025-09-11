@@ -59,6 +59,7 @@ def get_ticker_aliases():
         
         # Cash/Zero Return
         'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
+        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -322,6 +323,7 @@ def get_ticker_aliases():
         
         # Cash/Zero Return
         'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
+        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -1626,19 +1628,19 @@ def generate_allocations_pdf(custom_name=""):
                                         if last_rebal_date:
                                             # Map frequency to function expectations
                                             frequency_mapping = {
-                                                'monthly': 'month',
-                                                'weekly': 'week',
-                                                'bi-weekly': '2weeks',
-                                                'biweekly': '2weeks',
-                                                'quarterly': '3months',
-                                                'semi-annually': '6months',
-                                                'semiannually': '6months',
-                                                'annually': 'year',
-                                                'yearly': 'year',
+                                                'monthly': 'Monthly',
+                                                'weekly': 'Weekly',
+                                                'bi-weekly': 'Biweekly',
+                                                'biweekly': 'Biweekly',
+                                                'quarterly': 'Quarterly',
+                                                'semi-annually': 'Semiannually',
+                                                'semiannually': 'Semiannually',
+                                                'annually': 'Annually',
+                                                'yearly': 'Annually',
                                                 'market_day': 'market_day',
                                                 'calendar_day': 'calendar_day',
-                                                'never': 'none',
-                                                'none': 'none'
+                                                'never': 'Never',
+                                                'none': 'Never'
                                             }
                                             mapped_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency.lower())
                                             
@@ -6390,23 +6392,23 @@ if st.session_state.get('alloc_backtest_run', False):
                 rebalancing_frequency = rebalancing_frequency.lower()
                 # Map frequency names to what the function expects
                 frequency_mapping = {
-                    'monthly': 'month',
-                    'weekly': 'week',
-                    'bi-weekly': '2weeks',
-                    'biweekly': '2weeks',
-                    'quarterly': '3months',
-                    'semi-annually': '6months',
-                    'semiannually': '6months',
-                    'annually': 'year',
-                    'yearly': 'year',
+                    'monthly': 'Monthly',
+                    'weekly': 'Weekly',
+                    'bi-weekly': 'Biweekly',
+                    'biweekly': 'Biweekly',
+                    'quarterly': 'Quarterly',
+                    'semi-annually': 'Semiannually',
+                    'semiannually': 'Semiannually',
+                    'annually': 'Annually',
+                    'yearly': 'Annually',
                     'market_day': 'market_day',
                     'calendar_day': 'calendar_day',
-                    'never': 'none',
-                    'none': 'none'
+                    'never': 'Never',
+                    'none': 'Never'
                 }
                 rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                 
-                if last_rebal_date and rebalancing_frequency != 'none':
+                if last_rebal_date and rebalancing_frequency != 'Never':
                     # Ensure last_rebal_date is a naive datetime object
                     import pandas as pd
                     if isinstance(last_rebal_date, str):
