@@ -46,8 +46,7 @@ def get_ticker_aliases():
         'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
         
         # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
+        'ZEROX': 'ZEROX',        # Cash doing nothing - zero return
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -397,8 +396,7 @@ def get_ticker_aliases():
         'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
         
         # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
+        'ZEROX': 'ZEROX',        # Cash doing nothing - zero return
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -423,13 +421,40 @@ def resolve_ticker_alias(ticker):
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def generate_zero_return_data(period="max"):
+    """Generate synthetic zero return data for ZEROX ticker"""
+    try:
+        ref_ticker = yf.Ticker("SPY")
+        ref_hist = ref_ticker.history(period=period)
+        if ref_hist.empty:
+            end_date = pd.Timestamp.now()
+            start_date = end_date - pd.Timedelta(days=365)
+            dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        else:
+            dates = ref_hist.index
+        zero_data = pd.DataFrame({
+            'Close': [100.0] * len(dates),
+            'Dividends': [0.0] * len(dates)
+        }, index=dates)
+        return zero_data
+    except Exception:
+        end_date = pd.Timestamp.now()
+        start_date = end_date - pd.Timedelta(days=30)
+        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        zero_data = pd.DataFrame({
+            'Close': [100.0] * len(dates),
+            'Dividends': [0.0] * len(dates)
+        }, index=dates)
+        return zero_data
+
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Fetch fresh ticker data from Yahoo Finance (no caching)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period
-        auto_adjust: Auto-adjust setting
+        period: Data period (used in cache key to prevent conflicts)
+        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
     """
     try:
         # Parse leverage from ticker symbol
@@ -437,6 +462,10 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         
         # Resolve ticker alias if it exists
         resolved_ticker = resolve_ticker_alias(base_ticker)
+        
+        # Special handling for ZEROX - generate zero return data
+        if resolved_ticker == "ZEROX":
+            return generate_zero_return_data(period)
         
         ticker = yf.Ticker(resolved_ticker)
         hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
@@ -452,8 +481,9 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes  
 def get_ticker_info(ticker_symbol):
-    """Fetch fresh ticker info from Yahoo Finance (no caching)"""
+    """Cache ticker info to improve performance across multiple tabs"""
     try:
         # Parse leverage from ticker symbol
         base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
@@ -7414,7 +7444,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
             '1-3 Year Treasury ETF (2002+)': 'SHY',
             '1-3 Month T-Bill ETF (2007+)': 'BIL',
             '0-3 Month T-Bill ETF (2020+)': 'SGOV',
-            'Cash (Zero Return)': 'ZERO'
+            'Cash (Zero Return)': 'ZEROX'
         }
         
         for name, ticker in bond_tickers.items():
@@ -7674,11 +7704,9 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
     st.markdown("---")
     st.subheader("Minimal Threshold Filter")
     
-    # Initialize threshold settings if not present
-    if "multi_backtest_active_use_threshold" not in st.session_state:
-        st.session_state["multi_backtest_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
-    if "multi_backtest_active_threshold_percent" not in st.session_state:
-        st.session_state["multi_backtest_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+    # ALWAYS sync threshold settings from portfolio (not just if not present)
+    st.session_state["multi_backtest_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+    st.session_state["multi_backtest_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
     
     st.checkbox(
         "Enable Minimal Threshold Filter", 
@@ -7692,7 +7720,6 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             "Minimal Threshold (%)", 
             min_value=0.1, 
             max_value=50.0, 
-            value=2.0, 
             step=0.1,
             key="multi_backtest_active_threshold_percent", 
             on_change=update_threshold_percent,
@@ -7703,11 +7730,9 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
     st.markdown("---")
     st.subheader("Maximum Allocation Filter")
     
-    # Initialize max allocation settings if not present
-    if "multi_backtest_active_use_max_allocation" not in st.session_state:
-        st.session_state["multi_backtest_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
-    if "multi_backtest_active_max_allocation_percent" not in st.session_state:
-        st.session_state["multi_backtest_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
+    # ALWAYS sync max allocation settings from portfolio (not just if not present)
+    st.session_state["multi_backtest_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
+    st.session_state["multi_backtest_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
     
     st.checkbox(
         "Enable Maximum Allocation Filter", 
@@ -7721,7 +7746,6 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             "Maximum Allocation (%)", 
             min_value=0.1, 
             max_value=100.0, 
-            value=10.0, 
             step=0.1,
             key="multi_backtest_active_max_allocation_percent", 
             on_change=update_max_allocation_percent,
