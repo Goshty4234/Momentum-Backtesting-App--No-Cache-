@@ -59,7 +59,6 @@ def get_ticker_aliases():
         
         # Cash/Zero Return
         'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -85,7 +84,7 @@ def resolve_ticker_alias(ticker):
     return aliases.get(ticker.upper(), ticker)
 
 # =============================================================================
-# PERFORMANCE OPTIMIZATION: NO CACHING VERSION
+# PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
 # =============================================================================
 
 # =============================================================================
@@ -323,7 +322,6 @@ def get_ticker_aliases():
         
         # Cash/Zero Return
         'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        'ZERO': 'ZEROX',         # Alias for ZEROX - same zero-return behavior
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -348,13 +346,14 @@ def resolve_ticker_alias(ticker):
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data without caching (NO_CACHE version)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period
-        auto_adjust: Auto-adjust setting
+        period: Data period (used in cache key to prevent conflicts)
+        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
     """
     try:
         # Parse leverage from ticker symbol
@@ -377,8 +376,9 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes  
 def get_ticker_info(ticker_symbol):
-    """Get ticker info without caching (NO_CACHE version)"""
+    """Cache ticker info to improve performance across multiple tabs"""
     try:
         stock = yf.Ticker(ticker_symbol)
         info = stock.info
@@ -386,9 +386,10 @@ def get_ticker_info(ticker_symbol):
     except Exception:
         return {}
 
+@st.cache_data(ttl=600)  # Cache for 10 minutes
 def calculate_portfolio_metrics(portfolio_config, allocation_data):
-    """Calculate portfolio metrics without caching (NO_CACHE version)"""
-    # This will calculate the results without caching
+    """Cache heavy portfolio calculations to improve performance"""
+    # This will cache the results of expensive portfolio calculations
     # Note: The actual calculation logic remains unchanged
     return portfolio_config, allocation_data  # Placeholder - will be filled in by calling functions
 
@@ -424,8 +425,9 @@ def create_safe_cache_key(data):
         # Fallback to string representation
         return hashlib.md5(str(data).encode()).hexdigest()
 
+@st.cache_data(ttl=1800)  # Cache for 30 minutes - expensive backtest calculations
 def run_cached_backtest(portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id="allocations"):
-    """Run backtest without caching (NO_CACHE version)
+    """Cache expensive backtest calculations with proper invalidation
     
     Args:
         portfolios_config_hash: Hash of portfolio configurations to detect changes
@@ -435,7 +437,7 @@ def run_cached_backtest(portfolios_config_hash, start_date_str, end_date_str, be
         page_id: Page identifier to prevent cross-page conflicts
     """
     # This will be called by the actual backtest functions when needed
-    # No caching is applied in this version
+    # The caching key includes all parameters that affect the backtest result
     return portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id  # Placeholder
 
 def check_currency_warning(tickers):
@@ -600,23 +602,6 @@ active_portfolio = st.session_state.alloc_portfolio_configs[st.session_state.all
 if active_portfolio:
     # NUCLEAR APPROACH: FORCE momentum session state widget to sync
     st.session_state['alloc_active_use_momentum'] = active_portfolio.get('use_momentum', False)
-    
-    # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
-    if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
-        active_portfolio['momentum_windows'] = [
-            {"lookback": 365, "exclude": 30, "weight": 0.5},
-            {"lookback": 180, "exclude": 30, "weight": 0.3},
-            {"lookback": 120, "exclude": 30, "weight": 0.2},
-        ]
-        print(f"NUCLEAR: FORCED momentum windows for portfolio {active_portfolio.get('name', 'Unknown')}")
-    
-    # NUCLEAR: When momentum is enabled, ensure beta and volatility are disabled
-    if active_portfolio.get('use_momentum', False):
-        active_portfolio['calc_beta'] = False
-        active_portfolio['calc_volatility'] = False
-        # Update the UI checkboxes to reflect the change
-        st.session_state['alloc_active_calc_beta'] = False
-        st.session_state['alloc_active_calc_vol'] = False
 
 if active_portfolio:
     # Removed duplicate Portfolio Name input field
@@ -784,9 +769,7 @@ st.markdown("Use the forms below to configure and run backtests to obtain alloca
 # Portfolio Name
 if 'alloc_portfolio_name' not in st.session_state:
     st.session_state.alloc_portfolio_name = "Allocation Portfolio"
-if 'alloc_portfolio_name_input' not in st.session_state:
-    st.session_state.alloc_portfolio_name_input = st.session_state.alloc_portfolio_name
-alloc_portfolio_name = st.text_input("Portfolio Name", value=st.session_state.alloc_portfolio_name_input, key="alloc_portfolio_name_input")
+alloc_portfolio_name = st.text_input("Portfolio Name", value=st.session_state.alloc_portfolio_name, key="alloc_portfolio_name_input")
 st.session_state.alloc_portfolio_name = alloc_portfolio_name
 
 # Sync portfolio name with active portfolio configuration
@@ -894,7 +877,7 @@ def calculate_cagr(values, dates):
     start_val = values[0]
     end_val = values[-1]
     years = (dates[-1] - dates[0]).days / 365.25
-    if years <= 0 or start_val <= 0:
+    if years <= 0 or start_val == 0:
         return np.nan
     return (end_val / start_val) ** (1 / years) - 1
 
@@ -976,6 +959,24 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
     else:
         base_date = last_rebalance_date.date()
     
+    def add_months_safely(date, months_to_add):
+        """Safely add months to a date, handling day overflow"""
+        year = date.year + (date.month + months_to_add - 1) // 12
+        month = ((date.month + months_to_add - 1) % 12) + 1
+        
+        # Find the last day of the target month
+        if month == 12:
+            last_day_of_month = 31
+        else:
+            # Get the first day of the next month and subtract 1 day
+            next_month_first = datetime(year, month + 1, 1).date()
+            last_day_of_month = (next_month_first - timedelta(days=1)).day
+        
+        # Use the minimum of the original day or the last day of the target month
+        safe_day = min(date.day, last_day_of_month)
+        
+        return date.replace(year=year, month=month, day=safe_day)
+    
     # Calculate next rebalance date based on frequency
     if rebalancing_frequency == 'market_day':
         # Next market day (simplified - just next day for now)
@@ -987,23 +988,14 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
     elif rebalancing_frequency == '2weeks':
         next_date = base_date + timedelta(weeks=2)
     elif rebalancing_frequency == 'month':
-        # Add one month
-        if base_date.month == 12:
-            next_date = base_date.replace(year=base_date.year + 1, month=1)
-        else:
-            next_date = base_date.replace(month=base_date.month + 1)
+        # Add one month safely
+        next_date = add_months_safely(base_date, 1)
     elif rebalancing_frequency == '3months':
-        # Add three months
-        new_month = base_date.month + 3
-        new_year = base_date.year + (new_month - 1) // 12
-        new_month = ((new_month - 1) % 12) + 1
-        next_date = base_date.replace(year=new_year, month=new_month)
+        # Add three months safely
+        next_date = add_months_safely(base_date, 3)
     elif rebalancing_frequency == '6months':
-        # Add six months
-        new_month = base_date.month + 6
-        new_year = base_date.year + (new_month - 1) // 12
-        new_month = ((new_month - 1) % 12) + 1
-        next_date = base_date.replace(year=new_year, month=new_month)
+        # Add six months safely
+        next_date = add_months_safely(base_date, 6)
     elif rebalancing_frequency == 'year':
         next_date = base_date.replace(year=base_date.year + 1)
     else:
@@ -1032,27 +1024,13 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
             next_date = next_date + timedelta(weeks=2)
         elif rebalancing_frequency == 'month':
             # Add one month safely
-            if next_date.month == 12:
-                next_date = next_date.replace(year=next_date.year + 1, month=1)
-            else:
-                next_date = next_date.replace(month=next_date.month + 1)
-            # Handle day overflow
-            try:
-                next_date = next_date.replace(day=min(next_date.day, 28))
-            except ValueError:
-                next_date = next_date.replace(day=1)
+            next_date = add_months_safely(next_date, 1)
         elif rebalancing_frequency == '3months':
             # Add three months safely
-            new_month = next_date.month + 3
-            new_year = next_date.year + (new_month - 1) // 12
-            new_month = ((new_month - 1) % 12) + 1
-            next_date = next_date.replace(year=new_year, month=new_month, day=1)
+            next_date = add_months_safely(next_date, 3)
         elif rebalancing_frequency == '6months':
             # Add six months safely
-            new_month = next_date.month + 6
-            new_year = next_date.year + (new_month - 1) // 12
-            new_month = ((new_month - 1) % 12) + 1
-            next_date = next_date.replace(year=new_year, month=new_month, day=1)
+            next_date = add_months_safely(next_date, 6)
         elif rebalancing_frequency == 'year':
             next_date = next_date.replace(year=next_date.year + 1)
         
@@ -1407,7 +1385,7 @@ def generate_allocations_pdf(custom_name=""):
             ['Volatility Lookback', f"{active_portfolio.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
             ['Volatility Exclude', f"{active_portfolio.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
             ['Minimal Threshold', f"{active_portfolio.get('minimal_threshold_percent', 2.0):.1f}%" if active_portfolio.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
-            ['Maximum Allocation', f"{active_portfolio.get('max_allocation_percent', 10.0):.1f}%" if active_portfolio.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
+            ['Max Allocation', f"{active_portfolio.get('max_allocation_percent', 10.0):.1f}%" if active_portfolio.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
         ]
         
         # Add momentum windows if they exist
@@ -1502,7 +1480,7 @@ def generate_allocations_pdf(custom_name=""):
         story.append(PageBreak())
         current_date_str = datetime.now().strftime("%B %d, %Y")
         story.append(Paragraph(f"2. Target Allocation if Rebalanced Today ({current_date_str})", heading_style))
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 2))
         
         # Get the allocation data from your existing UI - fetch the existing allocation data
         if 'alloc_snapshot_data' in st.session_state:
@@ -1521,7 +1499,7 @@ def generate_allocations_pdf(custom_name=""):
                     
                     # Add portfolio header
                     story.append(Paragraph(f"Portfolio: {portfolio_name}", subheading_style))
-                    story.append(Spacer(1, 10))
+                    story.append(Spacer(1, 2))
                     
                     # Create pie chart for this portfolio
                     try:
@@ -1645,6 +1623,7 @@ def generate_allocations_pdf(custom_name=""):
                                             mapped_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency.lower())
                                             
                                             # Calculate next rebalance date
+                                            
                                             next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
                                                 mapped_frequency, last_rebal_date
                                             )
@@ -1737,7 +1716,7 @@ def generate_allocations_pdf(custom_name=""):
                                         total_alloc_pct = sum(float(row[1].rstrip('%')) for row in table_rows)
                                         total_value = sum(float(row[4].replace('$', '').replace(',', '')) for row in table_rows)
                                         total_port_pct = sum(float(row[5].rstrip('%')) for row in table_rows)
-
+                                        
                                         # Add total row
                                         total_row = [
                                             'TOTAL',
@@ -1747,7 +1726,7 @@ def generate_allocations_pdf(custom_name=""):
                                             f"${total_value:,.2f}",
                                             f"{total_port_pct:.2f}%"
                                         ]
-
+                                        
                                         # Create table with proper column widths
                                         page_width = 7.5*inch
                                         col_widths = [1.2*inch, 1.0*inch, 1.2*inch, 1.0*inch, 1.5*inch, 1.0*inch]
@@ -2200,176 +2179,209 @@ def generate_allocations_pdf(custom_name=""):
             ]))
             story.append(risk_table)
         
-        # Add detailed financial indicators table
-        try:
-            # Get comprehensive dataframe from session state
-            df_comprehensive = getattr(st.session_state, 'df_comprehensive', None)
+        # Add page break before detailed financial indicators
+        story.append(PageBreak())
+        
+        # Add detailed financial indicators tables covering all 5 sections
+        if hasattr(st.session_state, 'sector_data') and not st.session_state.sector_data.empty:
+            story.append(Spacer(1, 20))
+            story.append(Paragraph("Detailed Financial Indicators for Each Position", heading_style))
+            story.append(Spacer(1, 10))
             
-            if df_comprehensive is not None and not df_comprehensive.empty:
-                story.append(PageBreak())
-                story.append(Paragraph("Detailed Financial Indicators for Each Position", heading_style))
-                story.append(Spacer(1, 10))
-                story.append(Paragraph("This section provides comprehensive financial metrics for each position in your portfolio, organized into focused categories for better analysis.", styles['Normal']))
-                story.append(Spacer(1, 10))
-                
-                # Helper function to create wrapped text for PDF with enhanced company name, sector, and industry handling
-                def wrap_text_for_pdf(text, max_length=25):
-                    """Wrap long text to fit in PDF cells with intelligent line breaks for company names, sectors, and industries"""
-                    if pd.isna(text) or text is None:
-                        return 'N/A'
-                    text_str = str(text)
-                    if len(text_str) <= max_length:
-                        return text_str
+            # Get the comprehensive portfolio data from session state
+            try:
+                if hasattr(st.session_state, 'df_comprehensive'):
+                    df_comprehensive = st.session_state.df_comprehensive
                     
-                    # For company names, sector, and industry, prioritize showing the full name with line breaks
-                    if 'Name' in str(text) or 'Sector' in str(text) or 'Industry' in str(text) or len(text_str) > max_length * 1.2:
-                        # Try to break at spaces first for better readability
-                        words = text_str.split()
-                        if len(words) > 1:
-                            # Find the best break point that maximizes text visibility
-                            best_break = 0
-                            for i, word in enumerate(words):
-                                if len(' '.join(words[:i+1])) <= max_length:
-                                    best_break = i + 1
-                                else:
-                                    break
-                            
-                            if best_break > 0:
-                                # Use line break for better PDF formatting
-                                first_line = ' '.join(words[:best_break])
-                                second_line = ' '.join(words[best_break:])
-                                
-                                # For company names, sector, and industry, allow longer second lines to show more text
-                                if len(second_line) > max_length:
-                                    # Instead of truncating, try to break again
-                                    second_words = second_line.split()
-                                    if len(second_words) > 1:
-                                        # Find another break point in the second line
-                                        second_break = 0
-                                        for j, word in enumerate(second_words):
-                                            if len(' '.join(second_words[:j+1])) <= max_length:
-                                                second_break = j + 1
-                                            else:
-                                                break
-                                        if second_break > 0:
-                                            second_line = ' '.join(second_words[:second_break])
-                                            third_line = ' '.join(second_words[second_break:])
-                                            if len(third_line) > max_length:
-                                                third_line = third_line[:max_length-3] + '...'
-                                            return first_line + '\n' + second_line + '\n' + third_line
-                                        else:
-                                            # If we can't break further, truncate the second line
-                                            second_line = second_line[:max_length-3] + '...'
+                    # Helper function to create wrapped text for PDF with enhanced company name, sector, and industry handling
+                    def wrap_text_for_pdf(text, max_length=25):
+                        """Wrap long text to fit in PDF cells with intelligent line breaks for company names, sectors, and industries"""
+                        if pd.isna(text) or text is None:
+                            return 'N/A'
+                        text_str = str(text)
+                        if len(text_str) <= max_length:
+                            return text_str
+                        
+                        # For company names, sector, and industry, prioritize showing the full name with line breaks
+                        if 'Name' in str(text) or 'Sector' in str(text) or 'Industry' in str(text) or len(text_str) > max_length * 1.2:
+                            # Try to break at spaces first for better readability
+                            words = text_str.split()
+                            if len(words) > 1:
+                                # Find the best break point that maximizes text visibility
+                                best_break = 0
+                                for i, word in enumerate(words):
+                                    if len(' '.join(words[:i+1])) <= max_length:
+                                        best_break = i + 1
                                     else:
-                                        # Single long word in second line, truncate
-                                        second_line = second_line[:max_length-3] + '...'
+                                        break
                                 
-                                return first_line + '\n' + second_line
-                            else:
-                                # If we can't break at words, truncate with ellipsis
-                                return text_str[:max_length-3] + '...'
-                    
-                    # For other columns, try to break at spaces or special characters
-                    words = text_str.split()
-                    if len(words) == 1:
-                        # Single long word, break at max_length
-                        return text_str[:max_length-3] + '...'
-                    # Try to fit as many words as possible
-                    result = ''
-                    for word in words:
-                        if len(result + ' ' + word) <= max_length:
-                            result += (' ' + word) if result else word
-                        else:
-                            break
-                    if not result:
-                        result = text_str[:max_length-3] + '...'
-                    return result
-                
-                # Helper function to create focused tables with specific columns and styling
-                def create_focused_table(title, columns, data_subset, col_widths):
-                    """Create a focused table with specific columns and enhanced styling"""
-                    story.append(Paragraph(title, subheading_style))
-                    story.append(Spacer(1, 5))
-                    
-                    # Filter data to only include the specified columns
-                    if all(col in data_subset.columns for col in columns):
-                        table_data = [columns]  # Header row
-                        
-                        for _, row in data_subset.iterrows():
-                            pdf_row = []
-                            for col in columns:
-                                value = row[col]
-                                # Apply text wrapping based on column type
-                                if 'Name' in col:
-                                    pdf_row.append(wrap_text_for_pdf(value, 22))  # Increased for better company name display
-                                elif 'Sector' in col or 'Industry' in col:
-                                    pdf_row.append(wrap_text_for_pdf(value, 25))  # Increased for better sector/industry display
-                                elif 'Ticker' in col:
-                                    pdf_row.append(wrap_text_for_pdf(value, 8))
+                                if best_break > 0:
+                                    # Use line break for better PDF formatting
+                                    first_line = ' '.join(words[:best_break])
+                                    second_line = ' '.join(words[best_break:])
+                                    
+                                    # For company names, sector, and industry, allow longer second lines to show more text
+                                    if len(second_line) > max_length:
+                                        # Instead of truncating, try to break again
+                                        second_words = second_line.split()
+                                        if len(second_words) > 1:
+                                            # Find another break point in the second line
+                                            second_break = 0
+                                            for j, word in enumerate(second_words):
+                                                if len(' '.join(second_words[:j+1])) <= max_length:
+                                                    second_break = j + 1
+                                                else:
+                                                    break
+                                            if second_break > 0:
+                                                second_line = ' '.join(second_words[:second_break])
+                                                third_line = ' '.join(second_words[second_break:])
+                                                if len(third_line) > max_length:
+                                                    third_line = third_line[:max_length-3] + '...'
+                                                return first_line + '\n' + second_line + '\n' + third_line
+                                            else:
+                                                # If we can't break further, truncate the second line
+                                                second_line = second_line[:max_length-3] + '...'
+                                        else:
+                                            # Single long word in second line, truncate
+                                            second_line = second_line[:max_length-3] + '...'
+                                    
+                                    return first_line + '\n' + second_line
                                 else:
-                                    pdf_row.append(wrap_text_for_pdf(value, 20))
-                            
-                            table_data.append(pdf_row)
+                                    # If we can't break at words, truncate with ellipsis
+                                    return text_str[:max_length-3] + '...'
                         
-                        # Create table with custom column widths
-                        table = Table(table_data, colWidths=col_widths)
+                        # For other columns, try to break at spaces or special characters
+                        words = text_str.split()
+                        if len(words) == 1:
+                            # Single long word, break at max_length
+                            return text_str[:max_length-3] + '...'
+                        # Try to fit as many words as possible
+                        result = ''
+                        for word in words:
+                            if len(result + ' ' + word) <= max_length:
+                                result += (' ' + word) if result else word
+                            else:
+                                break
+                        if not result:
+                            result = text_str[:max_length-3] + '...'
+                        return result
+                    
+                    # Helper function to create a focused table
+                    def create_focused_table(title, columns, data_subset, col_widths):
+                        """Create a focused table with specific columns"""
+                        story.append(Paragraph(f"<b>{title}</b>", styles['Normal']))
+                        story.append(Spacer(1, 5))
+                        
+                        # Filter dataframe to only include available columns
+                        available_columns = [col for col in columns if col in data_subset.columns]
+                        if not available_columns:
+                            return
+                        
+                        df_subset = data_subset[available_columns].copy()
+                        
+                        # Convert to list format for PDF table with text wrapping
+                        pdf_data = [available_columns]  # Headers
+                        for _, row in df_subset.iterrows():
+                            pdf_row = []
+                            for col in available_columns:
+                                value = row[col]
+                                if pd.isna(value) or value is None:
+                                    pdf_row.append('N/A')
+                                else:
+                                    # Apply text wrapping based on column type
+                                    if 'Name' in col:
+                                        pdf_row.append(wrap_text_for_pdf(value, 22))  # Increased for better company name display
+                                    elif 'Sector' in col or 'Industry' in col:
+                                        pdf_row.append(wrap_text_for_pdf(value, 25))  # Increased for better sector/industry display
+                                    elif 'Ticker' in col:
+                                        pdf_row.append(wrap_text_for_pdf(value, 8))
+                                    else:
+                                        pdf_row.append(wrap_text_for_pdf(value, 15))
+                            pdf_data.append(pdf_row)
+                        
+                        # Create table with specified column widths and enhanced styling for text wrapping
+                        table = Table(pdf_data, colWidths=col_widths[:len(available_columns)])
                         table.setStyle(TableStyle([
                             ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                             ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
                             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                            ('FONTSIZE', (0, 0), (-1, -1), 6),  # Smaller font to fit more data
-                            ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),  # Thinner grid lines
+                            ('FONTSIZE', (0, 0), (-1, -1), 6),  # Very small font to fit more data
+                            ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),
                             ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [reportlab_colors.Color(0.98, 0.98, 0.98), reportlab_colors.Color(0.95, 0.95, 0.95)]),
-                            ('WORDWRAP', (0, 0), (-1, -1), True),
-                            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                            ('WORDWRAP', (0, 0), (-1, -1), True),  # Enable word wrapping for all cells
+                            ('LEFTPADDING', (0, 0), (-1, -1), 3),  # Add some padding for wrapped text
                             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-                            ('MINIMUMHEIGHT', (0, 0), (-1, -1), 15)
+                            ('MINIMUMHEIGHT', (0, 0), (-1, -1), 15)  # Ensure minimum height for wrapped text, especially for company names
                         ]))
+                        
                         story.append(table)
                         story.append(Spacer(1, 10))
-                    else:
-                        story.append(Paragraph(f"Note: {title} data not available for this portfolio.", styles['Normal']))
-                
-                # Section 1: Overview & Basic Info - Company Name column optimized to 1.5" for balance
-                # Industry column optimized to 1.1" to prevent truncation while ensuring table fits within page
-                # Enhanced text wrapping for Company Name, Sector, and Industry columns to ensure full text visibility
-                # Total table width: 7.1 inches (ensures small margin on each side of 8.5" page)
-                overview_cols = ['Ticker', 'Company Name', 'Sector', 'Industry', 'Current Price ($)', 'Allocation %', 'Shares', 'Total Value ($)', '% of Portfolio']
-                overview_widths = [0.6*inch, 1.5*inch, 1.0*inch, 1.1*inch, 0.8*inch, 0.7*inch, 0.6*inch, 1.0*inch, 0.8*inch]
-                create_focused_table("📊 Overview & Basic Information", overview_cols, df_comprehensive, overview_widths)
-                
-                # Section 2: Valuation Metrics
-                valuation_cols = ['Ticker', 'Market Cap ($B)', 'Enterprise Value ($B)', 'P/E Ratio', 'Forward P/E', 'PEG Ratio', 'Price/Book', 'Price/Sales', 'EV/EBITDA']
-                valuation_widths = [0.6*inch, 0.8*inch, 1.0*inch, 0.6*inch, 0.7*inch, 0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch]
-                create_focused_table("💰 Valuation Metrics", valuation_cols, df_comprehensive, valuation_widths)
-                
-                # Section 3: Financial Health - Increased column widths to prevent title overlap
-                health_cols = ['Ticker', 'Debt/Equity', 'Current Ratio', 'Quick Ratio', 'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)']
-                health_widths = [0.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.0*inch, 1.0*inch]
-                create_focused_table("🏥 Financial Health", health_cols, df_comprehensive, health_widths)
-                
-                # Section 4: Growth & Dividends - Increased column widths to prevent title overlap
-                growth_cols = ['Ticker', 'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)', 'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', '5Y Dividend Growth (%)']
-                growth_widths = [0.6*inch, 1.0*inch, 1.0*inch, 0.8*inch, 0.9*inch, 0.9*inch, 0.8*inch, 1.0*inch]
-                create_focused_table("📈 Growth & Dividends", growth_cols, df_comprehensive, growth_widths)
-                
-                # Section 5: Technical & Trading
-                technical_cols = ['Ticker', '52W High ($)', '52W Low ($)', '50D MA ($)', '200D MA ($)', 'Beta', 'Volume', 'Avg Volume', 'Analyst Rating']
-                technical_widths = [0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch, 0.7*inch, 0.5*inch, 0.7*inch, 0.7*inch, 0.7*inch]
-                create_focused_table("📊 Technical & Trading", technical_cols, df_comprehensive, technical_widths)
-                
-                story.append(Spacer(1, 10))
-                story.append(Paragraph("Note: This comprehensive analysis covers all 5 sections (Overview, Valuation, Financial Health, Growth & Dividends, Technical) with the most important metrics for each position. For complete data and interactive analysis, run the allocation analysis in the Streamlit interface.", styles['Normal']))
-                
-            else:
-                # Fallback: show message when comprehensive data is not available
-                story.append(Spacer(1, 10))
-                story.append(Paragraph("Note: Detailed financial indicators are not available for this portfolio. To view comprehensive financial metrics for each position, please run the allocation analysis in the Streamlit interface first.", styles['Normal']))
-        
-        except Exception as e:
-            story.append(Paragraph(f"Note: Detailed financial indicators table could not be generated: {str(e)}", styles['Normal']))
+                    
+                    # Section 1: Overview & Basic Info - Company Name column optimized to 1.5" for balance
+                    # Industry column optimized to 1.1" to prevent truncation while ensuring table fits within page
+                    # Enhanced text wrapping for Company Name, Sector, and Industry columns to ensure full text visibility
+                    # Total table width: 7.1 inches (ensures small margin on each side of 8.5" page)
+                    overview_cols = ['Ticker', 'Company Name', 'Sector', 'Industry', 'Current Price ($)', 'Allocation %', 'Shares', 'Total Value ($)', '% of Portfolio']
+                    overview_widths = [0.6*inch, 1.5*inch, 1.0*inch, 1.1*inch, 0.8*inch, 0.7*inch, 0.6*inch, 1.0*inch, 0.8*inch]
+                    create_focused_table("📊 Overview & Basic Information", overview_cols, df_comprehensive, overview_widths)
+                    
+                    # Section 2: Valuation Metrics
+                    valuation_cols = ['Ticker', 'Market Cap ($B)', 'Enterprise Value ($B)', 'P/E Ratio', 'Forward P/E', 'PEG Ratio', 'Price/Book', 'Price/Sales', 'EV/EBITDA']
+                    valuation_widths = [0.6*inch, 0.8*inch, 1.0*inch, 0.6*inch, 0.7*inch, 0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch]
+                    create_focused_table("💰 Valuation Metrics", valuation_cols, df_comprehensive, valuation_widths)
+                    
+                    # Section 3: Financial Health - Increased column widths to prevent title overlap
+                    health_cols = ['Ticker', 'Debt/Equity', 'Current Ratio', 'Quick Ratio', 'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)']
+                    health_widths = [0.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.0*inch, 1.0*inch]
+                    create_focused_table("🏥 Financial Health", health_cols, df_comprehensive, health_widths)
+                    
+                    # Section 4: Growth & Dividends - Increased column widths to prevent title overlap
+                    growth_cols = ['Ticker', 'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)', 'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', '5Y Dividend Growth (%)']
+                    growth_widths = [0.6*inch, 1.0*inch, 1.0*inch, 0.8*inch, 0.9*inch, 0.9*inch, 0.8*inch, 1.0*inch]
+                    create_focused_table("📈 Growth & Dividends", growth_cols, df_comprehensive, growth_widths)
+                    
+                    # Section 5: Technical & Trading
+                    technical_cols = ['Ticker', '52W High ($)', '52W Low ($)', '50D MA ($)', '200D MA ($)', 'Beta', 'Volume', 'Avg Volume', 'Analyst Rating']
+                    technical_widths = [0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch, 0.7*inch, 0.5*inch, 0.7*inch, 0.7*inch, 0.7*inch]
+                    create_focused_table("📊 Technical & Trading", technical_cols, df_comprehensive, technical_widths)
+                    
+                    story.append(Spacer(1, 10))
+                    story.append(Paragraph("Note: This comprehensive analysis covers all 5 sections (Overview, Valuation, Financial Health, Growth & Dividends, Technical) with the most important metrics for each position. For complete data and interactive analysis, run the allocation analysis in the Streamlit interface.", styles['Normal']))
+                    
+                else:
+                    # Fallback: create basic table from current allocations
+                    basic_data = []
+                    for ticker, alloc_pct in alloc_dict.items():
+                        if ticker != 'CASH':
+                            basic_data.append([
+                                ticker,
+                                f"{alloc_pct * 100:.2f}%",
+                                f"${portfolio_value * alloc_pct:,.2f}",
+                                f"{(portfolio_value * alloc_pct / portfolio_value * 100):.2f}%"
+                            ])
+                    
+                    if basic_data:
+                        # Create basic table headers
+                        basic_headers = ['Ticker', 'Allocation %', 'Total Value ($)', '% of Portfolio']
+                        basic_table = Table([basic_headers] + basic_data, colWidths=[1.5*inch, 1.5*inch, 2.0*inch, 1.5*inch])
+                        basic_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 8),
+                            ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98))
+                        ]))
+                        story.append(basic_table)
+                        story.append(Spacer(1, 10))
+                        story.append(Paragraph("Note: Basic allocation data shown. For comprehensive financial indicators, run the allocation analysis in the Streamlit interface.", styles['Normal']))
+            
+            except Exception as e:
+                story.append(Paragraph(f"Note: Detailed financial indicators table could not be generated: {str(e)}", styles['Normal']))
         
         # Update progress
         progress_bar.progress(90)
@@ -3028,7 +3040,7 @@ def single_backtest(config, sim_index, reindexed_data):
         
         current_total = sum(values[t][-1] for t in tickers) + unallocated_cash[-1] + unreinvested_cash[-1]
         
-        # Check if we should rebalance (either on schedule or due to targeted rebalancing)
+        # Check if we should rebalance
         should_rebalance = False
         
         # If targeted rebalancing is enabled and not using momentum, only rebalance when thresholds are violated
@@ -3039,7 +3051,7 @@ def single_backtest(config, sim_index, reindexed_data):
                 current_total_value = sum(current_asset_values.values())
                 if current_total_value > 0:
                     current_allocations = {t: v / current_total_value for t, v in current_asset_values.items()}
-
+                    
                     # Check if any ticker violates its thresholds
                     targeted_settings = config.get('targeted_rebalancing_settings', {})
                     for ticker, settings in targeted_settings.items():
@@ -3047,7 +3059,7 @@ def single_backtest(config, sim_index, reindexed_data):
                             min_alloc = settings.get('min_allocation', 0.0) / 100.0
                             max_alloc = settings.get('max_allocation', 100.0) / 100.0
                             current_alloc = current_allocations.get(ticker, 0.0)
-
+                            
                             if current_alloc > max_alloc or current_alloc < min_alloc:
                                 should_rebalance = True
                                 break
@@ -3056,7 +3068,7 @@ def single_backtest(config, sim_index, reindexed_data):
             if date in dates_rebal and set(tickers):
                 should_rebalance = True
         
-        if should_rebalance:
+        if should_rebalance and set(tickers):
             if use_momentum:
                 returns, valid_assets = calculate_momentum(date, set(tickers), momentum_windows)
                 if valid_assets:
@@ -3151,61 +3163,17 @@ def single_backtest(config, sim_index, reindexed_data):
                         unreinvested_cash[-1] = 0
                         unallocated_cash[-1] = current_total
                 else:
-                    # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
-                    use_max_allocation = config.get('use_max_allocation', False)
-                    max_allocation_percent = config.get('max_allocation_percent', 10.0)
+                    # Apply threshold filter for non-momentum strategies during rebalancing
                     use_threshold = config.get('use_minimal_threshold', False)
                     threshold_percent = config.get('minimal_threshold_percent', 2.0)
                     
-                    # Start with original allocations
-                    rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
-                    
-                    if use_max_allocation and rebalance_allocations:
-                        max_allocation_decimal = max_allocation_percent / 100.0
-                        
-                        # FIRST PASS: Apply maximum allocation filter
-                        capped_allocations = {}
-                        excess_allocation = 0.0
-                        
-                        for ticker, allocation in rebalance_allocations.items():
-                            if allocation > max_allocation_decimal:
-                                # Cap the allocation and collect excess
-                                capped_allocations[ticker] = max_allocation_decimal
-                                excess_allocation += (allocation - max_allocation_decimal)
-                            else:
-                                # Keep original allocation
-                                capped_allocations[ticker] = allocation
-                        
-                        # Redistribute excess allocation proportionally among stocks that are below the cap
-                        if excess_allocation > 0:
-                            # Find stocks that can receive more allocation (below the cap)
-                            eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                             if allocation < max_allocation_decimal}
-                            
-                            if eligible_stocks:
-                                # Calculate total allocation of eligible stocks
-                                total_eligible_allocation = sum(eligible_stocks.values())
-                                
-                                if total_eligible_allocation > 0:
-                                    # Redistribute excess proportionally
-                                    for ticker in eligible_stocks:
-                                        proportion = eligible_stocks[ticker] / total_eligible_allocation
-                                        additional_allocation = excess_allocation * proportion
-                                        new_allocation = capped_allocations[ticker] + additional_allocation
-                                        
-                                        # Make sure we don't exceed the cap
-                                        capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
-                        
-                        rebalance_allocations = capped_allocations
-                    
-                    # Apply minimal threshold filter for non-momentum strategies during rebalancing
-                    if use_threshold and rebalance_allocations:
+                    if use_threshold:
                         threshold_decimal = threshold_percent / 100.0
                         
                         # First: Filter out stocks below threshold
                         filtered_allocations = {}
                         for t in tickers:
-                            allocation = rebalance_allocations.get(t, 0)
+                            allocation = allocations.get(t, 0)
                             if allocation >= threshold_decimal:
                                 # Keep stocks above or equal to threshold
                                 filtered_allocations[t] = allocation
@@ -3220,28 +3188,35 @@ def single_backtest(config, sim_index, reindexed_data):
                         else:
                             # If no stocks meet threshold, use original allocations
                             rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
+                    else:
+                        # Use original allocations if threshold filter is disabled
+                        rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
                     
-                    # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+                    # Apply maximum allocation filter during rebalancing
+                    use_max_allocation = config.get('use_max_allocation', False)
+                    max_allocation_percent = config.get('max_allocation_percent', 10.0)
+                    
                     if use_max_allocation and rebalance_allocations:
                         max_allocation_decimal = max_allocation_percent / 100.0
                         
-                        # Check if any stocks exceed the cap after threshold filtering and normalization
-                        capped_allocations = {}
+                        # Cap individual stock allocations at maximum
+                        capped_rebalance_allocations = {}
                         excess_allocation = 0.0
                         
-                        for ticker, allocation in rebalance_allocations.items():
+                        for t in tickers:
+                            allocation = rebalance_allocations.get(t, 0)
                             if allocation > max_allocation_decimal:
                                 # Cap the allocation and collect excess
-                                capped_allocations[ticker] = max_allocation_decimal
+                                capped_rebalance_allocations[t] = max_allocation_decimal
                                 excess_allocation += (allocation - max_allocation_decimal)
                             else:
                                 # Keep original allocation
-                                capped_allocations[ticker] = allocation
+                                capped_rebalance_allocations[t] = allocation
                         
                         # Redistribute excess allocation proportionally among stocks that are below the cap
                         if excess_allocation > 0:
                             # Find stocks that can receive more allocation (below the cap)
-                            eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                            eligible_stocks = {t: allocation for t, allocation in capped_rebalance_allocations.items() 
                                              if allocation < max_allocation_decimal}
                             
                             if eligible_stocks:
@@ -3250,15 +3225,49 @@ def single_backtest(config, sim_index, reindexed_data):
                                 
                                 if total_eligible_allocation > 0:
                                     # Redistribute excess proportionally
-                                    for ticker in eligible_stocks:
-                                        proportion = eligible_stocks[ticker] / total_eligible_allocation
+                                    for t in eligible_stocks:
+                                        proportion = eligible_stocks[t] / total_eligible_allocation
                                         additional_allocation = excess_allocation * proportion
-                                        new_allocation = capped_allocations[ticker] + additional_allocation
+                                        new_allocation = capped_rebalance_allocations[t] + additional_allocation
                                         
                                         # Make sure we don't exceed the cap
-                                        capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                        capped_rebalance_allocations[t] = min(new_allocation, max_allocation_decimal)
                         
-                        rebalance_allocations = capped_allocations
+                        rebalance_allocations = capped_rebalance_allocations
+                    
+                    # Apply targeted rebalancing if enabled and thresholds are violated
+                    if config.get('use_targeted_rebalancing', False) and should_rebalance:
+                        targeted_settings = config.get('targeted_rebalancing_settings', {})
+                        current_asset_values = {t: values[t][-1] for t in tickers}
+                        current_total_value = sum(current_asset_values.values())
+                        
+                        if current_total_value > 0:
+                            current_allocations = {t: v / current_total_value for t, v in current_asset_values.items()}
+                            
+                            # Apply targeted rebalancing
+                            new_allocations = {}
+                            
+                            # Set allocations for tickers with targeted rebalancing
+                            for ticker in tickers:
+                                if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
+                                    settings = targeted_settings[ticker]
+                                    min_alloc = settings.get('min_allocation', 0.0) / 100.0
+                                    max_alloc = settings.get('max_allocation', 100.0) / 100.0
+                                    current_alloc = current_allocations.get(ticker, 0.0)
+                                    
+                                    if current_alloc > max_alloc:
+                                        new_allocations[ticker] = max_alloc
+                                    elif current_alloc < min_alloc:
+                                        new_allocations[ticker] = min_alloc
+                                    else:
+                                        new_allocations[ticker] = current_alloc
+                                else:
+                                    new_allocations[ticker] = current_allocations.get(ticker, 0.0)
+                            
+                            # Normalize to ensure allocations sum to 1.0
+                            total_alloc = sum(new_allocations.values())
+                            if total_alloc > 0:
+                                rebalance_allocations = {t: alloc / total_alloc for t, alloc in new_allocations.items()}
                     
                     sum_alloc = sum(rebalance_allocations.values())
                     if sum_alloc > 0:
@@ -3718,16 +3727,16 @@ def paste_json_callback():
         st.session_state['alloc_active_use_max_allocation'] = allocations_config.get('use_max_allocation', False)
         st.session_state['alloc_active_max_allocation_percent'] = allocations_config.get('max_allocation_percent', 10.0)
         
+        
         # Update portfolio name input field to match the imported portfolio
-        portfolio_name = allocations_config.get('name', 'Allocation Portfolio')
-        st.session_state.alloc_portfolio_name = portfolio_name
-        st.session_state.alloc_portfolio_name_input = portfolio_name
+        st.session_state.alloc_portfolio_name = allocations_config.get('name', 'Allocation Portfolio')
         
         st.success("Portfolio configuration updated from JSON (Allocations page).")
         st.info(f"Final stocks list: {[s['ticker'] for s in allocations_config['stocks']]}")
         st.info(f"Final momentum windows: {allocations_config['momentum_windows']}")
         st.info(f"Final use_momentum: {allocations_config['use_momentum']}")
         st.info(f"Final threshold settings: use={allocations_config.get('use_minimal_threshold', False)}, percent={allocations_config.get('minimal_threshold_percent', 2.0)}")
+        st.info(f"Final max allocation settings: use={allocations_config.get('use_max_allocation', False)}, percent={allocations_config.get('max_allocation_percent', 10.0)}")
     except json.JSONDecodeError:
         st.error("Invalid JSON format. Please check the text and try again.")
     except Exception as e:
@@ -3747,9 +3756,7 @@ def update_active_portfolio_index():
     # Update portfolio name input field to match the active portfolio
     if st.session_state.alloc_active_portfolio_index is not None and portfolio_configs:
         active_portfolio = portfolio_configs[st.session_state.alloc_active_portfolio_index]
-        portfolio_name = active_portfolio.get('name', 'Allocation Portfolio')
-        st.session_state.alloc_portfolio_name = portfolio_name
-        st.session_state.alloc_portfolio_name_input = portfolio_name
+        st.session_state.alloc_portfolio_name = active_portfolio.get('name', 'Allocation Portfolio')
     
     st.session_state.alloc_rerun_flag = True
 
@@ -3800,8 +3807,6 @@ def update_use_momentum():
             st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['momentum_windows'] = []
         st.session_state.alloc_rerun_flag = True
 
-        
-        st.session_state.alloc_rerun_flag = True
 
 
 
@@ -4090,7 +4095,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
             '1-3 Year Treasury ETF (2002+)': 'SHY',
             '1-3 Month T-Bill ETF (2007+)': 'BIL',
             '0-3 Month T-Bill ETF (2020+)': 'SGOV',
-            'Cash (Zero Return)': 'ZERO'
+            'Cash (Zero Return)': 'ZEROX'
         }
         
         for name, ticker in bond_tickers.items():
@@ -4132,7 +4137,8 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2020+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZEROX` → `ZERO` (Cash doing nothing), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
+    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
+
 
 with st.expander("⚡ Leverage Guide", expanded=False):
     st.markdown("""
@@ -4310,11 +4316,9 @@ if active_portfolio['use_momentum']:
     st.markdown("---")
     st.subheader("Minimal Threshold Filter")
     
-    # Initialize threshold settings if not present
-    if "alloc_active_use_threshold" not in st.session_state:
-        st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
-    if "alloc_active_threshold_percent" not in st.session_state:
-        st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+    # ALWAYS sync threshold settings from portfolio (not just if not present)
+    st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
+    st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
     
     st.checkbox(
         "Enable Minimal Threshold Filter", 
@@ -4328,7 +4332,6 @@ if active_portfolio['use_momentum']:
             "Minimal Threshold (%)", 
             min_value=0.1, 
             max_value=50.0, 
-            value=st.session_state.get("alloc_active_threshold_percent", 2.0), 
             step=0.1,
             key="alloc_active_threshold_percent", 
             on_change=update_threshold_percent,
@@ -4339,29 +4342,26 @@ if active_portfolio['use_momentum']:
     st.markdown("---")
     st.subheader("Maximum Allocation Filter")
     
-    # Initialize max allocation settings if not present
-    if "alloc_active_use_max_allocation" not in st.session_state:
-        st.session_state["alloc_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
-    if "alloc_active_max_allocation_percent" not in st.session_state:
-        st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
+    # ALWAYS sync maximum allocation settings from portfolio (not just if not present)
+    st.session_state["alloc_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
+    st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
     
     st.checkbox(
         "Enable Maximum Allocation Filter", 
         key="alloc_active_use_max_allocation", 
         on_change=update_use_max_allocation,
-        help="Cap individual stock allocations at the maximum percentage and redistribute excess weight proportionally"
+        help="Cap individual stock allocations at the maximum percentage and redistribute excess weight to other stocks"
     )
     
     if st.session_state.get("alloc_active_use_max_allocation", False):
         st.number_input(
             "Maximum Allocation (%)", 
-            min_value=0.1, 
+            min_value=1.0, 
             max_value=100.0, 
-            value=st.session_state.get("alloc_active_max_allocation_percent", 10.0), 
             step=0.1,
             key="alloc_active_max_allocation_percent", 
             on_change=update_max_allocation_percent,
-            help="Individual stocks cannot exceed this allocation percentage. Excess weight will be redistributed proportionally to other stocks"
+            help="Individual stocks will be capped at this maximum allocation percentage"
         )
     
     st.markdown("---")
@@ -4456,6 +4456,7 @@ if active_portfolio['use_momentum']:
 else:
     # Don't clear momentum_windows - they should persist when momentum is disabled
     # so they're available when momentum is re-enabled or for variant generation
+    
     active_portfolio['momentum_windows'] = []
 
 # Targeted Rebalancing Section (only when momentum is disabled)
@@ -4465,14 +4466,14 @@ st.subheader("Targeted Rebalancing")
 # Only show targeted rebalancing if momentum strategy is disabled
 if not active_portfolio.get('use_momentum', False):
     use_targeted_rebalancing = st.checkbox(
-        "Enable Targeted Rebalancing",
+        "Enable Targeted Rebalancing", 
         value=active_portfolio.get('use_targeted_rebalancing', False),
         help="Automatically rebalance when ticker allocations exceed min/max thresholds"
     )
-
+    
     # Update the portfolio config directly
     active_portfolio['use_targeted_rebalancing'] = use_targeted_rebalancing
-
+    
     # If enabling targeted rebalancing, disable momentum
     if use_targeted_rebalancing:
         active_portfolio['use_momentum'] = False
@@ -4480,7 +4481,6 @@ else:
     # Hide targeted rebalancing when momentum strategy is enabled
     active_portfolio['use_targeted_rebalancing'] = False
 
-# Show targeted rebalancing settings if enabled
 if active_portfolio.get('use_targeted_rebalancing', False):
     st.markdown("**Configure allocation limits for each ticker:**")
     
@@ -4489,17 +4489,9 @@ if active_portfolio.get('use_targeted_rebalancing', False):
     current_tickers = [s['ticker'] for s in stocks_list if s.get('ticker')]
     
     if current_tickers:
-        # Initialize targeted rebalancing settings for each ticker
+        # Initialize settings if not exists
         if 'targeted_rebalancing_settings' not in active_portfolio:
             active_portfolio['targeted_rebalancing_settings'] = {}
-        
-        for ticker in current_tickers:
-            if ticker not in active_portfolio.get('targeted_rebalancing_settings', {}):
-                active_portfolio['targeted_rebalancing_settings'][ticker] = {
-                    'enabled': False,
-                    'min_allocation': 0.0,
-                    'max_allocation': 100.0
-                }
         
         # Create columns for ticker settings
         cols = st.columns(min(len(current_tickers), 3))
@@ -4508,7 +4500,15 @@ if active_portfolio.get('use_targeted_rebalancing', False):
             with cols[i % 3]:
                 st.markdown(f"**{ticker}**")
                 
-                # Enable/disable for this ticker
+                # Initialize default settings for this ticker
+                if ticker not in active_portfolio['targeted_rebalancing_settings']:
+                    active_portfolio['targeted_rebalancing_settings'][ticker] = {
+                        'enabled': False,
+                        'min_allocation': 0.0,
+                        'max_allocation': 100.0
+                    }
+                
+                # Enable/disable checkbox
                 enabled = st.checkbox(
                     "Enable", 
                     value=active_portfolio['targeted_rebalancing_settings'][ticker]['enabled'],
@@ -4554,9 +4554,10 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config.pop('use_relative_momentum', None)
     cleaned_config.pop('equal_if_all_negative', None)
     
-    # Update targeted rebalancing settings
+    # Ensure targeted rebalancing settings are included
     cleaned_config['use_targeted_rebalancing'] = active_portfolio.get('use_targeted_rebalancing', False)
     cleaned_config['targeted_rebalancing_settings'] = active_portfolio.get('targeted_rebalancing_settings', {})
+    
     
     config_json = json.dumps(cleaned_config, indent=4)
     st.code(config_json, language='json')
@@ -5503,9 +5504,7 @@ def paste_all_json_callback():
                 st.session_state.alloc_active_portfolio_index = 0
                 st.session_state.alloc_portfolio_selector = processed_configs[0].get('name', '')
                 # Update portfolio name input field to match the first imported portfolio
-                portfolio_name = processed_configs[0].get('name', 'Allocation Portfolio')
-                st.session_state.alloc_portfolio_name = portfolio_name
-                st.session_state.alloc_portfolio_name_input = portfolio_name
+                st.session_state.alloc_portfolio_name = processed_configs[0].get('name', 'Allocation Portfolio')
                 # Mirror several active_* widget defaults so the UI selectboxes/inputs update
                 st.session_state['alloc_active_name'] = processed_configs[0].get('name', '')
                 st.session_state['alloc_active_initial'] = int(processed_configs[0].get('initial_value', 0) or 0)
@@ -5666,12 +5665,12 @@ if st.session_state.get('alloc_backtest_run', False):
                         show_cash = False
                     if not show_cash:
                         df_display = df_display.drop('CASH')
-
+                
                 # Add total row
                 total_alloc_pct = df_display['Allocation %'].sum()
                 total_value = df_display['Total Value ($)'].sum()
                 total_port_pct = df_display['% of Portfolio'].sum()
-
+                
                 total_row = pd.DataFrame({
                     'Allocation %': [total_alloc_pct],
                     'Price ($)': [float('nan')],
@@ -5679,7 +5678,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     'Total Value ($)': [total_value],
                     '% of Portfolio': [total_port_pct]
                 }, index=['TOTAL'])
-
+                
                 df_display = pd.concat([df_display, total_row])
 
                 fmt = {
@@ -5692,20 +5691,22 @@ if st.session_state.get('alloc_backtest_run', False):
                 try:
                     st.markdown(f"**{label}**")
                     sty = df_display.style.format(fmt)
+                    
+                    # Highlight CASH row if present
                     if 'CASH' in df_table.index and show_cash:
                         def _highlight_cash_row(s):
                             if s.name == 'CASH':
                                 return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
                             return [''] * len(s)
                         sty = sty.apply(_highlight_cash_row, axis=1)
-
+                    
                     # Highlight TOTAL row
                     def _highlight_total_row(s):
                         if s.name == 'TOTAL':
                             return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
                         return [''] * len(s)
                     sty = sty.apply(_highlight_total_row, axis=1)
-
+                    
                     st.dataframe(sty, use_container_width=True)
                 except Exception:
                     st.dataframe(df_display, use_container_width=True)
@@ -5934,8 +5935,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 if rows:
                     df_comprehensive = pd.DataFrame(rows)
-                    
-                    # Store comprehensive dataframe in session state for PDF access
+                    # Store in session state for PDF generation
                     st.session_state.df_comprehensive = df_comprehensive
                     
 
@@ -6853,12 +6853,12 @@ if st.session_state.get('alloc_backtest_run', False):
                         show_cash = False
                     if not show_cash:
                         df_display = df_display.drop('CASH')
-
+                
                 # Add total row
                 total_alloc_pct = df_display['Allocation %'].sum()
                 total_value = df_display['Total Value ($)'].sum()
                 total_port_pct = df_display['% of Portfolio'].sum()
-
+                
                 total_row = pd.DataFrame({
                     'Allocation %': [total_alloc_pct],
                     'Price ($)': [float('nan')],
@@ -6866,7 +6866,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     'Total Value ($)': [total_value],
                     '% of Portfolio': [total_port_pct]
                 }, index=['TOTAL'])
-
+                
                 df_display = pd.concat([df_display, total_row])
 
                 # formatting for display
@@ -6886,14 +6886,14 @@ if st.session_state.get('alloc_backtest_run', False):
                                 return ['background-color: #006400; color: white; font-weight: bold;' for _ in s]
                             return [''] * len(s)
                         sty = sty.apply(_highlight_cash_row, axis=1)
-
+                    
                     # Highlight TOTAL row
                     def _highlight_total_row(s):
                         if s.name == 'TOTAL':
                             return ['background-color: #1f4e79; color: white; font-weight: bold;' for _ in s]
                         return [''] * len(s)
                     sty = sty.apply(_highlight_total_row, axis=1)
-
+                    
                     st.dataframe(sty, use_container_width=True)
                 except Exception:
                     st.dataframe(df_display, use_container_width=True)
