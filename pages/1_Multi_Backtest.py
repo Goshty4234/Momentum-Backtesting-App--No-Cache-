@@ -8,6 +8,9 @@ from plotly.subplots import make_subplots
 import json
 import io
 
+# Set pandas options for handling large dataframes
+pd.set_option("styler.render.max_elements", 1000000)  # Allow up to 1M cells for styling
+
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
 # =============================================================================
@@ -4180,21 +4183,21 @@ def fusion_portfolio_backtest(fusion_config, all_portfolio_configs, sim_index, r
     
     # Fusion portfolio configuration loaded
     
-    # Map frequency names to what the function expects (same as individual portfolios)
+    # Map frequency names to what the get_dates_by_freq function expects (capitalized)
     frequency_mapping = {
-        'monthly': 'month',
-        'weekly': 'week',
-        'bi-weekly': '2weeks',
-        'biweekly': '2weeks',
-        'quarterly': '3months',
-        'semi-annually': '6months',
-        'semiannually': '6months',
-        'annually': 'year',
-        'yearly': 'year',
+        'monthly': 'Monthly',
+        'weekly': 'Weekly',
+        'bi-weekly': 'Biweekly',
+        'biweekly': 'Biweekly',
+        'quarterly': 'Quarterly',
+        'semi-annually': 'Semiannually',
+        'semiannually': 'Semiannually',
+        'annually': 'Annually',
+        'yearly': 'Annually',
         'market_day': 'market_day',
         'calendar_day': 'calendar_day',
-        'never': 'none',
-        'none': 'none'
+        'never': 'Never',
+        'none': 'Never'
     }
     fusion_rebalancing_frequency = frequency_mapping.get(fusion_rebalancing_frequency.lower(), fusion_rebalancing_frequency)
     
@@ -4220,78 +4223,8 @@ def fusion_portfolio_backtest(fusion_config, all_portfolio_configs, sim_index, r
             return None, None, {}, {}, {}, {}
     
     # Calculate fusion-level rebalancing dates based on fusion frequency
-    # Use the same logic as individual portfolios
-    fusion_rebalancing_dates = set()
-    
-    if fusion_rebalancing_frequency != 'none':
-        # Start from the beginning of the simulation
-        current_date = sim_index[0]
-        
-        while current_date <= sim_index[-1]:
-            fusion_rebalancing_dates.add(current_date)
-            
-            # Calculate next rebalancing date using the same logic as individual portfolios
-            if fusion_rebalancing_frequency == 'market_day':
-                # Find next market day
-                next_idx = sim_index.get_loc(current_date) + 1
-                if next_idx < len(sim_index):
-                    current_date = sim_index[next_idx]
-                else:
-                    break
-            elif fusion_rebalancing_frequency == 'calendar_day':
-                current_date = current_date + pd.Timedelta(days=1)
-            elif fusion_rebalancing_frequency == 'week':
-                current_date = current_date + pd.Timedelta(weeks=1)
-            elif fusion_rebalancing_frequency == '2weeks':
-                current_date = current_date + pd.Timedelta(weeks=2)
-            elif fusion_rebalancing_frequency == 'month':
-                # Add one month and set to 1st of the month
-                try:
-                    if current_date.month == 12:
-                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
-                    else:
-                        current_date = current_date.replace(month=current_date.month + 1, day=1)
-                except ValueError:
-                    # Handle day overflow (e.g., Jan 31 -> Feb 28/29)
-                    current_date = current_date.replace(day=1)
-                    if current_date.month == 12:
-                        current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
-                    else:
-                        current_date = current_date.replace(month=current_date.month + 1, day=1)
-            elif fusion_rebalancing_frequency == '3months':
-                # Add three months and set to 1st of the month
-                try:
-                    new_month = current_date.month + 3
-                    new_year = current_date.year + (new_month - 1) // 12
-                    new_month = ((new_month - 1) % 12) + 1
-                    current_date = current_date.replace(year=new_year, month=new_month, day=1)
-                except ValueError:
-                    # Handle day overflow
-                    current_date = current_date.replace(day=1)
-                    new_month = current_date.month + 3
-                    new_year = current_date.year + (new_month - 1) // 12
-                    new_month = ((new_month - 1) % 12) + 1
-                    current_date = current_date.replace(year=new_year, month=new_month, day=1)
-            elif fusion_rebalancing_frequency == '6months':
-                # Add six months and set to 1st of the month
-                try:
-                    new_month = current_date.month + 6
-                    new_year = current_date.year + (new_month - 1) // 12
-                    new_month = ((new_month - 1) % 12) + 1
-                    current_date = current_date.replace(year=new_year, month=new_month, day=1)
-                except ValueError:
-                    # Handle day overflow
-                    current_date = current_date.replace(day=1)
-                    new_month = current_date.month + 6
-                    new_year = current_date.year + (new_month - 1) // 12
-                    new_month = ((new_month - 1) % 12) + 1
-                    current_date = current_date.replace(year=new_year, month=new_month, day=1)
-            elif fusion_rebalancing_frequency == 'year':
-                current_date = current_date.replace(year=current_date.year + 1, month=1, day=1)
-            else:
-                break
-    
-    fusion_rebalancing_dates = sorted(fusion_rebalancing_dates)
+    # Individual portfolios handle their own rebalancing independently
+    fusion_rebalancing_dates = get_dates_by_freq(fusion_rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
     
     # Fusion rebalancing dates calculated
     
@@ -4301,26 +4234,31 @@ def fusion_portfolio_backtest(fusion_config, all_portfolio_configs, sim_index, r
     fusion_with_additions.iloc[:] = 0
     fusion_no_additions.iloc[:] = 0
     
-    # Track current portfolio values for between-portfolio rebalancing
-    current_portfolio_values = {}
-    for portfolio_name in selected_portfolios:
-        current_portfolio_values[portfolio_name] = 0.0
-    
-    # Track fusion-level allocations (between portfolios)
-    fusion_current_alloc = {}  # Actual drifted allocation between portfolios
-    fusion_today_weights_map = {}  # Target allocation if rebalanced today
-    
     # Initialize fusion historical data
     fusion_historical_allocations = {}
     fusion_historical_metrics = {}
     
-    # SIMPLE FUSION APPROACH: Manipulate the stored portfolio data
+    # CORRECT FUSION APPROACH: 
+    # 1. Individual portfolios rebalance at their own frequencies (already done above)
+    # 2. Fusion portfolio rebalances between portfolios at its own frequency
+    # 3. No interference between the two systems
     
-    # Apply rebalancing to the stored portfolio data
-    for rebalance_date in sorted(fusion_rebalancing_dates):
-        if rebalance_date in sim_index:
-            date_idx = sim_index.get_loc(rebalance_date)
-            
+    # Track current fusion-level allocations (between portfolios)
+    fusion_current_alloc = {}  # Actual drifted allocation between portfolios
+    fusion_today_weights_map = {}  # Target allocation if rebalanced today
+    
+    # Initialize fusion allocations with target allocations
+    for portfolio_name, target_allocation in allocations.items():
+        fusion_current_alloc[portfolio_name] = target_allocation
+        fusion_today_weights_map[portfolio_name] = target_allocation
+    
+    # Process each date in the simulation
+    for date_idx, current_date in enumerate(sim_index):
+        # Check if this is a fusion rebalancing date
+        is_fusion_rebalance = current_date in fusion_rebalancing_dates
+        
+        # Apply fusion-level rebalancing if needed
+        if is_fusion_rebalance:
             # Get current portfolio values at this date
             current_values = {}
             for portfolio_name in selected_portfolios:
@@ -4344,15 +4282,16 @@ def fusion_portfolio_backtest(fusion_config, all_portfolio_configs, sim_index, r
                         if current_value > 0:
                             adjustment_factor = target_value / current_value
                             
-                            # Apply adjustment to all future values in the time series (VECTORIZED - MUCH FASTER!)
+                            # Apply adjustment to all future values in the time series
                             portfolio_series = portfolio_results[portfolio_name]['with_additions']
                             portfolio_series_no_additions = portfolio_results[portfolio_name]['no_additions']
                             
-                            # Use vectorized pandas operations instead of loops
+                            # Use vectorized pandas operations
                             portfolio_series.iloc[date_idx:] *= adjustment_factor
                             portfolio_series_no_additions.iloc[date_idx:] *= adjustment_factor
                             
-                            # Portfolio rebalanced
+                            # Update fusion allocation tracking
+                            fusion_current_alloc[portfolio_name] = target_allocation
     
     # Now calculate the fusion portfolio by combining the adjusted individual portfolios
     for date_idx, current_date in enumerate(sim_index):
@@ -10444,9 +10383,25 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
                     return [f'{bg_color}; color: white;'] * len(s)
 
-                styler = allocations_df_raw.mul(100).style.apply(highlight_rows_by_index, axis=1)
-                styler.format('{:,.0f}%', na_rep='N/A')
-                st.dataframe(styler, use_container_width=True)
+                try:
+                    # Check if dataframe is too large for styling
+                    total_cells = allocations_df_raw.shape[0] * allocations_df_raw.shape[1]
+                    if total_cells > 200000:  # Conservative limit
+                        st.warning(f"Allocations table is very large ({total_cells:,} cells). Showing simplified view.")
+                        # Show only recent data (last 100 rows)
+                        recent_data = allocations_df_raw.tail(100)
+                        st.dataframe(recent_data.mul(100).round(1), use_container_width=True)
+                        st.caption("Showing last 100 rows. Use filters to narrow down the data.")
+                    else:
+                        # Increase pandas styler limit for smaller datasets
+                        pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                        styler = allocations_df_raw.mul(100).style.apply(highlight_rows_by_index, axis=1)
+                        styler.format('{:,.0f}%', na_rep='N/A')
+                        st.dataframe(styler, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error displaying allocations table: {str(e)}")
+                    st.write("Raw allocations data (first 1000 rows):")
+                    st.dataframe(allocations_df_raw.head(1000))
 
             # Table 2: Momentum Metrics and Calculated Weights (moved right after Historical Allocations)
             if selected_portfolio_detail in st.session_state.multi_all_metrics:
@@ -10623,47 +10578,68 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     if 'Volatility' in metrics_df_display.columns:
                         metrics_df_display['Volatility'] = metrics_df_display['Volatility'].fillna(np.nan) * 100
 
-                    # Corrected styling logic for alternating row colors and momentum color
-                    styler_metrics = metrics_df_display.style.apply(highlight_metrics_rows, axis=1)
-                    if 'Momentum' in metrics_df_display.columns:
-                        styler_metrics = styler_metrics.map(color_momentum, subset=['Momentum'])
-                    # Force white color for None/NA values in ALL columns
-                    styler_metrics = styler_metrics.map(color_all_columns)
+                    # Add error handling for empty or invalid dataframes
+                    if metrics_df_display.empty:
+                        st.warning("No metrics data available for this portfolio.")
+                    else:
+                        try:
+                            # Check if dataframe is too large for styling
+                            total_cells = metrics_df_display.shape[0] * metrics_df_display.shape[1]
+                            if total_cells > 200000:  # Conservative limit
+                                st.warning(f"Metrics table is very large ({total_cells:,} cells). Showing simplified view.")
+                                # Show only recent data (last 100 rows)
+                                recent_data = metrics_df_display.tail(100)
+                                st.dataframe(recent_data, use_container_width=True)
+                                st.caption("Showing last 100 rows. Use filters to narrow down the data.")
+                            else:
+                                # Increase pandas styler limit for smaller datasets
+                                pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                                
+                                # Corrected styling logic for alternating row colors and momentum color
+                                styler_metrics = metrics_df_display.style.apply(highlight_metrics_rows, axis=1)
+                                if 'Momentum' in metrics_df_display.columns:
+                                    styler_metrics = styler_metrics.map(color_momentum, subset=['Momentum'])
+                                # Force white color for None/NA values in ALL columns
+                                styler_metrics = styler_metrics.map(color_all_columns)
 
-                    fmt_dict = {}
-                    if 'Momentum' in metrics_df_display.columns:
-                        fmt_dict['Momentum'] = '{:,.0f}%'
-                    if 'Beta' in metrics_df_display.columns:
-                        fmt_dict['Beta'] = '{:,.2f}'
-                    if 'Volatility' in metrics_df_display.columns:
-                        fmt_dict['Volatility'] = '{:,.2f}%'
-                    if 'Calculated_Weight' in metrics_df_display.columns:
-                        fmt_dict['Calculated_Weight'] = '{:,.0f}%'
+                                fmt_dict = {}
+                                if 'Momentum' in metrics_df_display.columns:
+                                    fmt_dict['Momentum'] = '{:,.0f}%'
+                                if 'Beta' in metrics_df_display.columns:
+                                    fmt_dict['Beta'] = '{:,.2f}'
+                                if 'Volatility' in metrics_df_display.columns:
+                                    fmt_dict['Volatility'] = '{:,.2f}%'
+                                if 'Calculated_Weight' in metrics_df_display.columns:
+                                    fmt_dict['Calculated_Weight'] = '{:,.0f}%'
 
-                    if fmt_dict:
-                        styler_metrics = styler_metrics.format(fmt_dict)
-                    
-                    # NUCLEAR OPTION: Inject custom CSS to override Streamlit's stubborn styling
-                    st.markdown("""
-                    <style>
-                    /* NUCLEAR CSS OVERRIDE - BEAT STREAMLIT INTO SUBMISSION */
-                    .stDataFrame [data-testid="stDataFrame"] div[data-testid="stDataFrame"] table td,
-                    .stDataFrame [data-testid="stDataFrame"] div[data-testid="stDataFrame"] table th,
-                    .stDataFrame table td,
-                    .stDataFrame table th {
-                        color: #FFFFFF !important;
-                        font-weight: bold !important;
-                        text-shadow: 1px 1px 2px black !important;
-                    }
-                    
-                    /* Force ALL text in dataframes to be white */
-                    .stDataFrame * {
-                        color: #FFFFFF !important;
-                    }
-                    </style>
-                    """, unsafe_allow_html=True)
+                                if fmt_dict:
+                                    styler_metrics = styler_metrics.format(fmt_dict)
+                                
+                                # NUCLEAR OPTION: Inject custom CSS to override Streamlit's stubborn styling
+                                st.markdown("""
+                                <style>
+                                /* NUCLEAR CSS OVERRIDE - BEAT STREAMLIT INTO SUBMISSION */
+                                .stDataFrame [data-testid="stDataFrame"] div[data-testid="stDataFrame"] table td,
+                                .stDataFrame [data-testid="stDataFrame"] div[data-testid="stDataFrame"] table th,
+                                .stDataFrame table td,
+                                .stDataFrame table th {
+                                    color: #FFFFFF !important;
+                                    font-weight: bold !important;
+                                    text-shadow: 1px 1px 2px black !important;
+                                }
+                                
+                                /* Force ALL text in dataframes to be white */
+                                .stDataFrame * {
+                                    color: #FFFFFF !important;
+                                }
+                                </style>
+                                """, unsafe_allow_html=True)
 
-                    st.dataframe(styler_metrics, use_container_width=True)
+                                st.dataframe(styler_metrics, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error displaying metrics table: {str(e)}")
+                            st.write("Raw data (first 1000 rows):")
+                            st.dataframe(metrics_df_display.head(1000))
                     
 
             # PIE CHARTS SECTION - Show for ALL portfolios (moved outside allocation data condition)
