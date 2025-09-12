@@ -7713,7 +7713,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
 
     with col_beta_vol:
         if "multi_backtest_active_calc_beta" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_beta"] = active_portfolio['calc_beta']
+            st.session_state["multi_backtest_active_calc_beta"] = active_portfolio.get('calc_beta', False)
         st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score.")
         # Reset Beta button
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
@@ -7731,7 +7731,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.number_input("Beta Lookback (days)", min_value=1, key="multi_backtest_active_beta_window", on_change=update_beta_window)
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_vol"] = active_portfolio['calc_volatility']
+            st.session_state["multi_backtest_active_calc_vol"] = active_portfolio.get('calc_volatility', False)
         st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score.")
         # Reset Volatility button
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
