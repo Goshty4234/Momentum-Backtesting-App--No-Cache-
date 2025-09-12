@@ -1672,19 +1672,19 @@ def generate_allocations_pdf(custom_name=""):
                                         if last_rebal_date:
                                             # Map frequency to function expectations
                                             frequency_mapping = {
-                                                'monthly': 'Monthly',
-                                                'weekly': 'Weekly',
-                                                'bi-weekly': 'Biweekly',
-                                                'biweekly': 'Biweekly',
-                                                'quarterly': 'Quarterly',
-                                                'semi-annually': 'Semiannually',
-                                                'semiannually': 'Semiannually',
-                                                'annually': 'Annually',
-                                                'yearly': 'Annually',
+                                                'monthly': 'month',
+                                                'weekly': 'week',
+                                                'bi-weekly': '2weeks',
+                                                'biweekly': '2weeks',
+                                                'quarterly': '3months',
+                                                'semi-annually': '6months',
+                                                'semiannually': '6months',
+                                                'annually': 'year',
+                                                'yearly': 'year',
                                                 'market_day': 'market_day',
                                                 'calendar_day': 'calendar_day',
-                                                'never': 'Never',
-                                                'none': 'Never'
+                                                'never': 'none',
+                                                'none': 'none'
                                             }
                                             mapped_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency.lower())
                                             
@@ -2443,6 +2443,7 @@ def generate_allocations_pdf(custom_name=""):
 # Single-backtest core (adapted from your code, robust)
 # -----------------------
 def single_backtest(config, sim_index, reindexed_data):
+    print(f"[THRESHOLD DEBUG] single_backtest called for portfolio: {config.get('name', 'Unknown')}")
     stocks_list = config.get('stocks', [])
     raw_tickers = [s.get('ticker') for s in stocks_list if s.get('ticker')]
     # Filter out tickers not present in reindexed_data to avoid crashes for invalid tickers
@@ -2475,6 +2476,116 @@ def single_backtest(config, sim_index, reindexed_data):
     
     # Update tickers to only include unique tickers after deduplication
     tickers = list(allocations.keys())
+    
+    # Apply threshold filters to initial allocations for non-momentum strategies
+    use_momentum = config.get('use_momentum', True)
+    print(f"[THRESHOLD DEBUG] Portfolio: {config.get('name', 'Unknown')}, use_momentum: {use_momentum}, allocations: {allocations}")
+    
+    if not use_momentum and allocations:
+        use_max_allocation = config.get('use_max_allocation', False)
+        max_allocation_percent = config.get('max_allocation_percent', 10.0)
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        # Debug output
+        print(f"[THRESHOLD DEBUG] Non-momentum portfolio: use_threshold={use_threshold}, threshold_percent={threshold_percent}, use_max_allocation={use_max_allocation}, max_allocation_percent={max_allocation_percent}")
+        print(f"[THRESHOLD DEBUG] Original allocations: {allocations}")
+        
+        # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+        if use_max_allocation:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # FIRST PASS: Apply maximum allocation filter
+            capped_allocations = {}
+            excess_allocation = 0.0
+            
+            for ticker, allocation in allocations.items():
+                if allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
+                else:
+                    capped_allocations[ticker] = allocation
+            
+            # Redistribute excess allocation proportionally to stocks below the cap
+            if excess_allocation > 0:
+                # Find stocks below the cap
+                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                  if allocation < max_allocation_decimal}
+                
+                if below_cap_stocks:
+                    total_below_cap = sum(below_cap_stocks.values())
+                    if total_below_cap > 0:
+                        # Redistribute excess proportionally
+                        for ticker in below_cap_stocks:
+                            proportion = below_cap_stocks[ticker] / total_below_cap
+                            new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
+                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+            
+            allocations = capped_allocations
+        
+        # Apply minimal threshold filter
+        if use_threshold:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # First: Filter out stocks below threshold
+            filtered_allocations = {}
+            for ticker, allocation in allocations.items():
+                if allocation >= threshold_decimal:
+                    # Keep stocks above or equal to threshold
+                    filtered_allocations[ticker] = allocation
+            
+            # Then: Normalize remaining stocks to sum to 1
+            if filtered_allocations:
+                total_allocation = sum(filtered_allocations.values())
+                if total_allocation > 0:
+                    allocations = {ticker: allocation / total_allocation for ticker, allocation in filtered_allocations.items()}
+                else:
+                    allocations = {}
+            else:
+                # If no stocks meet threshold, keep original allocations
+                pass  # allocations remain unchanged
+        
+        # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+        if use_max_allocation:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # Check if any stocks exceed the cap after threshold filtering and normalization
+            capped_allocations = {}
+            excess_allocation = 0.0
+            
+            for ticker, allocation in allocations.items():
+                if allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
+                else:
+                    capped_allocations[ticker] = allocation
+            
+            # Redistribute excess allocation proportionally to stocks below the cap
+            if excess_allocation > 0:
+                # Find stocks below the cap
+                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                  if allocation < max_allocation_decimal}
+                
+                if below_cap_stocks:
+                    total_below_cap = sum(below_cap_stocks.values())
+                    if total_below_cap > 0:
+                        # Redistribute excess proportionally
+                        for ticker in below_cap_stocks:
+                            proportion = below_cap_stocks[ticker] / total_below_cap
+                            new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
+                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+            
+            allocations = capped_allocations
+        
+        # Update tickers list to only include tickers with non-zero allocations
+        tickers = [ticker for ticker, allocation in allocations.items() if allocation > 0]
+        
+        # Debug output after filtering
+        print(f"[THRESHOLD DEBUG] Filtered allocations: {allocations}")
+        print(f"[THRESHOLD DEBUG] Final tickers: {tickers}")
+    
     benchmark_ticker = config.get('benchmark_ticker')
     initial_value = config.get('initial_value', 0)
     # Allocation tracker: ignore added cash for this mode. Use initial_value as current portfolio value.
@@ -2494,7 +2605,7 @@ def single_backtest(config, sim_index, reindexed_data):
             'Semiannually': 'Semiannually',
             'Annually': 'Annually',
             # Legacy format mapping
-            'none': 'Never',
+            'none': 'none',
             'week': 'Weekly',
             '2weeks': 'Biweekly',
             'month': 'Monthly',
@@ -3713,7 +3824,7 @@ def paste_json_callback():
                 'Semiannually': 'Semiannually',
                 'Annually': 'Annually',
                 # Legacy format mapping
-                'none': 'Never',
+                'none': 'none',
                 'week': 'Weekly',
                 '2weeks': 'Biweekly',
                 'month': 'Monthly',
@@ -4853,6 +4964,22 @@ if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_containe
 
 # Move Run Backtest to the first sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
+    print(f"[THRESHOLD DEBUG] Run Backtest button clicked!")
+    
+    # Update active portfolio config with current session state values before running backtest
+    active_portfolio = st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]
+    active_portfolio['use_minimal_threshold'] = st.session_state.get('alloc_active_use_threshold', False)
+    active_portfolio['minimal_threshold_percent'] = st.session_state.get('alloc_active_threshold_percent', 2.0)
+    active_portfolio['use_max_allocation'] = st.session_state.get('alloc_active_use_max_allocation', False)
+    active_portfolio['max_allocation_percent'] = st.session_state.get('alloc_active_max_allocation_percent', 10.0)
+    
+    # Debug output
+    print(f"[THRESHOLD DEBUG] Before backtest - Portfolio: {active_portfolio.get('name', 'Unknown')}")
+    print(f"[THRESHOLD DEBUG] use_minimal_threshold: {active_portfolio.get('use_minimal_threshold', False)}")
+    print(f"[THRESHOLD DEBUG] minimal_threshold_percent: {active_portfolio.get('minimal_threshold_percent', 2.0)}")
+    print(f"[THRESHOLD DEBUG] use_max_allocation: {active_portfolio.get('use_max_allocation', False)}")
+    print(f"[THRESHOLD DEBUG] max_allocation_percent: {active_portfolio.get('max_allocation_percent', 10.0)}")
+    print(f"[THRESHOLD DEBUG] use_momentum: {active_portfolio.get('use_momentum', True)}")
     
     # Pre-backtest validation check for all portfolios
     # Prefer the allocations page configs when present so this page's edits are included
@@ -5498,7 +5625,7 @@ def paste_all_json_callback():
                         'Semiannually': 'Semiannually',
                         'Annually': 'Annually',
                         # Legacy format mapping
-                        'none': 'Never',
+                        'none': 'none',
                         'week': 'Weekly',
                         '2weeks': 'Biweekly',
                         'month': 'Monthly',
@@ -5590,6 +5717,43 @@ if st.session_state.get('alloc_backtest_run', False):
     if not allocs_for_portfolio and not metrics_for_portfolio:
         st.info("No allocation or rebalancing history available. If you have precomputed allocation snapshots, store them in session state keys `alloc_all_allocations` and `alloc_all_metrics` under this portfolio name.")
     else:
+        # --- Calculate timer variables for rebalancing timer ---
+        last_rebal_date = None
+        rebalancing_frequency = 'none'
+        
+        if allocs_for_portfolio and active_portfolio:
+            try:
+                # Get the last rebalance date from allocation history
+                alloc_dates = sorted(list(allocs_for_portfolio.keys()))
+                if len(alloc_dates) > 1:
+                    last_rebal_date = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
+                else:
+                    last_rebal_date = alloc_dates[-1] if alloc_dates else None
+                
+                # Get rebalancing frequency from active portfolio
+                rebalancing_frequency = active_portfolio.get('rebalancing_frequency', 'none')
+                # Convert to lowercase and map to function expectations
+                rebalancing_frequency = rebalancing_frequency.lower()
+                # Map frequency names to what the function expects
+                frequency_mapping = {
+                    'monthly': 'month',
+                    'weekly': 'week',
+                    'bi-weekly': '2weeks',
+                    'biweekly': '2weeks',
+                    'quarterly': '3months',
+                    'semi-annually': '6months',
+                    'semiannually': '6months',
+                    'annually': 'year',
+                    'yearly': 'year',
+                    'market_day': 'market_day',
+                    'calendar_day': 'calendar_day',
+                    'never': 'none',
+                    'none': 'none'
+                }
+                rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
+            except Exception as e:
+                pass  # Silently ignore timer calculation errors
+        
         # --- Rebalance as of Today (static snapshot from last Run Backtests) ---
         snapshot = st.session_state.get('alloc_snapshot_data', {})
         today_weights_map = snapshot.get('today_weights_map', {}) if snapshot else {}
@@ -5608,17 +5772,176 @@ if st.session_state.get('alloc_backtest_run', False):
                     total_allocation = sum(stock.get('allocation', 0) for stock in active_portfolio['stocks'] if stock.get('ticker'))
                     
                     if total_allocation > 0:
+                        # Build raw allocations from portfolio config
+                        raw_allocations = {}
                         for stock in active_portfolio['stocks']:
                             ticker = stock.get('ticker', '').strip()
                             allocation = stock.get('allocation', 0)
                             if ticker and allocation > 0:
-                                # Convert to proportion (0-1 range)
-                                today_weights[ticker] = allocation / total_allocation
+                                raw_allocations[ticker] = allocation / total_allocation
+                        
+                        # Apply threshold filters to the raw allocations
+                        use_max_allocation = active_portfolio.get('use_max_allocation', False)
+                        max_allocation_percent = active_portfolio.get('max_allocation_percent', 10.0)
+                        use_threshold = active_portfolio.get('use_minimal_threshold', False)
+                        threshold_percent = active_portfolio.get('minimal_threshold_percent', 2.0)
+                        
+                        print(f"[THRESHOLD DEBUG] Rebalance as of Today - use_threshold: {use_threshold}, threshold_percent: {threshold_percent}, use_max_allocation: {use_max_allocation}, max_allocation_percent: {max_allocation_percent}")
+                        print(f"[THRESHOLD DEBUG] Raw allocations: {raw_allocations}")
+                        
+                        # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+                        filtered_allocations = raw_allocations.copy()
+                        
+                        if use_max_allocation:
+                            max_allocation_decimal = max_allocation_percent / 100.0
+                            
+                            # FIRST PASS: Apply maximum allocation filter
+                            capped_allocations = {}
+                            excess_allocation = 0.0
+                            
+                            for ticker, allocation in filtered_allocations.items():
+                                if allocation > max_allocation_decimal:
+                                    # Cap the allocation and collect excess
+                                    capped_allocations[ticker] = max_allocation_decimal
+                                    excess_allocation += (allocation - max_allocation_decimal)
+                                else:
+                                    capped_allocations[ticker] = allocation
+                            
+                            # Redistribute excess allocation proportionally to stocks below the cap
+                            if excess_allocation > 0:
+                                # Find stocks below the cap
+                                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                                  if allocation < max_allocation_decimal}
+                                
+                                if below_cap_stocks:
+                                    total_below_cap = sum(below_cap_stocks.values())
+                                    if total_below_cap > 0:
+                                        # Redistribute excess proportionally
+                                        for ticker in below_cap_stocks:
+                                            proportion = below_cap_stocks[ticker] / total_below_cap
+                                            new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
+                                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                            
+                            filtered_allocations = capped_allocations
+                        
+                        # Apply minimal threshold filter
+                        if use_threshold:
+                            threshold_decimal = threshold_percent / 100.0
+                            
+                            # First: Filter out stocks below threshold
+                            threshold_filtered_allocations = {}
+                            for ticker, allocation in filtered_allocations.items():
+                                if allocation >= threshold_decimal:
+                                    # Keep stocks above or equal to threshold
+                                    threshold_filtered_allocations[ticker] = allocation
+                            
+                            # Then: Normalize remaining stocks to sum to 1
+                            if threshold_filtered_allocations:
+                                total_allocation = sum(threshold_filtered_allocations.values())
+                                if total_allocation > 0:
+                                    filtered_allocations = {ticker: allocation / total_allocation for ticker, allocation in threshold_filtered_allocations.items()}
+                                else:
+                                    filtered_allocations = {}
+                            else:
+                                # If no stocks meet threshold, keep original allocations
+                                pass  # filtered_allocations remain unchanged
+                        
+                        # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+                        if use_max_allocation:
+                            max_allocation_decimal = max_allocation_percent / 100.0
+                            
+                            # Check if any stocks exceed the cap after threshold filtering and normalization
+                            capped_allocations = {}
+                            excess_allocation = 0.0
+                            
+                            for ticker, allocation in filtered_allocations.items():
+                                if allocation > max_allocation_decimal:
+                                    # Cap the allocation and collect excess
+                                    capped_allocations[ticker] = max_allocation_decimal
+                                    excess_allocation += (allocation - max_allocation_decimal)
+                                else:
+                                    capped_allocations[ticker] = allocation
+                            
+                            # Redistribute excess allocation proportionally to stocks below the cap
+                            if excess_allocation > 0:
+                                # Find stocks below the cap
+                                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                                  if allocation < max_allocation_decimal}
+                                
+                                if below_cap_stocks:
+                                    total_below_cap = sum(below_cap_stocks.values())
+                                    if total_below_cap > 0:
+                                        # Redistribute excess proportionally
+                                        for ticker in below_cap_stocks:
+                                            proportion = below_cap_stocks[ticker] / total_below_cap
+                                            new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
+                                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                            
+                            filtered_allocations = capped_allocations
+                        
+                        # Use the filtered allocations as today_weights
+                        today_weights = filtered_allocations
+                        print(f"[THRESHOLD DEBUG] Filtered allocations for Rebalance as of Today: {today_weights}")
                     
                     # If no valid stocks or allocations, leave today_weights empty (will show info message)
             
             labels_today = [k for k, v in sorted(today_weights.items(), key=lambda x: (-x[1], x[0])) if v > 0]
             vals_today = [float(today_weights[k]) * 100 for k in labels_today]
+            
+            # --- REBALANCING TIMER SECTION (moved above pie chart) ---
+            if last_rebal_date and rebalancing_frequency != 'none':
+                # Ensure last_rebal_date is a naive datetime object
+                import pandas as pd
+                if isinstance(last_rebal_date, str):
+                    last_rebal_date = pd.to_datetime(last_rebal_date)
+                if hasattr(last_rebal_date, 'tzinfo') and last_rebal_date.tzinfo is not None:
+                    last_rebal_date = last_rebal_date.replace(tzinfo=None)
+                
+                next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
+                    rebalancing_frequency, last_rebal_date
+                )
+                
+                if next_date and time_until:
+                    st.markdown("---")
+                    st.markdown("**⏰ Next Rebalance Timer**")
+                    
+                    # Create columns for timer display
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            label="Time Until Next Rebalance",
+                            value=format_time_until(time_until),
+                            delta=None
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            label="Target Rebalance Date",
+                            value=next_date.strftime("%B %d, %Y"),
+                            delta=None
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            label="Rebalancing Frequency",
+                            value=rebalancing_frequency.replace('_', ' ').title(),
+                            delta=None
+                        )
+                    
+                    # Add a progress bar showing progress to next rebalance
+                    if rebalancing_frequency in ['week', '2weeks', 'month', '3months', '6months', 'year']:
+                        # Calculate progress percentage
+                        if hasattr(last_rebal_date, 'to_pydatetime'):
+                            last_rebal_datetime = last_rebal_date.to_pydatetime()
+                        else:
+                            last_rebal_datetime = last_rebal_date
+                        
+                        total_period = (next_rebalance_datetime - last_rebal_datetime).total_seconds()
+                        elapsed_period = (datetime.now() - last_rebal_datetime).total_seconds()
+                        progress = min(max(elapsed_period / total_period, 0), 1)
+                        
+                        st.progress(progress, text=f"Progress to next rebalance: {progress:.1%}")
             
             if labels_today and vals_today:
                 st.markdown(f"## Rebalance as of Today ({pd.Timestamp.now().strftime('%Y-%m-%d')})")
@@ -6415,93 +6738,6 @@ if st.session_state.get('alloc_backtest_run', False):
             
 
 
-        # Add timer for next rebalance date
-        if allocs_for_portfolio and active_portfolio:
-            try:
-                # Get the last rebalance date from allocation history
-                alloc_dates = sorted(list(allocs_for_portfolio.keys()))
-                if len(alloc_dates) > 1:
-                    last_rebal_date = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
-                else:
-                    last_rebal_date = alloc_dates[-1] if alloc_dates else None
-                
-                # Get rebalancing frequency from active portfolio
-                rebalancing_frequency = active_portfolio.get('rebalancing_frequency', 'none')
-                # Convert to lowercase and map to function expectations
-                rebalancing_frequency = rebalancing_frequency.lower()
-                # Map frequency names to what the function expects
-                frequency_mapping = {
-                    'monthly': 'Monthly',
-                    'weekly': 'Weekly',
-                    'bi-weekly': 'Biweekly',
-                    'biweekly': 'Biweekly',
-                    'quarterly': 'Quarterly',
-                    'semi-annually': 'Semiannually',
-                    'semiannually': 'Semiannually',
-                    'annually': 'Annually',
-                    'yearly': 'Annually',
-                    'market_day': 'market_day',
-                    'calendar_day': 'calendar_day',
-                    'never': 'Never',
-                    'none': 'Never'
-                }
-                rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
-                
-                if last_rebal_date and rebalancing_frequency != 'Never':
-                    # Ensure last_rebal_date is a naive datetime object
-                    import pandas as pd
-                    if isinstance(last_rebal_date, str):
-                        last_rebal_date = pd.to_datetime(last_rebal_date)
-                    if hasattr(last_rebal_date, 'tzinfo') and last_rebal_date.tzinfo is not None:
-                        last_rebal_date = last_rebal_date.replace(tzinfo=None)
-                    
-                    next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
-                        rebalancing_frequency, last_rebal_date
-                    )
-                    
-                    if next_date and time_until:
-                        st.markdown("---")
-                        st.markdown("**⏰ Next Rebalance Timer**")
-                        
-                        # Create columns for timer display
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric(
-                                label="Time Until Next Rebalance",
-                                value=format_time_until(time_until),
-                                delta=None
-                            )
-                        
-                        with col2:
-                            st.metric(
-                                label="Target Rebalance Date",
-                                value=next_date.strftime("%B %d, %Y"),
-                                delta=None
-                            )
-                        
-                        with col3:
-                            st.metric(
-                                label="Rebalancing Frequency",
-                                value=rebalancing_frequency.replace('_', ' ').title(),
-                                delta=None
-                            )
-                        
-                        # Add a progress bar showing progress to next rebalance
-                        if rebalancing_frequency in ['week', '2weeks', 'month', '3months', '6months', 'year']:
-                            # Calculate progress percentage
-                            if hasattr(last_rebal_date, 'to_pydatetime'):
-                                last_rebal_datetime = last_rebal_date.to_pydatetime()
-                            else:
-                                last_rebal_datetime = last_rebal_date
-                            
-                            total_period = (next_rebalance_datetime - last_rebal_datetime).total_seconds()
-                            elapsed_period = (datetime.now() - last_rebal_datetime).total_seconds()
-                            progress = min(max(elapsed_period / total_period, 0), 1)
-                            
-                            st.progress(progress, text=f"Progress to next rebalance: {progress:.1%}")
-            except Exception as e:
-                pass  # Silently ignore timer calculation errors
         
         build_table_from_alloc({**today_weights, 'CASH': today_weights.get('CASH', 0)}, None, f"Shares if Rebalanced Today (snapshot)")
 
