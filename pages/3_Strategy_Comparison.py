@@ -12,6 +12,7 @@ import io
 import contextlib
 import os
 import plotly.io as pio
+import time as time_module
 
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
@@ -4053,109 +4054,66 @@ sync_global_tickers_to_all_portfolios()
 # -----------------------
 # Timer function for next rebalance date
 # -----------------------
-def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
-    """
-    Calculate the next rebalance date based on rebalancing frequency and last rebalance date.
-    Excludes today and yesterday as mentioned in the requirements.
-    """
-    if not last_rebalance_date or rebalancing_frequency == 'none':
+def calculate_next_rebalance_date(rebalancing_frequency, start_date):
+    """Find most recent rebalance date based on frequency, calculate next"""
+    if rebalancing_frequency == 'none':
         return None, None, None
     
-    # Convert to datetime if it's a pandas Timestamp
-    if hasattr(last_rebalance_date, 'to_pydatetime'):
-        last_rebalance_date = last_rebalance_date.to_pydatetime()
+    # Get backtest start date
+    if isinstance(start_date, str):
+        start_date = pd.to_datetime(start_date)
+    if hasattr(start_date, 'to_pydatetime'):
+        start_date = start_date.to_pydatetime()
     
-    today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
-    
-    # If last rebalance was today or yesterday, use the day before yesterday as base
-    if last_rebalance_date.date() >= yesterday:
-        base_date = yesterday - timedelta(days=1)
-    else:
-        base_date = last_rebalance_date.date()
-    
-    # Calculate next rebalance date based on frequency
-    if rebalancing_frequency == 'market_day':
-        # Next market day (simplified - just next day for now)
-        next_date = base_date + timedelta(days=1)
-    elif rebalancing_frequency == 'calendar_day':
-        next_date = base_date + timedelta(days=1)
-    elif rebalancing_frequency == 'week':
-        next_date = base_date + timedelta(weeks=1)
-    elif rebalancing_frequency == '2weeks':
-        next_date = base_date + timedelta(weeks=2)
-    elif rebalancing_frequency == 'month':
-        # Add one month
-        if base_date.month == 12:
-            next_date = base_date.replace(year=base_date.year + 1, month=1)
-        else:
-            next_date = base_date.replace(month=base_date.month + 1)
-    elif rebalancing_frequency == '3months':
-        # Add three months
-        new_month = base_date.month + 3
-        new_year = base_date.year + (new_month - 1) // 12
-        new_month = ((new_month - 1) % 12) + 1
-        next_date = base_date.replace(year=new_year, month=new_month)
-    elif rebalancing_frequency == '6months':
-        # Add six months
-        new_month = base_date.month + 6
-        new_year = base_date.year + (new_month - 1) // 12
-        new_month = ((new_month - 1) % 12) + 1
-        next_date = base_date.replace(year=new_year, month=new_month)
-    elif rebalancing_frequency == 'year':
-        next_date = base_date.replace(year=base_date.year + 1)
-    else:
-        return None, None, None
-    
-    # Calculate time until next rebalance
     now = datetime.now()
-    # Ensure both datetimes are offset-naive for comparison and subtraction
-    if hasattr(next_date, 'tzinfo') and next_date.tzinfo is not None:
-        next_date = next_date.replace(tzinfo=None)
-    next_rebalance_datetime = datetime.combine(next_date, time(9, 30))  # Assume 9:30 AM market open
-    if hasattr(next_rebalance_datetime, 'tzinfo') and next_rebalance_datetime.tzinfo is not None:
-        next_rebalance_datetime = next_rebalance_datetime.replace(tzinfo=None)
-    if hasattr(now, 'tzinfo') and now.tzinfo is not None:
-        now = now.replace(tzinfo=None)
-    # If next rebalance is in the past, calculate the next one iteratively instead of recursively
-    max_iterations = 10  # Prevent infinite loops
-    iteration = 0
-    while next_rebalance_datetime <= now and iteration < max_iterations:
-        iteration += 1
-        if rebalancing_frequency in ['market_day', 'calendar_day']:
-            next_date = next_date + timedelta(days=1)
-        elif rebalancing_frequency == 'week':
-            next_date = next_date + timedelta(weeks=1)
-        elif rebalancing_frequency == '2weeks':
-            next_date = next_date + timedelta(weeks=2)
-        elif rebalancing_frequency == 'month':
-            # Add one month safely
-            if next_date.month == 12:
-                next_date = next_date.replace(year=next_date.year + 1, month=1)
-            else:
-                next_date = next_date.replace(month=next_date.month + 1)
-            # Handle day overflow
-            try:
-                next_date = next_date.replace(day=min(next_date.day, 28))
-            except ValueError:
-                next_date = next_date.replace(day=1)
-        elif rebalancing_frequency == '3months':
-            # Add three months safely
-            new_month = next_date.month + 3
-            new_year = next_date.year + (new_month - 1) // 12
-            new_month = ((new_month - 1) % 12) + 1
-            next_date = next_date.replace(year=new_year, month=new_month, day=1)
-        elif rebalancing_frequency == '6months':
-            # Add six months safely
-            new_month = next_date.month + 6
-            new_year = next_date.year + (new_month - 1) // 12
-            new_month = ((new_month - 1) % 12) + 1
-            next_date = next_date.replace(year=new_year, month=new_month, day=1)
-        elif rebalancing_frequency == 'year':
-            next_date = next_date.replace(year=next_date.year + 1)
-        
-        next_rebalance_datetime = datetime.combine(next_date, time(9, 30))
+    start_year = start_date.year
+    start_month = start_date.month
+    start_day = start_date.day
+    current_year = now.year
     
+    # Find most recent rebalance date based on frequency
+    if rebalancing_frequency == 'year':
+        # Most recent January 1st (or start date) that has passed
+        last_rebalance = date(current_year, start_month, start_day)
+        if last_rebalance >= now.date():
+            last_rebalance = date(current_year - 1, start_month, start_day)
+    elif rebalancing_frequency == 'month':
+        # Most recent same day of month that has passed
+        last_rebalance = date(current_year, now.month, start_day)
+        if last_rebalance >= now.date():
+            if now.month > 1:
+                last_rebalance = date(current_year, now.month - 1, start_day)
+            else:
+                last_rebalance = date(current_year - 1, 12, start_day)
+    elif rebalancing_frequency == 'week':
+        # Most recent same weekday that has passed
+        days_since_start = (now.date() - start_date.date()).days
+        weeks_passed = days_since_start // 7
+        last_rebalance = start_date.date() + timedelta(weeks=weeks_passed)
+    else:
+        # For other frequencies, use simple day calculation
+        freq_days = {'market_day': 1, 'calendar_day': 1, '2weeks': 14, '3months': 90, '6months': 180}
+        days = freq_days.get(rebalancing_frequency, 30)
+        days_since_start = (now.date() - start_date.date()).days
+        periods_passed = days_since_start // days
+        last_rebalance = start_date.date() + timedelta(days=periods_passed * days)
+    
+    # Calculate next rebalance date
+    if rebalancing_frequency == 'year':
+        next_date = date(last_rebalance.year + 1, last_rebalance.month, last_rebalance.day)
+    elif rebalancing_frequency == 'month':
+        if last_rebalance.month == 12:
+            next_date = date(last_rebalance.year + 1, 1, last_rebalance.day)
+        else:
+            next_date = date(last_rebalance.year, last_rebalance.month + 1, last_rebalance.day)
+    elif rebalancing_frequency == 'week':
+        next_date = last_rebalance + timedelta(weeks=1)
+    else:
+        freq_days = {'market_day': 1, 'calendar_day': 1, '2weeks': 14, '3months': 90, '6months': 180}
+        days = freq_days.get(rebalancing_frequency, 30)
+        next_date = last_rebalance + timedelta(days=days)
+    
+    next_rebalance_datetime = datetime.combine(next_date, time(9, 30))
     time_until = next_rebalance_datetime - now
     
     return next_date, time_until, next_rebalance_datetime
@@ -4861,7 +4819,7 @@ def paste_json_callback():
                 'Semiannually': 'Semiannually',
                 'Annually': 'Annually',
                 # Legacy format mapping
-                'none': 'Never',
+                'none': 'none',
                 'week': 'Weekly',
                 '2weeks': 'Biweekly',
                 'month': 'Monthly',
@@ -5172,7 +5130,7 @@ def paste_all_json_callback():
                         'Semiannually': 'Semiannually',
                         'Annually': 'Annually',
                         # Legacy format mapping
-                        'none': 'Never',
+                        'none': 'none',
                         'week': 'Weekly',
                         '2weeks': 'Biweekly',
                         'month': 'Monthly',
@@ -8142,6 +8100,9 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             
             st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability (NO CACHE)...**")
             
+            # Start timing
+            start_time = time_module.time()
+            
             # Process strategies one by one with robust error handling
             for i, cfg in enumerate(st.session_state.strategy_comparison_portfolio_configs, start=1):
                 try:
@@ -8258,9 +8219,15 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             # Final progress update
             progress_bar.progress(1.0, text="Strategy processing completed!")
             
-            # Show results summary
+            # Show results summary with performance timing
             if successful_strategies > 0:
+                # Calculate total processing time
+                end_time = time_module.time()
+                total_time = end_time - start_time
+                avg_time_per_strategy = total_time / successful_strategies if successful_strategies > 0 else 0
+                
                 st.success(f"🎉 **Successfully processed {successful_strategies}/{len(st.session_state.strategy_comparison_portfolio_configs)} strategies!**")
+                st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per strategy: {avg_time_per_strategy:.2f}s")
                 if failed_strategies:
                     st.warning(f"⚠️ **{len(failed_strategies)} strategies failed** - check warnings above for details")
             else:
@@ -10129,10 +10096,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                 # Add timer for next rebalance date
                                 try:
                                     # Get the last rebalance date from allocation history
-                                    if len(alloc_dates) > 1:
-                                        last_rebal_date_for_timer = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
-                                    else:
-                                        last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
+                                    last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
                                     
                                     # Get rebalancing frequency from portfolio config
                                     portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
@@ -10142,30 +10106,31 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                     rebalancing_frequency = rebalancing_frequency.lower()
                                     # Map frequency names to what the function expects
                                     frequency_mapping = {
-                                        'monthly': 'Monthly',
-                                        'weekly': 'Weekly',
-                                        'bi-weekly': 'Biweekly',
-                                        'biweekly': 'Biweekly',
-                                        'quarterly': 'Quarterly',
-                                        'semi-annually': 'Semiannually',
-                                        'semiannually': 'Semiannually',
-                                        'annually': 'Annually',
-                                        'yearly': 'Annually',
+                                        'monthly': 'month',
+                                        'weekly': 'week',
+                                        'bi-weekly': '2weeks',
+                                        'biweekly': '2weeks',
+                                        'quarterly': '3months',
+                                        'semi-annually': '6months',
+                                        'semiannually': '6months',
+                                        'annually': 'year',
+                                        'yearly': 'year',
                                         'market_day': 'market_day',
                                         'calendar_day': 'calendar_day',
-                                        'never': 'Never',
-                                        'none': 'Never'
+                                        'never': 'none',
+                                        'none': 'none'
                                     }
                                     rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                                     
-                                    if last_rebal_date_for_timer and rebalancing_frequency != 'Never':
+                                    if last_rebal_date_for_timer and rebalancing_frequency != 'none':
                                         # Ensure last_rebal_date_for_timer is a naive datetime object
                                         if isinstance(last_rebal_date_for_timer, str):
                                             last_rebal_date_for_timer = pd.to_datetime(last_rebal_date_for_timer)
                                         if hasattr(last_rebal_date_for_timer, 'tzinfo') and last_rebal_date_for_timer.tzinfo is not None:
                                             last_rebal_date_for_timer = last_rebal_date_for_timer.replace(tzinfo=None)
+                                        backtest_start_date = st.session_state.get("strategy_comparison_start_date", date(2010, 1, 1))
                                         next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
-                                            rebalancing_frequency, last_rebal_date_for_timer
+                                            rebalancing_frequency, backtest_start_date
                                         )
                                         
                                         if next_date and time_until:
@@ -10264,34 +10229,26 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                                     
                                                     # Map frequency names to what the function expects (EXACT same as main window)
                                                     frequency_mapping = {
-                                                        'monthly': 'Monthly',
-                                                        'weekly': 'Weekly',
-                                                        'bi-weekly': 'Biweekly',
-                                                        'biweekly': 'Biweekly',
-                                                        'quarterly': 'Quarterly',
-                                                        'semi-annually': 'Semiannually',
-                                                        'semiannually': 'Semiannually',
-                                                        'annually': 'Annually',
-                                                        'yearly': 'Annually',
+                                                        'monthly': 'month',
+                                                        'weekly': 'week',
+                                                        'bi-weekly': '2weeks',
+                                                        'biweekly': '2weeks',
+                                                        'quarterly': '3months',
+                                                        'semi-annually': '6months',
+                                                        'semiannually': '6months',
+                                                        'annually': 'year',
+                                                        'yearly': 'year',
                                                         'market_day': 'market_day',
                                                         'calendar_day': 'calendar_day',
-                                                        'never': 'Never',
-                                                        'none': 'Never'
+                                                        'never': 'none',
+                                                        'none': 'none'
                                                     }
                                                     rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                                                     
-                                                    # Get last rebalance date from allocation history (EXACT same as main window)
-                                                    allocs_for_portfolio = st.session_state.strategy_comparison_all_allocations.get(portfolio_name) if 'strategy_comparison_all_allocations' in st.session_state else None
-                                                    if allocs_for_portfolio:
-                                                        alloc_dates = sorted(list(allocs_for_portfolio.keys()))
-                                                        if len(alloc_dates) > 1:
-                                                            last_rebal_date_for_timer = alloc_dates[-2]  # Second to last date (excluding today/yesterday)
-                                                        else:
-                                                            last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
-                                                    else:
-                                                        last_rebal_date_for_timer = None
+                                                    # Get the last rebalance date from allocation history
+                                                    last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
                                                     
-                                                    if last_rebal_date_for_timer and rebalancing_frequency != 'Never':
+                                                    if last_rebal_date_for_timer and rebalancing_frequency != 'none':
                                                         # Ensure last_rebal_date_for_timer is a naive datetime object (EXACT same as main window)
                                                         if isinstance(last_rebal_date_for_timer, str):
                                                             last_rebal_date_for_timer = pd.to_datetime(last_rebal_date_for_timer)
@@ -10299,8 +10256,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                                             last_rebal_date_for_timer = last_rebal_date_for_timer.replace(tzinfo=None)
                                                         
                                                         # Use EXACT same function as main window
+                                                        backtest_start_date = st.session_state.get("strategy_comparison_start_date", date(2010, 1, 1))
                                                         next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
-                                                            rebalancing_frequency, last_rebal_date_for_timer
+                                                            rebalancing_frequency, backtest_start_date
                                                         )
                                                         
                                                         if next_date and time_until:
@@ -10568,6 +10526,139 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                 )
                                 # Store fig_today for PDF generation
                                 st.session_state[f'strategy_comparison_fig_today_{selected_portfolio_detail}'] = fig_today
+                                
+                                # NUCLEAR APPROACH: Force timer display - NO EXCEPTION HANDLING
+                                st.markdown("---")
+                                st.markdown("**⏰ Next Rebalance Timer**")
+                                
+                                # Get portfolio config - FORCE IT
+                                portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
+                                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                                
+                                if portfolio_cfg:
+                                    rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'monthly')
+                                else:
+                                    rebalancing_frequency = 'monthly'
+                                
+                                # Map frequency names to what the function expects
+                                frequency_mapping = {
+                                    'monthly': 'month',
+                                    'weekly': 'week',
+                                    'bi-weekly': '2weeks',
+                                    'biweekly': '2weeks',
+                                    'quarterly': '3months',
+                                    'semi-annually': '6months',
+                                    'semiannually': '6months',
+                                    'annually': 'year',
+                                    'yearly': 'year',
+                                    'market_day': 'market_day',
+                                    'calendar_day': 'calendar_day',
+                                    'never': 'none',
+                                    'none': 'none'
+                                }
+                                rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), 'month')
+                                
+                                # FORCE last rebalance date - use last allocation date
+                                if len(alloc_dates) >= 1:
+                                    last_rebal_date_for_timer = alloc_dates[-1]
+                                else:
+                                    # Fallback to today - 30 days ago
+                                    last_rebal_date_for_timer = datetime.now().date() - timedelta(days=30)
+                                
+                                # Ensure it's a date object
+                                if isinstance(last_rebal_date_for_timer, str):
+                                    last_rebal_date_for_timer = pd.to_datetime(last_rebal_date_for_timer).date()
+                                elif hasattr(last_rebal_date_for_timer, 'date'):
+                                    last_rebal_date_for_timer = last_rebal_date_for_timer.date()
+                                
+                                # Calculate next rebalance date and time until
+                                next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
+                                    rebalancing_frequency, last_rebal_date_for_timer
+                                )
+                                
+                                # Create columns for timer display
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    if time_until:
+                                        st.metric(
+                                            label="Time Until Next Rebalance",
+                                            value=format_time_until(time_until),
+                                            delta=None
+                                        )
+                                    else:
+                                        st.metric(
+                                            label="Time Until Next Rebalance",
+                                            value="Calculating...",
+                                            delta=None
+                                        )
+                                
+                                with col2:
+                                    if next_date:
+                                        st.metric(
+                                            label="Target Rebalance Date",
+                                            value=next_date.strftime("%B %d, %Y"),
+                                            delta=None
+                                        )
+                                    else:
+                                        st.metric(
+                                            label="Target Rebalance Date",
+                                            value="N/A",
+                                            delta=None
+                                        )
+                                
+                                with col3:
+                                    st.metric(
+                                        label="Rebalancing Frequency",
+                                        value=rebalancing_frequency.replace('_', ' ').title(),
+                                        delta=None
+                                    )
+                                
+                                # Add progress bar
+                                if rebalancing_frequency in ['week', '2weeks', 'month', '3months', '6months', 'year'] and next_rebalance_datetime and time_until:
+                                    last_rebal_datetime = datetime.combine(last_rebal_date_for_timer, time(9, 30))
+                                    total_period = (next_rebalance_datetime - last_rebal_datetime).total_seconds()
+                                    elapsed_period = (datetime.now() - last_rebal_datetime).total_seconds()
+                                    progress = min(max(elapsed_period / total_period, 0), 1)
+                                    st.progress(progress, text=f"Progress to next rebalance: {progress:.1%}")
+                                
+                                # Create timer table for PDF export
+                                timer_data = [
+                                    ['Time Until Next Rebalance', format_time_until(time_until) if time_until else 'N/A'],
+                                    ['Target Rebalance Date', next_date.strftime("%B %d, %Y") if next_date else 'N/A'],
+                                    ['Rebalancing Frequency', rebalancing_frequency.replace('_', ' ').title()]
+                                ]
+                                
+                                fig_timer = go.Figure(data=[go.Table(
+                                    header=dict(
+                                        values=['Parameter', 'Value'],
+                                        fill_color='#2E86AB',
+                                        align='center',
+                                        font=dict(color='white', size=16, family='Arial Black')
+                                    ),
+                                    cells=dict(
+                                        values=list(zip(*timer_data)),
+                                        fill_color='#1f2937',
+                                        align=['left', 'center'],
+                                        font=dict(color='white', size=14)
+                                    )
+                                )])
+                                
+                                fig_timer.update_layout(
+                                    title=dict(
+                                        text="⏰ Next Rebalance Timer",
+                                        x=0.5,
+                                        font=dict(size=18, color='#2E86AB', family='Arial Black')
+                                    ),
+                                    width=700,
+                                    height=250,
+                                    margin=dict(l=20, r=20, t=60, b=20)
+                                )
+                                
+                                # Store in session state for PDF export
+                                st.session_state[f'strategy_comparison_timer_table_{selected_portfolio_detail}'] = fig_timer
+                                
+                                # Display the pie chart
                                 st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
                                 
                                 # Table moved under the plot
@@ -11078,32 +11169,33 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                             rebalancing_frequency = rebalancing_frequency.lower()
                             # Map frequency names to what the function expects
                             frequency_mapping = {
-                                'monthly': 'Monthly',
-                                'weekly': 'Weekly',
-                                'bi-weekly': 'Biweekly',
-                                'biweekly': 'Biweekly',
-                                'quarterly': 'Quarterly',
-                                'semi-annually': 'Semiannually',
-                                'semiannually': 'Semiannually',
-                                'annually': 'Annually',
-                                'yearly': 'Annually',
+                                'monthly': 'month',
+                                'weekly': 'week',
+                                'bi-weekly': '2weeks',
+                                'biweekly': '2weeks',
+                                'quarterly': '3months',
+                                'semi-annually': '6months',
+                                'semiannually': '6months',
+                                'annually': 'year',
+                                'yearly': 'year',
                                 'market_day': 'market_day',
                                 'calendar_day': 'calendar_day',
-                                'never': 'Never',
-                                'none': 'Never'
+                                'never': 'none',
+                                'none': 'none'
                             }
                             rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                             
-                            if last_date and rebalancing_frequency != 'Never':
+                            if last_date and rebalancing_frequency != 'none':
                                 # Ensure last_date is a naive datetime object
                                 if isinstance(last_date, str):
-                                    last_date_for_timer = pd.to_datetime(last_date)
+                                    last_rebal_date_for_timer = pd.to_datetime(last_date)
                                 else:
-                                    last_date_for_timer = last_date
-                                if hasattr(last_date_for_timer, 'tzinfo') and last_date_for_timer.tzinfo is not None:
-                                    last_date_for_timer = last_date_for_timer.replace(tzinfo=None)
+                                    last_rebal_date_for_timer = last_date
+                                if hasattr(last_rebal_date_for_timer, 'tzinfo') and last_rebal_date_for_timer.tzinfo is not None:
+                                    last_rebal_date_for_timer = last_rebal_date_for_timer.replace(tzinfo=None)
+                                backtest_start_date = st.session_state.get("strategy_comparison_start_date", date(2010, 1, 1))
                                 next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
-                                    rebalancing_frequency, last_date_for_timer
+                                    rebalancing_frequency, backtest_start_date
                                 )
                                 
                                 if next_date and time_until:
@@ -11137,10 +11229,10 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                     # Add a progress bar showing progress to next rebalance
                                     if rebalancing_frequency in ['week', '2weeks', 'month', '3months', '6months', 'year']:
                                         # Calculate progress percentage
-                                        if hasattr(last_date_for_timer, 'to_pydatetime'):
-                                            last_rebal_datetime = last_date_for_timer.to_pydatetime()
+                                        if hasattr(last_rebal_date_for_timer, 'to_pydatetime'):
+                                            last_rebal_datetime = last_rebal_date_for_timer.to_pydatetime()
                                         else:
-                                            last_rebal_datetime = last_date_for_timer
+                                            last_rebal_datetime = last_rebal_date_for_timer
                                         
                                         total_period = (next_rebalance_datetime - last_rebal_datetime).total_seconds()
                                         elapsed_period = (datetime.now() - last_rebal_datetime).total_seconds()
@@ -11319,7 +11411,140 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                             )
                             # Store fig_today for PDF generation
                             st.session_state[f'strategy_comparison_fig_today_{selected_portfolio_detail}'] = fig_today
-                            st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_fallback_{selected_portfolio_detail}")
+                        
+                        # NUCLEAR APPROACH: Force timer display - NO EXCEPTION HANDLING
+                        st.markdown("---")
+                        st.markdown("**⏰ Next Rebalance Timer**")
+                        
+                        # Get portfolio config - FORCE IT
+                        portfolio_configs = st.session_state.get('strategy_comparison_portfolio_configs', [])
+                        portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                        
+                        if portfolio_cfg:
+                            rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'monthly')
+                        else:
+                            rebalancing_frequency = 'monthly'
+                        
+                        # Map frequency names to what the function expects
+                        frequency_mapping = {
+                            'monthly': 'month',
+                            'weekly': 'week',
+                            'bi-weekly': '2weeks',
+                            'biweekly': '2weeks',
+                            'quarterly': '3months',
+                            'semi-annually': '6months',
+                            'semiannually': '6months',
+                            'annually': 'year',
+                            'yearly': 'year',
+                            'market_day': 'market_day',
+                            'calendar_day': 'calendar_day',
+                            'never': 'none',
+                            'none': 'none'
+                        }
+                        rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), 'month')
+                        
+                        # FORCE last rebalance date - use last_date or fallback
+                        if 'last_date' in locals() and last_date:
+                            last_rebal_date_for_timer = last_date
+                        else:
+                            # Fallback to today - 30 days ago
+                            last_rebal_date_for_timer = datetime.now().date() - timedelta(days=30)
+                        
+                        # Ensure it's a date object
+                        if isinstance(last_rebal_date_for_timer, str):
+                            last_rebal_date_for_timer = pd.to_datetime(last_rebal_date_for_timer).date()
+                        elif hasattr(last_rebal_date_for_timer, 'date'):
+                            last_rebal_date_for_timer = last_rebal_date_for_timer.date()
+                        
+                        # Calculate next rebalance date and time until
+                        next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
+                            rebalancing_frequency, last_rebal_date_for_timer
+                        )
+                        
+                        # Create columns for timer display
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if time_until:
+                                st.metric(
+                                    label="Time Until Next Rebalance",
+                                    value=format_time_until(time_until),
+                                    delta=None
+                                )
+                            else:
+                                st.metric(
+                                    label="Time Until Next Rebalance",
+                                    value="Calculating...",
+                                    delta=None
+                                )
+                        
+                        with col2:
+                            if next_date:
+                                st.metric(
+                                    label="Target Rebalance Date",
+                                    value=next_date.strftime("%B %d, %Y"),
+                                    delta=None
+                                )
+                            else:
+                                st.metric(
+                                    label="Target Rebalance Date",
+                                    value="N/A",
+                                    delta=None
+                                )
+                        
+                        with col3:
+                            st.metric(
+                                label="Rebalancing Frequency",
+                                value=rebalancing_frequency.replace('_', ' ').title(),
+                                delta=None
+                            )
+                        
+                        # Add progress bar
+                        if rebalancing_frequency in ['week', '2weeks', 'month', '3months', '6months', 'year'] and next_rebalance_datetime and time_until:
+                            last_rebal_datetime = datetime.combine(last_rebal_date_for_timer, time(9, 30))
+                            total_period = (next_rebalance_datetime - last_rebal_datetime).total_seconds()
+                            elapsed_period = (datetime.now() - last_rebal_datetime).total_seconds()
+                            progress = min(max(elapsed_period / total_period, 0), 1)
+                            st.progress(progress, text=f"Progress to next rebalance: {progress:.1%}")
+                        
+                        # Create timer table for PDF export
+                        timer_data = [
+                            ['Time Until Next Rebalance', format_time_until(time_until) if time_until else 'N/A'],
+                            ['Target Rebalance Date', next_date.strftime("%B %d, %Y") if next_date else 'N/A'],
+                            ['Rebalancing Frequency', rebalancing_frequency.replace('_', ' ').title()]
+                        ]
+                        
+                        fig_timer = go.Figure(data=[go.Table(
+                            header=dict(
+                                values=['Parameter', 'Value'],
+                                fill_color='#2E86AB',
+                                align='center',
+                                font=dict(color='white', size=16, family='Arial Black')
+                            ),
+                            cells=dict(
+                                values=list(zip(*timer_data)),
+                                fill_color='#1f2937',
+                                align=['left', 'center'],
+                                font=dict(color='white', size=14)
+                            )
+                        )])
+                        
+                        fig_timer.update_layout(
+                            title=dict(
+                                text="⏰ Next Rebalance Timer",
+                                x=0.5,
+                                font=dict(size=18, color='#2E86AB', family='Arial Black')
+                            ),
+                            width=700,
+                            height=250,
+                            margin=dict(l=20, r=20, t=60, b=20)
+                        )
+                        
+                        # Store in session state for PDF export
+                        st.session_state[f'strategy_comparison_timer_table_{selected_portfolio_detail}'] = fig_timer
+                        
+                        # Display the pie chart
+                        st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_fallback_{selected_portfolio_detail}")
                         
                         with col_main_table:
                             # Add the "Rebalance as of today" table for fallback
