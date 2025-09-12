@@ -2845,7 +2845,7 @@ def get_dates_by_freq(freq, start, end, market_days):
         return set(market_days)
     elif freq == "calendar_day":
         return set(pd.date_range(start=start, end=end, freq='D'))
-    elif freq == "Weekly":
+    elif freq == "week" or freq == "Weekly":
         # Use first trading day of each week (Monday) - start from first Monday, not actual start date
         dates = []
         # Find the first Monday on or after start date
@@ -2869,7 +2869,7 @@ def get_dates_by_freq(freq, start, end, market_days):
             current_date += pd.Timedelta(weeks=1)
         
         return set(dates)
-    elif freq == "Biweekly":
+    elif freq == "2weeks" or freq == "Biweekly":
         # Use first trading day of every other week (every 2 weeks starting from first Monday)
         dates = []
         # Find the first Monday on or after start date
@@ -2893,7 +2893,7 @@ def get_dates_by_freq(freq, start, end, market_days):
             current_date += pd.Timedelta(weeks=2)
         
         return set(dates)
-    elif freq == "Monthly":
+    elif freq == "month" or freq == "Monthly":
         # Use 1st of each month - start from January of start year, not actual start date
         dates = []
         start_year = start.year
@@ -2925,7 +2925,7 @@ def get_dates_by_freq(freq, start, end, market_days):
                 current_year += 1
         
         return set(dates)
-    elif freq == "Quarterly":
+    elif freq == "3months" or freq == "Quarterly":
         # Use 1st of January, April, July, October
         dates = []
         start_year = start.year
@@ -2948,7 +2948,7 @@ def get_dates_by_freq(freq, start, end, market_days):
                         dates.append(market_day_quarter)
         
         return set(dates)
-    elif freq == "Semiannually":
+    elif freq == "6months" or freq == "Semiannually":
         # Use 1st of January and July
         dates = []
         start_year = start.year
