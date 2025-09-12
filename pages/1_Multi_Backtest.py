@@ -7,6 +7,8 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import json
 import io
+import concurrent.futures
+import time as time_module
 
 # Set pandas options for handling large dataframes
 pd.set_option("styler.render.max_elements", 1000000)  # Allow up to 1M cells for styling
@@ -4387,19 +4389,19 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     
     # Map frequency names to what the get_dates_by_freq function expects (capitalized)
     frequency_mapping = {
-        'monthly': 'Monthly',
-        'weekly': 'Weekly',
-        'bi-weekly': 'Biweekly',
-        'biweekly': 'Biweekly',
-        'quarterly': 'Quarterly',
-        'semi-annually': 'Semiannually',
-        'semiannually': 'Semiannually',
-        'annually': 'Annually',
-        'yearly': 'Annually',
+        'monthly': 'month',
+        'weekly': 'week',
+        'bi-weekly': '2weeks',
+        'biweekly': '2weeks',
+        'quarterly': '3months',
+        'semi-annually': '6months',
+        'semiannually': '6months',
+        'annually': 'year',
+        'yearly': 'year',
         'market_day': 'market_day',
         'calendar_day': 'calendar_day',
-        'never': 'Never',
-        'none': 'Never'
+        'never': 'none',
+        'none': 'none'
     }
     fusion_rebalancing_frequency = frequency_mapping.get(fusion_rebalancing_frequency.lower(), fusion_rebalancing_frequency)
     
@@ -5361,7 +5363,7 @@ def paste_json_callback():
                 'Semiannually': 'Semiannually',
                 'Annually': 'Annually',
                 # Legacy format mapping
-                'none': 'Never',
+                'none': 'none',
                 'week': 'Weekly',
                 '2weeks': 'Biweekly',
                 'month': 'Monthly',
@@ -8481,6 +8483,10 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Step 2: Process individual portfolios FIRST
                 if individual_portfolios:
                     status_container.info(f"🚀 **Phase 1: Processing {len(individual_portfolios)} individual portfolios...**")
+                    
+                    # Start timing
+                    start_time = time_module.time()
+                    
                     for i, (original_index, cfg) in enumerate(individual_portfolios, start=1):
                         try:
                             # Update progress for individual portfolios
@@ -8613,6 +8619,13 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             failed_portfolios.append((cfg.get('name', f'Portfolio {i}'), str(e)))
                             st.warning(f"⚠️ Portfolio {cfg.get('name', f'Portfolio {i}')} failed: {str(e)}")
                             continue
+                
+                # Show Phase 1 performance summary
+                if individual_portfolios:
+                    end_time = time_module.time()
+                    phase1_time = end_time - start_time
+                    avg_time_per_portfolio = phase1_time / len(individual_portfolios) if len(individual_portfolios) > 0 else 0
+                    st.info(f"⏱️ **Phase 1 Performance:** Total time: {phase1_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s")
                 
                 # Step 3: Process fusion portfolios LAST (after all individual portfolios are done)
                 if fusion_portfolios:
@@ -8754,9 +8767,15 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Clear temporary status messages
                 status_container.empty()
                 
-                # Show results summary
+                # Show results summary with performance timing
                 if successful_portfolios > 0:
+                    # Calculate total processing time
+                    total_end_time = time_module.time()
+                    total_time = total_end_time - start_time
+                    avg_time_per_portfolio = total_time / successful_portfolios if successful_portfolios > 0 else 0
+                    
                     st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios!**")
+                    st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s")
                     if failed_portfolios:
                         st.warning(f"⚠️ **{len(failed_portfolios)} portfolios failed** - check warnings above for details")
                 else:
@@ -8955,7 +8974,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                 alloc_pct = float(today_weights.get(tk, 0))
                                 if tk == 'CASH':
                                     price = None
-                                    shares = 0
+                                    shares = 0.0
                                     total_val = portfolio_value * alloc_pct
                                 else:
                                     df = raw_data.get(tk)
@@ -8974,7 +8993,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                             shares = 0.0
                                             total_val = portfolio_value * alloc_pct
                                     except Exception:
-                                        shares = 0
+                                        shares = 0.0
                                         total_val = portfolio_value * alloc_pct
 
                                 pct_of_port = (total_val / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -8982,7 +9001,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     'Ticker': tk,
                                     'Allocation %': round(alloc_pct * 100, 2),
                                     'Price ($)': round(price, 2) if price is not None else float('nan'),
-                                    'Shares': round(shares, 2),
+                                    'Shares': float(round(shares, 2)) if shares is not None else 0.0,
                                     'Total Value ($)': round(total_val, 2),
                                     '% of Portfolio': round(pct_of_port, 2),
                                 })
@@ -9050,19 +9069,19 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     
                     # Map frequency names to what the function expects
                     frequency_mapping = {
-                        'monthly': 'Monthly',
-                        'weekly': 'Weekly',
-                        'bi-weekly': 'Biweekly',
-                        'biweekly': 'Biweekly',
-                        'quarterly': 'Quarterly',
-                        'semi-annually': 'Semiannually',
-                        'semiannually': 'Semiannually',
-                        'annually': 'Annually',
-                        'yearly': 'Annually',
+                        'monthly': 'month',
+                        'weekly': 'week',
+                        'bi-weekly': '2weeks',
+                        'biweekly': '2weeks',
+                        'quarterly': '3months',
+                        'semi-annually': '6months',
+                        'semiannually': '6months',
+                        'annually': 'year',
+                        'yearly': 'year',
                         'market_day': 'market_day',
                         'calendar_day': 'calendar_day',
-                        'never': 'Never',
-                        'none': 'Never'
+                        'never': 'none',
+                        'none': 'none'
                     }
                     rebal_freq = frequency_mapping.get(rebal_freq, rebal_freq)
                     
@@ -9307,7 +9326,7 @@ def paste_all_json_callback():
                         'Semiannually': 'Semiannually',
                         'Annually': 'Annually',
                         # Legacy format mapping
-                        'none': 'Never',
+                        'none': 'none',
                         'week': 'Weekly',
                         '2weeks': 'Biweekly',
                         'month': 'Monthly',
@@ -11303,23 +11322,23 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         
                         # Map frequency names to what the function expects
                         frequency_mapping = {
-                            'monthly': 'Monthly',
-                            'weekly': 'Weekly',
-                            'bi-weekly': 'Biweekly',
-                            'biweekly': 'Biweekly',
-                            'quarterly': 'Quarterly',
-                            'semi-annually': 'Semiannually',
-                            'semiannually': 'Semiannually',
-                            'annually': 'Annually',
-                            'yearly': 'Annually',
+                            'monthly': 'month',
+                            'weekly': 'week',
+                            'bi-weekly': '2weeks',
+                            'biweekly': '2weeks',
+                            'quarterly': '3months',
+                            'semi-annually': '6months',
+                            'semiannually': '6months',
+                            'annually': 'year',
+                            'yearly': 'year',
                             'market_day': 'market_day',
                             'calendar_day': 'calendar_day',
-                            'never': 'Never',
-                            'none': 'Never'
+                            'never': 'none',
+                            'none': 'none'
                         }
                         rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                         
-                        if rebalancing_frequency != 'Never':
+                        if rebalancing_frequency != 'none':
                             # Calculate next rebalance date using the actual last rebalance date
                             next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
                                 rebalancing_frequency, actual_last_rebal_date
@@ -11447,7 +11466,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         shares = 0.0
                                         total_val = portfolio_value * alloc_pct
                                 except Exception:
-                                    shares = 0
+                                    shares = 0.0
                                     total_val = portfolio_value * alloc_pct
 
                             pct_of_port = (total_val / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -11455,7 +11474,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 'Ticker': tk,
                                 'Allocation %': alloc_pct * 100,
                                 'Price ($)': price if price is not None else float('nan'),
-                                'Shares': shares,
+                                'Shares': float(shares) if shares is not None else 0.0,
                                 'Total Value ($)': total_val,
                                 '% of Portfolio': pct_of_port,
                             })
@@ -11569,7 +11588,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     # Get current price (same logic as target allocation table)
                                     if ticker == 'CASH':
                                         price = None
-                                        shares = 0
+                                        shares = 0.0
                                         total_val = dollar_amount
                                     else:
                                         df = raw_data.get(ticker)
@@ -11594,7 +11613,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         'Ticker': ticker,
                                         'Allocation %': f"{allocation_percent * 100:.1f}%",
                                         'Price ($)': f"${price:.2f}" if price is not None else "N/A",
-                                        'Shares': shares,
+                                        'Shares': float(shares) if shares is not None else 0.0,
                                         'Total Value ($)': f"${total_val:,.2f}",
                                         '% of Portfolio': f"{pct_of_port:.2f}%"
                                     })
@@ -11609,7 +11628,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 total_row = {
                                     'Allocation %': '100.0%',
                                     'Price ($)': '',
-                                    'Shares': '',
+                                    'Shares': 0.0,
                                     'Total Value ($)': f"${total_invested:,.2f}",
                                     '% of Portfolio': '100.00%'
                                 }
@@ -11648,21 +11667,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                             # Map frequency names to what the function expects (capitalized as in page 1)
                             frequency_mapping = {
-                                'monthly': 'Monthly',
-                                'weekly': 'Weekly',
-                                'bi-weekly': 'Biweekly',
-                                'biweekly': 'Biweekly',
-                                'quarterly': 'Quarterly',
-                                'semi-annually': 'Semiannually',
-                                'semiannually': 'Semiannually',
-                                'annually': 'Annually',
-                                'yearly': 'Annually',
-                                'never': 'Never',
-                                'none': 'Never'
+                                'monthly': 'month',
+                                'weekly': 'week',
+                                'bi-weekly': '2weeks',
+                                'biweekly': '2weeks',
+                                'quarterly': '3months',
+                                'semi-annually': '6months',
+                                'semiannually': '6months',
+                                'annually': 'year',
+                                'yearly': 'year',
+                                'never': 'none',
+                                'none': 'none'
                             }
                             rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                             
-                            if rebalancing_frequency != 'Never':
+                            if rebalancing_frequency != 'none':
                                 # Get sim_index from the portfolio results
                                 sim_index = None
                                 if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -11788,21 +11807,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                             # Map frequency names to what the function expects (capitalized as in page 1)
                             frequency_mapping = {
-                                'monthly': 'Monthly',
-                                'weekly': 'Weekly',
-                                'bi-weekly': 'Biweekly',
-                                'biweekly': 'Biweekly',
-                                'quarterly': 'Quarterly',
-                                'semi-annually': 'Semiannually',
-                                'semiannually': 'Semiannually',
-                                'annually': 'Annually',
-                                'yearly': 'Annually',
-                                'never': 'Never',
-                                'none': 'Never'
+                                'monthly': 'month',
+                                'weekly': 'week',
+                                'bi-weekly': '2weeks',
+                                'biweekly': '2weeks',
+                                'quarterly': '3months',
+                                'semi-annually': '6months',
+                                'semiannually': '6months',
+                                'annually': 'year',
+                                'yearly': 'year',
+                                'never': 'none',
+                                'none': 'none'
                             }
                             rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                             
-                            if rebalancing_frequency != 'Never':
+                            if rebalancing_frequency != 'none':
                                 # Get sim_index from the portfolio results
                                 sim_index = None
                                 if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -11879,7 +11898,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     alloc_pct = float(alloc_value) if alloc_value is not None else 0.0
                                 if tk == 'CASH':
                                     price = None
-                                    shares = 0
+                                    shares = 0.0
                                     total_val = portfolio_value * alloc_pct
                                 else:
                                     df = raw_data.get(tk)
@@ -11902,7 +11921,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             shares = 0.0
                                             total_val = portfolio_value * alloc_pct
                                     except Exception:
-                                        shares = 0
+                                        shares = 0.0
                                         total_val = portfolio_value * alloc_pct
 
                                 pct_of_port = (total_val / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -11910,7 +11929,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     'Ticker': tk,
                                     'Allocation %': alloc_pct * 100,
                                     'Price ($)': price if price is not None else float('nan'),
-                                    'Shares': shares,
+                                    'Shares': float(shares) if shares is not None else 0.0,
                                     'Total Value ($)': total_val,
                                     '% of Portfolio': pct_of_port,
                                 })
@@ -12482,19 +12501,19 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     
                                     # Map frequency names to what the function expects
                                     frequency_mapping = {
-                                        'monthly': 'Monthly',
-                                        'weekly': 'Weekly',
-                                        'bi-weekly': 'Biweekly',
-                                        'biweekly': 'Biweekly',
-                                        'quarterly': 'Quarterly',
-                                        'semi-annually': 'Semiannually',
-                                        'semiannually': 'Semiannually',
-                                        'annually': 'Annually',
-                                        'yearly': 'Annually',
+                                        'monthly': 'month',
+                                        'weekly': 'week',
+                                        'bi-weekly': '2weeks',
+                                        'biweekly': '2weeks',
+                                        'quarterly': '3months',
+                                        'semi-annually': '6months',
+                                        'semiannually': '6months',
+                                        'annually': 'year',
+                                        'yearly': 'year',
                                         'market_day': 'market_day',
                                         'calendar_day': 'calendar_day',
-                                        'never': 'Never',
-                                        'none': 'Never'
+                                        'never': 'none',
+                                        'none': 'none'
                                     }
                                     fusion_freq = frequency_mapping.get(fusion_freq.lower(), fusion_freq)
                                     
@@ -12587,18 +12606,18 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         # Map frequency names to what the function expects
                                         frequency_mapping = {
                                             'daily': 'market_day',
-                                            'weekly': 'Weekly',
-                                            'monthly': 'Monthly',
-                                            'quarterly': 'Quarterly',
-                                            'annually': 'Annually',
-                                            'never': 'Never',
-                                            'none': 'Never'
+                                            'weekly': 'week',
+                                            'monthly': 'month',
+                                            'quarterly': '3months',
+                                            'annually': 'year',
+                                            'never': 'none',
+                                            'none': 'none'
                                         }
                                         rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                                         
                                         # Find the actual last rebalancing date
                                         last_rebal_date = None
-                                        if rebalancing_frequency != 'Never':
+                                        if rebalancing_frequency != 'none':
                                             # Get sim_index from the portfolio results
                                             sim_index = None
                                             if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -12686,19 +12705,19 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     rebalancing_frequency = rebalancing_frequency.lower()
                                     # Map frequency names to what the function expects
                                     frequency_mapping = {
-                                        'monthly': 'Monthly',
-                                        'weekly': 'Weekly',
-                                        'bi-weekly': 'Biweekly',
-                                        'biweekly': 'Biweekly',
-                                        'quarterly': 'Quarterly',
-                                        'semi-annually': 'Semiannually',
-                                        'semiannually': 'Semiannually',
-                                        'annually': 'Annually',
-                                        'yearly': 'Annually',
+                                        'monthly': 'month',
+                                        'weekly': 'week',
+                                        'bi-weekly': '2weeks',
+                                        'biweekly': '2weeks',
+                                        'quarterly': '3months',
+                                        'semi-annually': '6months',
+                                        'semiannually': '6months',
+                                        'annually': 'year',
+                                        'yearly': 'year',
                                         'market_day': 'market_day',
                                         'calendar_day': 'calendar_day',
-                                        'never': 'Never',
-                                        'none': 'Never'
+                                        'never': 'none',
+                                        'none': 'none'
                                     }
                                     rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                                     
@@ -12993,7 +13012,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                     alloc_pct = float(alloc_dict.get(tk, 0))
                                                     if tk == 'CASH':
                                                         price = None
-                                                        shares = 0
+                                                        shares = 0.0
                                                         total_val = portfolio_value * alloc_pct
                                                     else:
                                                         df = raw_data.get(tk)
@@ -13017,7 +13036,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                                 shares = 0.0
                                                                 total_val = portfolio_value * alloc_pct
                                                         except Exception:
-                                                            shares = 0
+                                                            shares = 0.0
                                                             total_val = portfolio_value * alloc_pct
 
                                                     pct_of_port = (total_val / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -13025,7 +13044,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                         'Ticker': tk,
                                                         'Allocation %': alloc_pct * 100,
                                                         'Price ($)': price if price is not None else float('nan'),
-                                                        'Shares': shares,
+                                                        'Shares': float(shares) if shares is not None else 0.0,
                                                         'Total Value ($)': total_val,
                                                         '% of Portfolio': pct_of_port,
                                                     })
@@ -13105,7 +13124,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                     alloc_pct = float(today_weights.get(tk, 0))
                                                     if tk == 'CASH':
                                                         price = None
-                                                        shares = 0
+                                                        shares = 0.0
                                                         total_val = portfolio_value * alloc_pct
                                                     else:
                                                         df = raw_data.get(tk)
@@ -13124,7 +13143,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                                 shares = 0.0
                                                                 total_val = portfolio_value * alloc_pct
                                                         except Exception:
-                                                            shares = 0
+                                                            shares = 0.0
                                                             total_val = portfolio_value * alloc_pct
 
                                                     pct_of_port = (total_val / portfolio_value * 100) if portfolio_value > 0 else 0
@@ -13132,7 +13151,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                         'Ticker': tk,
                                                         'Allocation %': alloc_pct * 100,
                                                         'Price ($)': price if price is not None else float('nan'),
-                                                        'Shares': shares,
+                                                        'Shares': float(shares) if shares is not None else 0.0,
                                                         'Total Value ($)': total_val,
                                                         '% of Portfolio': pct_of_port,
                                                     })
