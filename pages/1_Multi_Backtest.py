@@ -14,6 +14,66 @@ import time as time_module
 pd.set_option("styler.render.max_elements", 1000000)  # Allow up to 1M cells for styling
 
 # =============================================================================
+# HELPER FUNCTIONS FOR FOCUSED ANALYSIS
+# =============================================================================
+
+def calculate_cagr(values, dates):
+    if len(values) < 2:
+        return np.nan
+    start_val = values[0]
+    end_val = values[-1]
+    years = (dates[-1] - dates[0]).days / 365.25
+    if years <= 0 or start_val == 0:
+        return np.nan
+    return (end_val / start_val) ** (1 / years) - 1
+
+def calculate_volatility(returns):
+    # Annualized volatility - same as Backtest_Engine.py
+    return returns.std() * np.sqrt(365) if len(returns) > 1 else np.nan
+
+def calculate_sharpe(returns, risk_free_rate):
+    """Calculates the Sharpe ratio."""
+    # Create a constant risk-free rate series aligned with returns
+    daily_rf_rate = risk_free_rate / 365.25
+    rf_series = pd.Series(daily_rf_rate, index=returns.index)
+    
+    aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
+    if aligned_returns.empty:
+        return np.nan
+    
+    excess_returns = aligned_returns - aligned_rf
+    if excess_returns.std() == 0:
+        return np.nan
+        
+    return excess_returns.mean() / excess_returns.std() * np.sqrt(365)
+
+def calculate_sortino(returns, risk_free_rate):
+    """Calculates the Sortino ratio."""
+    # Create a constant risk-free rate series aligned with returns
+    daily_rf_rate = risk_free_rate / 365.25
+    rf_series = pd.Series(daily_rf_rate, index=returns.index)
+    
+    aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
+    if aligned_returns.empty:
+        return np.nan
+        
+    downside_returns = aligned_returns[aligned_returns < aligned_rf]
+    if downside_returns.empty or downside_returns.std() == 0:
+        # If no downside returns, Sortino is infinite or undefined.
+        # We can return nan or a very high value. nan is safer.
+        return np.nan
+    
+    downside_std = downside_returns.std()
+    
+    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365)
+
+def calculate_upi(cagr, ulcer_index):
+    """Calculates the Ulcer Performance Index (UPI = CAGR / Ulcer Index, both as decimals)."""
+    if ulcer_index is None or pd.isna(ulcer_index) or ulcer_index == 0:
+        return np.nan
+    return cagr / (ulcer_index / 100)
+
+# =============================================================================
 # TICKER ALIASES FUNCTIONS
 # =============================================================================
 
@@ -2099,36 +2159,87 @@ def generate_simple_pdf_report(custom_name=""):
                             story.append(Paragraph(f"Next Rebalance Timer - {portfolio_name}", subheading_style))
                             story.append(Spacer(1, 5))
                             
-                            # Try to get timer information from session state
-                            timer_table_key = f"timer_table_{portfolio_name}"
-                            if timer_table_key in st.session_state:
-                                timer_fig = st.session_state[timer_table_key]
-                                if timer_fig and hasattr(timer_fig, 'data') and timer_fig.data:
-                                    # Extract timer information from the figure data
-                                    for trace in timer_fig.data:
-                                        if trace.type == 'table' and hasattr(trace, 'cells') and trace.cells:
-                                            cell_values = trace.cells.values
-                                            if cell_values and len(cell_values) >= 2:
-                                                # Format the timer information
-                                                timer_info = []
-                                                for i in range(len(cell_values[0])):
-                                                    if i < len(cell_values[0]) and i < len(cell_values[1]):
-                                                        param = cell_values[0][i]
-                                                        value = cell_values[1][i]
-                                                        timer_info.append(f"{param}: {value}")
-                                                
-                                                if timer_info:
-                                                    for info in timer_info:
-                                                        story.append(Paragraph(info, styles['Normal']))
-                                                else:
-                                                    story.append(Paragraph("Next rebalance information not available", styles['Normal']))
-                                                break
+                            # Calculate timer information from portfolio configuration and allocation data
+                            try:
+                                # Get portfolio configuration
+                                portfolio_cfg = None
+                                if 'multi_backtest_snapshot_data' in st.session_state:
+                                    snapshot = st.session_state['multi_backtest_snapshot_data']
+                                    portfolio_configs = snapshot.get('portfolio_configs', [])
+                                    portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
+                                
+                                if portfolio_cfg:
+                                    rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
+                                    initial_value = portfolio_cfg.get('initial_value', 10000)
+                                    
+                                    # Get last rebalance date from allocation data
+                                    all_allocations = snapshot.get('all_allocations', {})
+                                    portfolio_allocations = all_allocations.get(portfolio_name, {})
+                                    
+                                    if portfolio_allocations:
+                                        alloc_dates = sorted(list(portfolio_allocations.keys()))
+                                        
+                                        # Find the actual last rebalance date by looking at the backtest results
+                                        # The last rebalance date should be from the actual rebalancing dates, not just any date
+                                        last_rebal_date = None
+                                        if 'multi_all_results' in st.session_state and portfolio_name in st.session_state.multi_all_results:
+                                            portfolio_results = st.session_state.multi_all_results[portfolio_name]
+                                            if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
+                                                # Get the simulation index (actual trading days)
+                                                sim_index = portfolio_results['with_additions'].index
+                                                # Get the rebalancing frequency to calculate actual rebalance dates
+                                                rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'none')
+                                                # Get actual rebalancing dates
+                                                actual_rebal_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
+                                                if actual_rebal_dates:
+                                                    # Find the most recent actual rebalance date that's in our allocation data
+                                                    actual_rebal_dates_sorted = sorted(list(actual_rebal_dates))
+                                                    for rebal_date in reversed(actual_rebal_dates_sorted):
+                                                        if rebal_date in portfolio_allocations:
+                                                            last_rebal_date = rebal_date
+                                                            break
+                                        
+                                        # Fallback to second-to-last date if we couldn't find an actual rebalance date
+                                        if last_rebal_date is None:
+                                            last_rebal_date = alloc_dates[-2] if len(alloc_dates) > 1 else alloc_dates[-1] if alloc_dates else None
+                                        
+                                        if last_rebal_date:
+                                            # Map frequency to function expectations
+                                            frequency_mapping = {
+                                                'monthly': 'month',
+                                                'weekly': 'week',
+                                                'bi-weekly': '2weeks',
+                                                'biweekly': '2weeks',
+                                                'quarterly': '3months',
+                                                'semi-annually': '6months',
+                                                'semiannually': '6months',
+                                                'annually': 'year',
+                                                'yearly': 'year',
+                                                'never': 'none',
+                                                'none': 'none'
+                                            }
+                                            mapped_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency.lower())
+                                            
+                                            # Calculate next rebalance date
+                                            next_date, time_until, next_rebalance_datetime = calculate_next_rebalance_date(
+                                                mapped_frequency, last_rebal_date
+                                            )
+                                            
+                                            if next_date and time_until:
+                                                story.append(Paragraph(f"Time Until Next Rebalance: {format_time_until(time_until)}", styles['Normal']))
+                                                story.append(Paragraph(f"Target Rebalance Date: {next_date.strftime('%B %d, %Y')}", styles['Normal']))
+                                                story.append(Paragraph(f"Rebalancing Frequency: {rebalancing_frequency}", styles['Normal']))
+                                                story.append(Paragraph(f"Portfolio Value: ${initial_value:,.2f}", styles['Normal']))
+                                            else:
+                                                story.append(Paragraph("Next rebalance date calculation not available", styles['Normal']))
+                                        else:
+                                            story.append(Paragraph("No rebalancing history available", styles['Normal']))
                                     else:
-                                        story.append(Paragraph("Next rebalance information not available", styles['Normal']))
+                                        story.append(Paragraph("No allocation data available for timer calculation", styles['Normal']))
                                 else:
-                                    story.append(Paragraph("Next rebalance information not available", styles['Normal']))
-                            else:
-                                story.append(Paragraph("Next rebalance information not available", styles['Normal']))
+                                    story.append(Paragraph("Portfolio configuration not available", styles['Normal']))
+                            except Exception as e:
+                                story.append(Paragraph(f"Error calculating timer information: {str(e)}", styles['Normal']))
                             
                             # Add page break so Allocation Details starts on a new page
                             story.append(PageBreak())
@@ -6498,7 +6609,7 @@ if use_custom_dates:
         start_date = st.date_input("Start Date", min_value=date(1900, 1, 1), key="multi_backtest_start_date", on_change=update_start_date)
     
     with col_end_date:
-        end_date = st.date_input("End Date", key="multi_backtest_end_date", on_change=update_end_date)
+        end_date = st.date_input("End Date", min_value=date(1900, 1, 1), key="multi_backtest_end_date", on_change=update_end_date)
     
     with col_clear_dates:
         st.markdown("<br>", unsafe_allow_html=True) # Spacer for alignment
@@ -10517,6 +10628,577 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         
         # Format the configuration table
         st.dataframe(config_df, use_container_width=True)
+
+        # Focused Performance Analysis with Date Range
+        # Initialize session state variables first (using page-specific keys)
+        if 'multi_backtest_focused_analysis_results' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_results = None
+        if 'multi_backtest_focused_analysis_show_essential' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_show_essential = False
+        if 'multi_backtest_focused_analysis_period' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_period = None
+        if 'multi_backtest_focused_analysis_start_date' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_start_date = None
+        if 'multi_backtest_focused_analysis_end_date' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_end_date = None
+        
+        # Date range controls
+        col_date1, col_date2, col_metrics = st.columns([1, 1, 1])
+        
+        # Get the earliest and latest available dates from backtest data
+        min_date = None
+        max_date = None
+        if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
+            # Use the same reliable method as used elsewhere in the code
+            try:
+                first_date = min(series['no_additions'].index.min() for series in st.session_state.multi_all_results.values() if 'no_additions' in series)
+                last_date = max(series['no_additions'].index.max() for series in st.session_state.multi_all_results.values() if 'no_additions' in series)
+                min_date = first_date.date()
+                max_date = last_date.date()
+            except (ValueError, KeyError, AttributeError):
+                # Fallback to the previous method if the above fails
+                all_dates = []
+                for portfolio_name, results in st.session_state.multi_all_results.items():
+                    if isinstance(results, dict) and 'no_additions' in results:
+                        series = results['no_additions']
+                        if hasattr(series, 'index') and len(series.index) > 0:
+                            all_dates.extend(series.index.tolist())
+                
+                if all_dates:
+                    min_date = min(all_dates).date()
+                    max_date = max(all_dates).date()
+        
+        with col_date1:
+            # Check if we need to update the date range due to new portfolio data
+            current_min_date = min_date if min_date else datetime.date(1900, 1, 1)
+            current_max_date = max_date if max_date else datetime.date.today()
+            
+            # Update session state if the available date range has changed
+            if 'multi_backtest_focused_analysis_available_min_date' not in st.session_state:
+                st.session_state.multi_backtest_focused_analysis_available_min_date = current_min_date
+                st.session_state.multi_backtest_focused_analysis_available_max_date = current_max_date
+            elif (st.session_state.multi_backtest_focused_analysis_available_min_date != current_min_date or 
+                  st.session_state.multi_backtest_focused_analysis_available_max_date != current_max_date):
+                # Date range has changed, update session state and reset selected dates
+                st.session_state.multi_backtest_focused_analysis_available_min_date = current_min_date
+                st.session_state.multi_backtest_focused_analysis_available_max_date = current_max_date
+                st.session_state.multi_backtest_focused_analysis_start_date = current_min_date
+                st.session_state.multi_backtest_focused_analysis_end_date = current_max_date
+            
+            # Initialize start date in session state with fallback and validation
+            if st.session_state.multi_backtest_focused_analysis_start_date is None:
+                st.session_state.multi_backtest_focused_analysis_start_date = current_min_date
+            
+            # Ensure the start date is valid and within bounds
+            start_date_value = st.session_state.multi_backtest_focused_analysis_start_date
+            if start_date_value is None:
+                start_date_value = current_min_date
+            else:
+                # Convert to datetime.date if it's a pandas Timestamp or other datetime-like object
+                try:
+                    if hasattr(start_date_value, 'date'):
+                        start_date_value = start_date_value.date()
+                    elif not isinstance(start_date_value, datetime.date):
+                        start_date_value = pd.to_datetime(start_date_value).date()
+                except:
+                    start_date_value = current_min_date
+                
+                # Check bounds after conversion
+                if start_date_value < current_min_date:
+                    start_date_value = current_min_date
+                elif start_date_value > current_max_date:
+                    start_date_value = current_max_date
+            
+            start_date = st.date_input(
+                "Start Date", 
+                value=start_date_value,
+                min_value=current_min_date,
+                max_value=current_max_date,
+                key="focused_analysis_start_date_input",
+                help="Start date for focused performance analysis"
+            )
+            
+            # Store the selected start date in session state
+            if start_date != st.session_state.multi_backtest_focused_analysis_start_date:
+                st.session_state.multi_backtest_focused_analysis_start_date = start_date
+        
+        with col_date2:
+            # Initialize end date in session state with fallback and validation
+            if st.session_state.multi_backtest_focused_analysis_end_date is None:
+                st.session_state.multi_backtest_focused_analysis_end_date = current_max_date
+            
+            # Ensure the end date is valid and within bounds
+            end_date_value = st.session_state.multi_backtest_focused_analysis_end_date
+            if end_date_value is None:
+                end_date_value = current_max_date
+            else:
+                # Convert to datetime.date if it's a pandas Timestamp or other datetime-like object
+                try:
+                    if hasattr(end_date_value, 'date'):
+                        end_date_value = end_date_value.date()
+                    elif not isinstance(end_date_value, datetime.date):
+                        end_date_value = pd.to_datetime(end_date_value).date()
+                except:
+                    end_date_value = current_max_date
+                
+                # Check bounds after conversion
+                if end_date_value < current_min_date:
+                    end_date_value = current_min_date
+                elif end_date_value > current_max_date:
+                    end_date_value = current_max_date
+            
+            end_date = st.date_input(
+                "End Date", 
+                value=end_date_value,
+                min_value=current_min_date,
+                max_value=current_max_date,
+                key="focused_analysis_end_date_input",
+                help="End date for focused performance analysis"
+            )
+            
+            # Store the selected end date in session state
+            if end_date != st.session_state.multi_backtest_focused_analysis_end_date:
+                st.session_state.multi_backtest_focused_analysis_end_date = end_date
+        
+        with col_metrics:
+            show_essential_only = st.checkbox(
+                "Essential Metrics Only", 
+                value=False,
+                help="Show only CAGR, Max Drawdown, Volatility, and Total Return for quick analysis"
+            )
+        
+        # Add title after date inputs are defined
+        st.subheader("📊 Focused Performance Analysis")
+        
+        # Calculate Analysis Button
+        calculate_analysis = st.button(
+            "📊 Calculate Analysis", 
+            type="primary",
+            use_container_width=True,
+            help="Click to generate the focused performance analysis with your selected date range"
+        )
+        
+        # Session state variables are already initialized above
+        
+        # Update session state when essential metrics checkbox changes
+        if show_essential_only != st.session_state.multi_backtest_focused_analysis_show_essential:
+            st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
+            # Recalculate if we have existing results
+            if st.session_state.multi_backtest_focused_analysis_results is not None:
+                calculate_analysis = True
+        
+        # Calculate focused performance metrics only when button is clicked
+        if calculate_analysis and start_date and end_date and 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
+            focused_stats = {}
+            
+            # Check if we have the Final Performance Statistics data to use exact same values
+            stats_df_display = st.session_state.get('multi_backtest_stats_df_display')
+            
+            # If the selected date range covers the full period, use exact values from Final Performance Statistics
+            full_period_analysis = False
+            if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
+                try:
+                    # Get the actual data period from the first portfolio
+                    first_portfolio = next(iter(st.session_state.multi_all_results.values()))
+                    if isinstance(first_portfolio, dict) and 'no_additions' in first_portfolio:
+                        series = first_portfolio['no_additions']
+                        if hasattr(series, 'index') and len(series.index) > 0:
+                            data_start = series.index[0].date()
+                            data_end = series.index[-1].date()
+                            # Check if selected range covers the full period (within 7 days tolerance)
+                            start_diff = abs((start_date - data_start).days)
+                            end_diff = abs((end_date - data_end).days)
+                            if start_diff <= 7 and end_diff <= 7:
+                                full_period_analysis = True
+                except:
+                    pass
+            
+            if full_period_analysis and stats_df_display is not None and not stats_df_display.empty:
+                # Use exact values from Final Performance Statistics for full period analysis
+                for portfolio_name in st.session_state.multi_all_results.keys():
+                    if portfolio_name in stats_df_display.index:
+                        row = stats_df_display.loc[portfolio_name]
+                        
+                        # Extract numeric values from formatted strings
+                        def extract_numeric(val_str, default=0):
+                            try:
+                                if pd.isna(val_str) or val_str == 'N/A' or val_str == '':
+                                    return default
+                                # Remove % and other formatting
+                                clean_val = str(val_str).replace('%', '').replace('$', '').replace(',', '').strip()
+                                return float(clean_val)
+                            except:
+                                return default
+                        
+                        # Get values from Final Performance Statistics (already formatted)
+                        cagr_val = extract_numeric(row.get('CAGR', 'N/A'))
+                        max_dd_val = extract_numeric(row.get('Max Drawdown', 'N/A'))
+                        vol_val = extract_numeric(row.get('Volatility', 'N/A'))
+                        sharpe_val = extract_numeric(row.get('Sharpe', 'N/A'))
+                        sortino_val = extract_numeric(row.get('Sortino', 'N/A'))
+                        ulcer_val = extract_numeric(row.get('Ulcer Index', 'N/A'))
+                        upi_val = extract_numeric(row.get('UPI', 'N/A'))
+                        total_ret_val = extract_numeric(row.get('Total Return', 'N/A'))
+                        
+                        if show_essential_only:
+                            focused_stats[portfolio_name] = {
+                                'CAGR': cagr_val,
+                                'Max Drawdown': max_dd_val,
+                                'Volatility': vol_val,
+                                'Total Return': total_ret_val
+                            }
+                        else:
+                            # For full analysis, we still need to calculate additional metrics not in Final Performance Statistics
+                            # Get the series for additional calculations
+                            results = st.session_state.multi_all_results[portfolio_name]
+                            if isinstance(results, dict) and 'no_additions' in results:
+                                series = results['no_additions']
+                                if hasattr(series, 'index') and len(series.index) > 0:
+                                    # Calculate returns for additional metrics
+                                    returns = series.pct_change().fillna(0)
+                                    
+                                    # Smart weekend filter for win/loss rates
+                                    zero_rate = (abs(returns) < 1e-5).mean()
+                                    if zero_rate > 0.25:
+                                        weekday_mask = returns.index.weekday < 5
+                                        non_zero_mask = abs(returns) > 1e-5
+                                        smart_mask = weekday_mask | non_zero_mask
+                                        returns = returns[smart_mask]
+                                    
+                                    # Calculate additional metrics not in Final Performance Statistics
+                                    cumulative = (1 + returns).cumprod()
+                                    running_max = cumulative.expanding().max()
+                                    drawdown = (cumulative - running_max) / running_max
+                                    median_drawdown = drawdown.median()
+                                    
+                                    # Win/loss rates
+                                    positive_returns = returns[returns > 1e-5]
+                                    negative_returns = returns[returns < -1e-5]
+                                    win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                    loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                    median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
+                                    median_loss = negative_returns.median() * 100 if len(negative_returns) > 0 else 0
+                                    
+                                    # Profit factor
+                                    gross_profit = positive_returns.sum() if len(positive_returns) > 0 else 0
+                                    gross_loss = abs(negative_returns.sum()) if len(negative_returns) > 0 else 0
+                                    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
+                                    
+                                    # Monthly metrics
+                                    monthly_returns = series.resample('M').last().pct_change().fillna(0) * 100
+                                    best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
+                                    worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
+                                    median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
+                                    
+                                    # Risk-adjusted ratios
+                                    calmar_ratio = (cagr_val) / abs(max_dd_val) if max_dd_val != 0 else np.nan
+                                    sterling_ratio = (cagr_val) / abs(median_drawdown * 100) if median_drawdown != 0 else np.nan
+                                    recovery_factor = abs(total_ret_val) / abs(max_dd_val) if max_dd_val != 0 else np.nan
+                                    
+                                    # Tail ratio
+                                    tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
+                                    
+                                    focused_stats[portfolio_name] = {
+                                        'CAGR': cagr_val,  # From Final Performance Statistics
+                                        'Max Drawdown': max_dd_val,  # From Final Performance Statistics
+                                        'Volatility': vol_val,  # From Final Performance Statistics
+                                        'Sharpe': sharpe_val,  # From Final Performance Statistics
+                                        'Sortino': sortino_val,  # From Final Performance Statistics
+                                        'Ulcer Index': ulcer_val,  # From Final Performance Statistics
+                                        'UPI': upi_val,  # From Final Performance Statistics
+                                        'Beta': extract_numeric(row.get('Beta', 'N/A')),  # From Final Performance Statistics
+                                        'Total Return': total_ret_val,  # From Final Performance Statistics
+                                        'Final Value (No Contributions)': series.iloc[-1],
+                                        'Median Drawdown': median_drawdown * 100,
+                                        'Win Rate': win_rate,
+                                        'Loss Rate': loss_rate,
+                                        'Median Win': median_win,
+                                        'Median Loss': median_loss,
+                                        'Profit Factor': profit_factor,
+                                        'Best Month': best_month,
+                                        'Worst Month': worst_month,
+                                        'Median Monthly': median_monthly,
+                                        'Calmar Ratio': calmar_ratio,
+                                        'Sterling Ratio': sterling_ratio,
+                                        'Recovery Factor': recovery_factor,
+                                        'Tail Ratio': tail_ratio
+                                    }
+            else:
+                # For partial period analysis, calculate everything from scratch
+                for portfolio_name, results in st.session_state.multi_all_results.items():
+                    if isinstance(results, dict) and 'no_additions' in results:
+                        series = results['no_additions']
+                        if hasattr(series, 'index') and len(series.index) > 0:
+                            # Filter series by date range
+                            # Convert dates to datetime for proper comparison
+                            start_datetime = pd.to_datetime(start_date)
+                            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Include the end date
+                            mask = (series.index >= start_datetime) & (series.index < end_datetime)
+                            filtered_series = series[mask]
+                            
+                            if len(filtered_series) > 1:
+                                # Calculate returns with ffill compatibility
+                                returns = filtered_series.pct_change().fillna(0)
+                                
+                                if len(returns) > 0:
+                                    # Smart weekend filter for win/loss rates
+                                    zero_rate = (abs(returns) < 1e-5).mean()
+                                    if zero_rate > 0.25:  # If more than 25% are zero (likely weekends)
+                                        # Filter to include only non-zero returns or returns on weekdays
+                                        weekday_mask = returns.index.weekday < 5  # Monday=0, Friday=4
+                                        non_zero_mask = abs(returns) > 1e-5
+                                        smart_mask = weekday_mask | non_zero_mask
+                                        returns = returns[smart_mask]
+                                    
+                                    # Calculate metrics for the date range
+                                    cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                    
+                                    # Calculate volatility using the SAME method as Final Performance Statistics
+                                    # Use the original returns (before smart filtering) like Final Performance Statistics does
+                                    original_returns = filtered_series.pct_change().fillna(0)
+                                    volatility = calculate_volatility(original_returns)
+                                    
+                                    # Use original returns for Sharpe and Sortino (same as Final Performance Statistics)
+                                    sharpe = calculate_sharpe(original_returns, 0.02)  # 2% risk-free rate
+                                    sortino = calculate_sortino(original_returns, 0.02)
+                                    
+                                    # Calculate max drawdown using original returns (like Final Performance Statistics)
+                                    cumulative = (1 + original_returns).cumprod()
+                                    running_max = cumulative.expanding().max()
+                                    drawdown = (cumulative - running_max) / running_max
+                                    max_drawdown = drawdown.min()
+                                    
+                                    # Calculate Ulcer Index using original returns (like Final Performance Statistics)
+                                    ulcer_index = np.sqrt((drawdown ** 2).mean()) * 100
+                                    
+                                    # Calculate UPI
+                                    upi = calculate_upi(cagr, ulcer_index) if ulcer_index > 0 else np.nan
+                                    
+                                    # Calculate Beta (same as Final Performance Statistics)
+                                    beta = np.nan
+                                    # Find the portfolio config to get benchmark ticker
+                                    cfg_for_name = next((c for c in st.session_state.multi_backtest_portfolio_configs if c['name'] == portfolio_name), None)
+                                    if cfg_for_name:
+                                        bench_ticker = cfg_for_name.get('benchmark_ticker')
+                                        raw_data = st.session_state.get('multi_backtest_raw_data')
+                                        if bench_ticker and raw_data and bench_ticker in raw_data:
+                                            # get benchmark price_change series aligned to filtered_series index
+                                            try:
+                                                bench_df = raw_data[bench_ticker].reindex(filtered_series.index)
+                                                if 'Price_change' in bench_df.columns:
+                                                    bench_returns = bench_df['Price_change'].fillna(0)
+                                                else:
+                                                    bench_returns = bench_df['Close'].pct_change().fillna(0)
+
+                                                portfolio_returns = original_returns  # Use original returns like Final Performance Statistics
+                                                common_idx = portfolio_returns.index.intersection(bench_returns.index)
+                                                if len(common_idx) >= 2:
+                                                    pr = portfolio_returns.reindex(common_idx).dropna()
+                                                    br = bench_returns.reindex(common_idx).dropna()
+                                                    common_idx2 = pr.index.intersection(br.index)
+                                                    if len(common_idx2) >= 2 and br.loc[common_idx2].var() != 0:
+                                                        cov = pr.loc[common_idx2].cov(br.loc[common_idx2])
+                                                        var = br.loc[common_idx2].var()
+                                                        beta = cov / var
+                                            except Exception as e:
+                                                pass
+                                    
+                                    # Calculate additional instantaneous metrics
+                                    total_return = (filtered_series.iloc[-1] / filtered_series.iloc[0] - 1)
+                                    final_value = filtered_series.iloc[-1]
+                                    final_value_no_contrib = filtered_series.iloc[-1]
+                                    total_money_added = 0  # Not available in no_additions series
+                                    
+                                    # Calculate median drawdown
+                                    median_drawdown = drawdown.median()
+                                    
+                                    # Calculate win/loss rates
+                                    positive_returns = returns[returns > 1e-5]
+                                    negative_returns = returns[returns < -1e-5]
+                                    win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                    loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                    
+                                    # Calculate median win/loss
+                                    median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
+                                    median_loss = negative_returns.median() * 100 if len(negative_returns) > 0 else 0
+                                    
+                                    # Calculate profit factor
+                                    gross_profit = positive_returns.sum() if len(positive_returns) > 0 else 0
+                                    gross_loss = abs(negative_returns.sum()) if len(negative_returns) > 0 else 0
+                                    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
+                                    
+                                    # Calculate monthly returns for monthly metrics
+                                    monthly_returns = filtered_series.resample('M').last().pct_change().fillna(0) * 100
+                                    best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
+                                    worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
+                                    median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
+                                    
+                                    # Calculate risk-adjusted ratios
+                                    calmar_ratio = (cagr * 100) / abs(max_drawdown * 100) if max_drawdown != 0 else np.nan
+                                    sterling_ratio = (cagr * 100) / abs(median_drawdown * 100) if median_drawdown != 0 else np.nan
+                                    recovery_factor = abs(total_return) / abs(max_drawdown) if max_drawdown != 0 else np.nan
+                                    
+                                    # Calculate tail ratio (95th percentile / 5th percentile)
+                                    tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
+                                    
+                                    if show_essential_only:
+                                        focused_stats[portfolio_name] = {
+                                            'CAGR': cagr * 100,
+                                            'Max Drawdown': max_drawdown * 100,
+                                            'Volatility': volatility * 100,
+                                            'Total Return': total_return * 100
+                                        }
+                                    else:
+                                        focused_stats[portfolio_name] = {
+                                            'CAGR': cagr * 100,
+                                            'Max Drawdown': max_drawdown * 100,
+                                            'Volatility': volatility * 100,
+                                            'Sharpe': sharpe,
+                                            'Sortino': sortino,
+                                            'Ulcer Index': ulcer_index,
+                                            'UPI': upi,
+                                            'Beta': beta,
+                                            'Total Return': total_return * 100,
+                                            'Final Value (No Contributions)': final_value_no_contrib,
+                                            'Median Drawdown': median_drawdown * 100,
+                                            'Win Rate': win_rate,
+                                            'Loss Rate': loss_rate,
+                                            'Median Win': median_win,
+                                            'Median Loss': median_loss,
+                                            'Profit Factor': profit_factor,
+                                            'Best Month': best_month,
+                                            'Worst Month': worst_month,
+                                            'Median Monthly': median_monthly,
+                                            'Calmar Ratio': calmar_ratio,
+                                            'Sterling Ratio': sterling_ratio,
+                                            'Recovery Factor': recovery_factor,
+                                            'Tail Ratio': tail_ratio
+                                        }
+            
+            if focused_stats:
+                # Store results in session state
+                st.session_state.multi_backtest_focused_analysis_results = focused_stats
+                st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
+                st.session_state.multi_backtest_focused_analysis_period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+                
+                # Create focused stats DataFrame
+                focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
+                focused_df.index.name = 'Portfolio'
+                
+                # Format the DataFrame
+                if show_essential_only:
+                    focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
+                else:
+                    # Format all columns
+                    focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Sharpe'] = focused_df['Sharpe'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Sortino'] = focused_df['Sortino'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Ulcer Index'] = focused_df['Ulcer Index'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['UPI'] = focused_df['UPI'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Beta'] = focused_df['Beta'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Final Value (No Contributions)'] = focused_df['Final Value (No Contributions)'].apply(lambda x: f"${x:,.2f}")
+                    focused_df['Median Drawdown'] = focused_df['Median Drawdown'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Win Rate'] = focused_df['Win Rate'].apply(lambda x: f"{x:.1f}%")
+                    focused_df['Loss Rate'] = focused_df['Loss Rate'].apply(lambda x: f"{x:.1f}%")
+                    focused_df['Median Win'] = focused_df['Median Win'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Median Loss'] = focused_df['Median Loss'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Profit Factor'] = focused_df['Profit Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) and x != np.inf else "N/A")
+                    focused_df['Best Month'] = focused_df['Best Month'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Worst Month'] = focused_df['Worst Month'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Median Monthly'] = focused_df['Median Monthly'].apply(lambda x: f"{x:.2f}%")
+                    focused_df['Calmar Ratio'] = focused_df['Calmar Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Sterling Ratio'] = focused_df['Sterling Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Recovery Factor'] = focused_df['Recovery Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                    focused_df['Tail Ratio'] = focused_df['Tail Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                
+                # Display the focused table
+                st.dataframe(focused_df, use_container_width=True)
+                
+                # Show date range info
+                st.info(f"📅 **Analysis Period:** {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            else:
+                st.warning("⚠️ No data available for the selected date range. Please check your date selection.")
+        elif st.session_state.multi_backtest_focused_analysis_results is not None:
+            # Display stored results even when not recalculating
+            focused_stats = st.session_state.multi_backtest_focused_analysis_results
+            show_essential = st.session_state.multi_backtest_focused_analysis_show_essential
+            
+            # Create focused stats DataFrame
+            focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
+            focused_df.index.name = 'Portfolio'
+            
+            # Format the DataFrame based on current essential setting
+            if show_essential_only:
+                # Filter to only show essential columns
+                essential_cols = ['CAGR', 'Max Drawdown', 'Volatility', 'Total Return']
+                if all(col in focused_df.columns for col in essential_cols):
+                    focused_df = focused_df[essential_cols]
+                focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
+                focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
+                focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
+                focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
+            else:
+                # Format all columns
+                focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
+                focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
+                focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
+                if 'Sharpe' in focused_df.columns:
+                    focused_df['Sharpe'] = focused_df['Sharpe'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Sortino' in focused_df.columns:
+                    focused_df['Sortino'] = focused_df['Sortino'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Ulcer Index' in focused_df.columns:
+                    focused_df['Ulcer Index'] = focused_df['Ulcer Index'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'UPI' in focused_df.columns:
+                    focused_df['UPI'] = focused_df['UPI'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Beta' in focused_df.columns:
+                    focused_df['Beta'] = focused_df['Beta'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Total Return' in focused_df.columns:
+                    focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
+                if 'Final Value (No Contributions)' in focused_df.columns:
+                    focused_df['Final Value (No Contributions)'] = focused_df['Final Value (No Contributions)'].apply(lambda x: f"${x:,.2f}")
+                if 'Median Drawdown' in focused_df.columns:
+                    focused_df['Median Drawdown'] = focused_df['Median Drawdown'].apply(lambda x: f"{x:.2f}%")
+                if 'Win Rate' in focused_df.columns:
+                    focused_df['Win Rate'] = focused_df['Win Rate'].apply(lambda x: f"{x:.1f}%")
+                if 'Loss Rate' in focused_df.columns:
+                    focused_df['Loss Rate'] = focused_df['Loss Rate'].apply(lambda x: f"{x:.1f}%")
+                if 'Median Win' in focused_df.columns:
+                    focused_df['Median Win'] = focused_df['Median Win'].apply(lambda x: f"{x:.2f}%")
+                if 'Median Loss' in focused_df.columns:
+                    focused_df['Median Loss'] = focused_df['Median Loss'].apply(lambda x: f"{x:.2f}%")
+                if 'Profit Factor' in focused_df.columns:
+                    focused_df['Profit Factor'] = focused_df['Profit Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) and x != np.inf else "N/A")
+                if 'Best Month' in focused_df.columns:
+                    focused_df['Best Month'] = focused_df['Best Month'].apply(lambda x: f"{x:.2f}%")
+                if 'Worst Month' in focused_df.columns:
+                    focused_df['Worst Month'] = focused_df['Worst Month'].apply(lambda x: f"{x:.2f}%")
+                if 'Median Monthly' in focused_df.columns:
+                    focused_df['Median Monthly'] = focused_df['Median Monthly'].apply(lambda x: f"{x:.2f}%")
+                if 'Calmar Ratio' in focused_df.columns:
+                    focused_df['Calmar Ratio'] = focused_df['Calmar Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Sterling Ratio' in focused_df.columns:
+                    focused_df['Sterling Ratio'] = focused_df['Sterling Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Recovery Factor' in focused_df.columns:
+                    focused_df['Recovery Factor'] = focused_df['Recovery Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+                if 'Tail Ratio' in focused_df.columns:
+                    focused_df['Tail Ratio'] = focused_df['Tail Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+            
+            # Display the focused analysis table
+            st.dataframe(focused_df, use_container_width=True)
+            
+            # Show date range info - THIS IS THE KEY FOR PERSISTENCE
+            if st.session_state.multi_backtest_focused_analysis_period is not None:
+                st.info(f"📅 **Analysis Period:** {st.session_state.multi_backtest_focused_analysis_period}")
+        elif not calculate_analysis:
+            st.info("👆 **Select your date range above and click 'Calculate Analysis' to generate the focused performance metrics.**")
+        else:
+            st.warning("⚠️ Please ensure you have portfolio data loaded and valid date range selected.")
 
         st.subheader("Yearly Performance (Interactive Table)")
         all_years = st.session_state.multi_backtest_all_years
