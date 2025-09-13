@@ -3761,6 +3761,105 @@ with st.sidebar:
         else:
             st.info(f"Total Allocation: {total_alloc_percentage:.2f}%")
 
+    # Bulk ticker input section
+    with st.expander("📝 Bulk Ticker Input", expanded=False):
+        st.markdown("**Enter multiple tickers separated by spaces or commas:**")
+        
+        # Initialize bulk ticker input in session state
+        if 'backtest_engine_bulk_tickers' not in st.session_state:
+            st.session_state.backtest_engine_bulk_tickers = ""
+        
+        # Auto-populate bulk ticker input with current tickers
+        current_tickers = [ticker for ticker in st.session_state.tickers if ticker]
+        if current_tickers:
+            current_ticker_string = ' '.join(current_tickers)
+            if st.session_state.backtest_engine_bulk_tickers != current_ticker_string:
+                st.session_state.backtest_engine_bulk_tickers = current_ticker_string
+        
+        # Text area for bulk ticker input
+        bulk_tickers = st.text_area(
+            "Tickers (e.g., SPY QQQ GLD TLT or SPY,QQQ,GLD,TLT)",
+            value=st.session_state.backtest_engine_bulk_tickers,
+            key="backtest_engine_bulk_ticker_input",
+            height=100,
+            help="Enter ticker symbols separated by spaces or commas. Click 'Fill Tickers' to replace tickers (keeps existing allocations)."
+        )
+        
+        if st.button("Fill Tickers", key="backtest_engine_fill_tickers_btn"):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        ticker_list.append(ticker)
+                
+                if ticker_list:
+                    current_tickers = st.session_state.tickers.copy()
+                    current_allocs = st.session_state.allocs.copy()
+                    current_divs = st.session_state.divs.copy()
+                    
+                    # Replace tickers - new ones get 0% allocation
+                    new_tickers = []
+                    new_allocs = []
+                    new_divs = []
+                    
+                    for i, ticker in enumerate(ticker_list):
+                        if i < len(current_tickers):
+                            # Use existing allocation if available
+                            new_tickers.append(ticker)
+                            new_allocs.append(current_allocs[i])
+                            new_divs.append(current_divs[i])
+                        else:
+                            # New tickers get 0% allocation
+                            new_tickers.append(ticker)
+                            new_allocs.append(0.0)
+                            new_divs.append(True)
+                    
+                    # Update session state
+                    st.session_state.tickers = new_tickers
+                    st.session_state.allocs = new_allocs
+                    st.session_state.divs = new_divs
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("ticker_") or key.startswith("alloc_input_") or key.startswith("divs_checkbox_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Replaced tickers with: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun
+                    st.rerun()
+                else:
+                    st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
+            else:
+                st.error("❌ Please enter ticker symbols.")
+
+    # Clear all tickers button - exact same format as page 1
+    if st.button("🗑️ Clear All Tickers", key="backtest_engine_clear_all_tickers_immediate", 
+                help="Delete ALL tickers and create a blank one", use_container_width=True):
+        # Clear all tickers and create a single blank ticker
+        st.session_state.tickers = ['']
+        st.session_state.allocs = [0.0]
+        st.session_state.divs = [True]
+        
+        # Clear bulk ticker input
+        st.session_state.backtest_engine_bulk_tickers = ""
+        
+        # Clear any existing session state keys for individual ticker inputs to force refresh
+        for key in list(st.session_state.keys()):
+            if key.startswith("ticker_") or key.startswith("alloc_input_") or key.startswith("divs_checkbox_"):
+                del st.session_state[key]
+        
+        # Clear any backtest results
+        for key in list(st.session_state.keys()):
+            if key.startswith("backtest_") or key in ["results", "fig", "fig_stats", "fig_drawdown", "fig_allocations"]:
+                del st.session_state[key]
+        
+        st.success("✅ All tickers cleared! Ready for fresh start.")
+        st.rerun()
+
     if st.button("Add Ticker", help="Add another asset to the list", on_click=add_ticker_callback):
         pass
 
