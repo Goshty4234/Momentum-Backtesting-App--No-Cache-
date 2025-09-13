@@ -2970,6 +2970,43 @@ if active_portfolio:
 def get_trading_days(start_date, end_date):
     return pd.bdate_range(start=start_date, end=end_date)
 
+def sort_dataframe_numerically(df, column):
+    """Sort DataFrame by a specific column numerically, handling percentage strings and N/A values"""
+    if column not in df.columns:
+        return df
+    
+    # Create a copy to avoid modifying the original
+    df_sorted = df.copy()
+    
+    # Extract numeric values for sorting
+    def extract_numeric_value(value):
+        if pd.isna(value) or value == 'N/A' or value == 'N/A%':
+            return float('-inf')  # Put N/A values at the end
+        
+        # Handle percentage strings
+        if isinstance(value, str) and value.endswith('%'):
+            try:
+                return float(value.replace('%', ''))
+            except:
+                return float('-inf')
+        
+        # Handle regular numbers
+        try:
+            return float(value)
+        except:
+            return float('-inf')
+    
+    # Create sorting key
+    df_sorted['_sort_key'] = df_sorted[column].apply(extract_numeric_value)
+    
+    # Sort by the numeric key
+    df_sorted = df_sorted.sort_values('_sort_key', ascending=False)
+    
+    # Drop the sorting key
+    df_sorted = df_sorted.drop('_sort_key', axis=1)
+    
+    return df_sorted
+
 def get_dates_by_freq(freq, start, end, market_days):
     market_days = sorted(market_days)
     
@@ -9398,6 +9435,21 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             with st.expander("ℹ️ Column Definitions", expanded=False):
                 st.markdown(tooltip_html, unsafe_allow_html=True)
             
+            # Add sorting controls
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                sort_column = st.selectbox(
+                    "Sort by:",
+                    options=stats_df_clean.columns.tolist(),
+                    index=0,
+                    key="no_cache_strategy_comparison_final_stats_sort_column",
+                    help="Select a column to sort the table numerically"
+                )
+            with col2:
+                if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_final_stats_sort_button"):
+                    stats_df_clean = sort_dataframe_numerically(stats_df_clean, sort_column)
+                    st.rerun()
+            
             # Display the dataframe with multiple fallback options
             try:
                 st.dataframe(styled_df, use_container_width=True)
@@ -9871,6 +9923,55 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     focused_df['Recovery Factor'] = focused_df['Recovery Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
                     focused_df['Tail Ratio'] = focused_df['Tail Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
                 
+                # Add column definitions expander
+                focused_tooltip_data = {
+                    'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
+                    'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
+                    'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
+                    'Sharpe Ratio': 'Sharpe Ratio - Risk-adjusted return (excess return per unit of volatility)',
+                    'Sortino Ratio': 'Sortino Ratio - Risk-adjusted return considering only downside volatility',
+                    'Calmar Ratio': 'Calmar Ratio - Annual return divided by maximum drawdown',
+                    'Sterling Ratio': 'Sterling Ratio - Average annual return divided by average drawdown',
+                    'Recovery Factor': 'Recovery Factor - Net profit divided by maximum drawdown',
+                    'Tail Ratio': 'Tail Ratio - 95th percentile return divided by 5th percentile return',
+                    'Win Rate': 'Win Rate - Percentage of positive return periods',
+                    'Loss Rate': 'Loss Rate - Percentage of negative return periods',
+                    'Median Win': 'Median Win - Median return of positive periods',
+                    'Median Loss': 'Median Loss - Median return of negative periods',
+                    'Profit Factor': 'Profit Factor - Gross profit divided by gross loss',
+                    'Best Month': 'Best Month - Highest single month return',
+                    'Worst Month': 'Worst Month - Lowest single month return',
+                    'Median Monthly': 'Median Monthly - Median monthly return',
+                    'Median Drawdown': 'Median Drawdown - Median drawdown value'
+                }
+                
+                # Create tooltip HTML
+                focused_tooltip_html = "<div style='background-color: #1e1e1e; color: white; padding: 10px; border-radius: 5px; font-size: 12px;'>"
+                focused_tooltip_html += "<b>Column Definitions:</b><br><br>"
+                for col in focused_df.columns:
+                    if col in focused_tooltip_data:
+                        focused_tooltip_html += f"<b>{col}:</b> {focused_tooltip_data[col]}<br><br>"
+                focused_tooltip_html += "</div>"
+                
+                # Display tooltip info
+                with st.expander("ℹ️ Column Definitions", expanded=False):
+                    st.markdown(focused_tooltip_html, unsafe_allow_html=True)
+                
+                # Add sorting controls for focused analysis
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    focused_sort_column = st.selectbox(
+                        "Sort by:",
+                        options=focused_df.columns.tolist(),
+                        index=0,
+                        key="no_cache_strategy_comparison_focused_analysis_sort_column",
+                        help="Select a column to sort the table numerically"
+                    )
+                with col2:
+                    if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_focused_analysis_sort_button"):
+                        focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
+                        st.rerun()
+                
                 # Display the focused table
                 st.dataframe(focused_df, use_container_width=True)
                 
@@ -9942,6 +10043,55 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     focused_df['Recovery Factor'] = focused_df['Recovery Factor'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
                 if 'Tail Ratio' in focused_df.columns:
                     focused_df['Tail Ratio'] = focused_df['Tail Ratio'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
+            
+            # Add column definitions expander
+            focused_tooltip_data = {
+                'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
+                'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
+                'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
+                'Sharpe Ratio': 'Sharpe Ratio - Risk-adjusted return (excess return per unit of volatility)',
+                'Sortino Ratio': 'Sortino Ratio - Risk-adjusted return considering only downside volatility',
+                'Calmar Ratio': 'Calmar Ratio - Annual return divided by maximum drawdown',
+                'Sterling Ratio': 'Sterling Ratio - Average annual return divided by average drawdown',
+                'Recovery Factor': 'Recovery Factor - Net profit divided by maximum drawdown',
+                'Tail Ratio': 'Tail Ratio - 95th percentile return divided by 5th percentile return',
+                'Win Rate': 'Win Rate - Percentage of positive return periods',
+                'Loss Rate': 'Loss Rate - Percentage of negative return periods',
+                'Median Win': 'Median Win - Median return of positive periods',
+                'Median Loss': 'Median Loss - Median return of negative periods',
+                'Profit Factor': 'Profit Factor - Gross profit divided by gross loss',
+                'Best Month': 'Best Month - Highest single month return',
+                'Worst Month': 'Worst Month - Lowest single month return',
+                'Median Monthly': 'Median Monthly - Median monthly return',
+                'Median Drawdown': 'Median Drawdown - Median drawdown value'
+            }
+            
+            # Create tooltip HTML
+            focused_tooltip_html = "<div style='background-color: #1e1e1e; color: white; padding: 10px; border-radius: 5px; font-size: 12px;'>"
+            focused_tooltip_html += "<b>Column Definitions:</b><br><br>"
+            for col in focused_df.columns:
+                if col in focused_tooltip_data:
+                    focused_tooltip_html += f"<b>{col}:</b> {focused_tooltip_data[col]}<br><br>"
+            focused_tooltip_html += "</div>"
+            
+            # Display tooltip info
+            with st.expander("ℹ️ Column Definitions", expanded=False):
+                st.markdown(focused_tooltip_html, unsafe_allow_html=True)
+            
+            # Add sorting controls for focused analysis
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                focused_sort_column = st.selectbox(
+                    "Sort by:",
+                    options=focused_df.columns.tolist(),
+                    index=0,
+                    key="no_cache_strategy_comparison_focused_analysis_sort_column_2",
+                    help="Select a column to sort the table numerically"
+                )
+            with col2:
+                if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_focused_analysis_sort_button_2"):
+                    focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
+                    st.rerun()
             
             # Display the focused analysis table
             st.dataframe(focused_df, use_container_width=True)
