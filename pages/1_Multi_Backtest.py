@@ -9,9 +9,51 @@ import json
 import io
 import concurrent.futures
 import time as time_module
+import os
+import signal
+import sys
+import threading
 
 # Set pandas options for handling large dataframes
 pd.set_option("styler.render.max_elements", 1000000)  # Allow up to 1M cells for styling
+
+# =============================================================================
+# HARD KILL MECHANISM
+# =============================================================================
+
+def hard_kill_process():
+    """Completely kill the current process and all background threads"""
+    try:
+        # Kill all background threads
+        for thread in threading.enumerate():
+            if thread != threading.current_thread():
+                thread.join(timeout=0.1)
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # On Windows, use os._exit for immediate termination
+        if os.name == 'nt':
+            os._exit(1)
+        else:
+            # On Unix-like systems, use os.kill
+            os.kill(os.getpid(), signal.SIGTERM)
+    except Exception:
+        # Last resort - force exit
+        os._exit(1)
+
+def check_kill_request():
+    """Check if user has requested a hard kill"""
+    if st.session_state.get('hard_kill_requested', False):
+        st.error("🛑 **HARD KILL REQUESTED** - Terminating all processes...")
+        st.stop()
+
+def emergency_kill():
+    """Emergency kill function that can be called from anywhere"""
+    st.error("🛑 **EMERGENCY KILL** - Forcing immediate termination...")
+    st.session_state.hard_kill_requested = True
+    hard_kill_process()
 
 # =============================================================================
 # HELPER FUNCTIONS FOR FOCUSED ANALYSIS
@@ -8390,12 +8432,14 @@ if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_containe
 
 # Move Run Backtest to the left sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
+    # Reset kill flag when starting new run
+    st.session_state.hard_kill_requested = False
     
     # Pre-backtest validation check for all portfolios
     configs_to_run = st.session_state.multi_backtest_portfolio_configs
     valid_configs = True
     validation_errors = []
-    
+
     for cfg in configs_to_run:
         # Check if this is a fusion portfolio
         is_fusion = 'fusion_portfolio' in cfg and cfg['fusion_portfolio'].get('enabled', False)
@@ -8447,6 +8491,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         progress_bar = st.empty()
         progress_bar.progress(0, text="Initializing multi-portfolio backtest...")
         
+        # Check for kill request
+        check_kill_request()
+        
         # Get all tickers first
         all_tickers = sorted(list(set(s['ticker'] for cfg in st.session_state.multi_backtest_portfolio_configs for s in cfg['stocks'] if s['ticker']) | set(cfg['benchmark_ticker'] for cfg in st.session_state.multi_backtest_portfolio_configs if 'benchmark_ticker' in cfg)))
         all_tickers = [t for t in all_tickers if t]
@@ -8477,6 +8524,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             data = {}
             invalid_tickers = []
             for i, t in enumerate(all_tickers):
+                # Check for kill request during data download
+                check_kill_request()
+                
                 try:
                     progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
                     progress_bar.progress((i + 1) / (len(all_tickers) + 1), text=progress_text)
@@ -8597,6 +8647,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 
                 progress_bar.progress(1.0, text="Executing multi-portfolio backtest analysis...")
                 
+                # Check for kill request before main execution
+                check_kill_request()
+                
                 # =============================================================================
                 # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO CACHE VERSION)
                 # =============================================================================
@@ -8635,10 +8688,16 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 if individual_portfolios:
                     status_container.info(f"🚀 **Phase 1: Processing {len(individual_portfolios)} individual portfolios...**")
                     
+                    # Check for kill request before processing portfolios
+                    check_kill_request()
+                    
                     # Start timing
                     start_time = time_module.time()
                     
                     for i, (original_index, cfg) in enumerate(individual_portfolios, start=1):
+                        # Check for kill request during portfolio processing
+                        check_kill_request()
+                        
                         try:
                             # Update progress for individual portfolios
                             progress_percent = i / len(individual_portfolios)
@@ -8782,6 +8841,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 if fusion_portfolios:
                     status_container.info(f"🚀 **Phase 2: Processing {len(fusion_portfolios)} fusion portfolios...**")
                     
+                    # Check for kill request before processing fusion portfolios
+                    check_kill_request()
+                    
                     # Step 3a: Resolve fusion dependencies (fusion-of-fusion support)
                     def resolve_fusion_dependencies(fusion_list):
                         """Resolve dependencies between fusion portfolios"""
@@ -8842,6 +8904,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     resolved_fusion_portfolios = resolve_fusion_dependencies(fusion_portfolios)
                     
                     for i, (original_index, cfg) in enumerate(resolved_fusion_portfolios, start=1):
+                        # Check for kill request during fusion portfolio processing
+                        check_kill_request()
+                        
                         try:
                             # Update progress for fusion portfolios
                             progress_percent = i / len(resolved_fusion_portfolios)
@@ -9310,6 +9375,20 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             # Save portfolio index -> unique key mapping so UI selectors can reference results reliably
             st.session_state.multi_backtest_portfolio_key_map = portfolio_key_map
             st.session_state.multi_backtest_ran = True
+            
+            # Final kill check before completion
+            check_kill_request()
+
+# Cancel Run button underneath with same dimensions
+if st.sidebar.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
+    st.session_state.hard_kill_requested = True
+    st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
+    st.rerun()
+
+# Emergency kill button (always visible)
+if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
+    st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
+    emergency_kill()
 
 # Sidebar JSON export/import for ALL portfolios
 def paste_all_json_callback():
