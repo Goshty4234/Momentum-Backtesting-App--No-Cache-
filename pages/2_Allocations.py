@@ -21,7 +21,48 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors as reportlab_colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import base64
+import os
+import signal
+import sys
+import threading
 warnings.filterwarnings('ignore')
+
+# =============================================================================
+# HARD KILL FUNCTIONS
+# =============================================================================
+def hard_kill_process():
+    """Completely kill the current process and all background threads"""
+    try:
+        # Kill all background threads
+        for thread in threading.enumerate():
+            if thread != threading.current_thread():
+                thread.join(timeout=0.1)
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+
+        # On Windows, use os._exit for immediate termination
+        if os.name == 'nt':
+            os._exit(1)
+        else:
+            # On Unix-like systems, use os.kill
+            os.kill(os.getpid(), signal.SIGTERM)
+    except Exception:
+        # Last resort - force exit
+        os._exit(1)
+
+def check_kill_request():
+    """Check if user has requested a hard kill"""
+    if st.session_state.get('hard_kill_requested', False):
+        st.error("🛑 **HARD KILL REQUESTED** - Terminating all processes...")
+        st.stop()
+
+def emergency_kill():
+    """Emergency kill function that can be called from anywhere"""
+    st.error("🛑 **EMERGENCY KILL** - Forcing immediate termination...")
+    st.session_state.hard_kill_requested = True
+    hard_kill_process()
 
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
@@ -4925,8 +4966,21 @@ if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_containe
     clear_all_outputs()
     st.rerun()
 
+# Cancel Run Button
+if st.sidebar.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
+    st.session_state.hard_kill_requested = True
+    st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
+    st.rerun()
+
+# Emergency Kill Button
+if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
+    st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
+    emergency_kill()
+
 # Move Run Backtest to the first sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
+    # Reset kill request when starting new backtest
+    st.session_state.hard_kill_requested = False
     print(f"[THRESHOLD DEBUG] Run Backtest button clicked!")
     
     # Update active portfolio config with current session state values before running backtest
