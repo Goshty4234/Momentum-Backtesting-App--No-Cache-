@@ -59,10 +59,15 @@ def check_kill_request():
         st.stop()
 
 def emergency_kill():
-    """Emergency kill function that can be called from anywhere"""
-    st.error("🛑 **EMERGENCY KILL** - Forcing immediate termination...")
+    """Emergency kill function that stops backtest without crashing the app"""
+    st.error("🛑 **EMERGENCY KILL** - Forcing immediate backtest termination...")
     st.session_state.hard_kill_requested = True
-    hard_kill_process()
+    # Reset running flags to bring back the Run button
+    st.session_state.running = False
+    st.session_state._run_requested = False
+    if "_pending_backtest_params" in st.session_state:
+        del st.session_state["_pending_backtest_params"]
+    st.rerun()
 
 # =============================================================================
 # LEVERAGE ETF SIMULATION FUNCTIONS
@@ -4541,13 +4546,8 @@ with col_cancel:
         st.rerun()
 
 with col_emergency:
-    if st.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
-        # Reset running flags to bring back the Run button
-        st.session_state.running = False
-        st.session_state._run_requested = False
-        if "_pending_backtest_params" in st.session_state:
-            del st.session_state["_pending_backtest_params"]
-        st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
+    if st.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force stop backtest immediately - Use for unresponsive states"):
+        st.toast("🚨 **EMERGENCY KILL** - Force stopping backtest...", icon="💥")
         emergency_kill()
 
 # Execution block: perform the heavy backtest work only when a run has been
