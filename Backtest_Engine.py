@@ -19,10 +19,50 @@ import pandas_market_calendars as mcal
 from warnings import warn
 import plotly.graph_objects as go
 import logging
+import os
+import signal
+import sys
 try:
     from streamlit_plotly_events import plotly_events
 except Exception:
     plotly_events = None
+
+# =============================================================================
+# HARD KILL FUNCTIONS
+# =============================================================================
+def hard_kill_process():
+    """Completely kill the current process and all background threads"""
+    try:
+        # Kill all background threads
+        for thread in threading.enumerate():
+            if thread != threading.current_thread():
+                thread.join(timeout=0.1)
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+
+        # On Windows, use os._exit for immediate termination
+        if os.name == 'nt':
+            os._exit(1)
+        else:
+            # On Unix-like systems, use os.kill
+            os.kill(os.getpid(), signal.SIGTERM)
+    except Exception:
+        # Last resort - force exit
+        os._exit(1)
+
+def check_kill_request():
+    """Check if user has requested a hard kill"""
+    if st.session_state.get('hard_kill_requested', False):
+        st.error("🛑 **HARD KILL REQUESTED** - Terminating all processes...")
+        st.stop()
+
+def emergency_kill():
+    """Emergency kill function that can be called from anywhere"""
+    st.error("🛑 **EMERGENCY KILL** - Forcing immediate termination...")
+    st.session_state.hard_kill_requested = True
+    hard_kill_process()
 
 # =============================================================================
 # LEVERAGE ETF SIMULATION FUNCTIONS
@@ -4379,7 +4419,8 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
             benchmark_error = f"Error verifying benchmark ticker on Yahoo Finance: {e}"
     if benchmark_error:
         st.warning(benchmark_error)
-    # Main page
+
+# Main page
 st.markdown("---")
 st.subheader("Run Backtest")
 
@@ -4396,6 +4437,8 @@ if not st.session_state.get("_run_requested", False):
     col_run, col_clear = st.columns([1, 1])
     with col_run:
         if st.button("Run backtest", type="primary", use_container_width=True):
+            # Reset kill request when starting new backtest
+            st.session_state.hard_kill_requested = False
             # --- PRE-CHECK BLOCK ---
             print("DEBUG: Run Backtest button pressed. Checking pre-conditions...")
             # Print start date of each selected ticker and benchmark for debugging
@@ -4484,6 +4527,29 @@ if not st.session_state.get("_run_requested", False):
     with col_clear:
         st.button("Clear outputs", on_click=clear_outputs, use_container_width=True)
 
+# Stop buttons - always visible, same size as run/clear buttons
+col_cancel, col_emergency = st.columns([1, 1])
+with col_cancel:
+    if st.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
+        st.session_state.hard_kill_requested = True
+        # Reset running flags to bring back the Run button
+        st.session_state.running = False
+        st.session_state._run_requested = False
+        if "_pending_backtest_params" in st.session_state:
+            del st.session_state["_pending_backtest_params"]
+        st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
+        st.rerun()
+
+with col_emergency:
+    if st.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
+        # Reset running flags to bring back the Run button
+        st.session_state.running = False
+        st.session_state._run_requested = False
+        if "_pending_backtest_params" in st.session_state:
+            del st.session_state["_pending_backtest_params"]
+        st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
+        emergency_kill()
+
 # Execution block: perform the heavy backtest work only when a run has been
 # requested and the running banner is visible. This ensures the UI updates
 # before computation and avoids re-entrancy/infinite-loop problems.
@@ -4526,6 +4592,9 @@ if st.session_state.get("_run_requested", False) and st.session_state.get("runni
         st.stop()
 
     with st.spinner("Running backtest..."):
+        # Check for kill request before starting
+        check_kill_request()
+        
         console_buf = io.StringIO()
         with contextlib.redirect_stdout(console_buf):
             try:
