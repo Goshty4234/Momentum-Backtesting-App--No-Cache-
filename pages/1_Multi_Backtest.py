@@ -2950,7 +2950,7 @@ def get_portfolio_value(portfolio_name):
                     portfolio_value = float(latest_value)
     return portfolio_value
 
-def sort_dataframe_numerically(df, column):
+def sort_dataframe_numerically(df, column, ascending=False):
     """Sort DataFrame by a specific column numerically, handling percentage strings and N/A values"""
     if column not in df.columns:
         return df
@@ -2980,7 +2980,7 @@ def sort_dataframe_numerically(df, column):
     df_sorted['_sort_key'] = df_sorted[column].apply(extract_numeric_value)
     
     # Sort by the numeric key
-    df_sorted = df_sorted.sort_values('_sort_key', ascending=False)
+    df_sorted = df_sorted.sort_values('_sort_key', ascending=ascending)
     
     # Drop the sorting key
     df_sorted = df_sorted.drop('_sort_key', axis=1)
@@ -8363,6 +8363,9 @@ def clear_all_outputs():
     st.session_state.multi_all_results = None
     st.session_state.multi_all_allocations = None
     st.session_state.multi_all_metrics = None
+    # Clear sorted states
+    st.session_state.multi_backtest_final_stats_sorted_df = None
+    st.session_state.multi_backtest_focused_analysis_sorted_df = None
     st.session_state.multi_backtest_all_drawdowns = None
     st.session_state.multi_backtest_stats_df_display = None
     st.session_state.multi_backtest_all_years = None
@@ -9302,6 +9305,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             st.session_state.multi_backtest_all_years = all_years
             st.session_state.multi_all_allocations = all_allocations
             st.session_state.multi_all_metrics = all_metrics
+            # Clear any previous sorting when new results are calculated
+            st.session_state.multi_backtest_final_stats_sorted_df = None
             # Save portfolio index -> unique key mapping so UI selectors can reference results reliably
             st.session_state.multi_backtest_portfolio_key_map = portfolio_key_map
             st.session_state.multi_backtest_ran = True
@@ -10525,21 +10530,25 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         if total_count > 0 and numeric_count / total_count > 0.5:
                             safe_fmt_map[col] = fmt
             
+            # Use sorted dataframe if available, otherwise use original
+            sorted_df = st.session_state.get('multi_backtest_final_stats_sorted_df', None)
+            display_df = sorted_df if sorted_df is not None else stats_df_clean
+            
             # Add tooltips to the dataframe
             if safe_fmt_map and not has_problematic_data:
                 try:
-                    styled_df = stats_df_clean.style.format(safe_fmt_map)
+                    styled_df = display_df.style.format(safe_fmt_map)
                 except Exception as e:
-                    styled_df = stats_df_clean
+                    styled_df = display_df
             else:
                 # Skip styling entirely if there's problematic data
-                styled_df = stats_df_clean
+                styled_df = display_df
             
             # Add tooltips using HTML
             tooltip_html = "<div style='background-color: #1e1e1e; color: white; padding: 10px; border-radius: 5px; font-size: 12px;'>"
             tooltip_html += "<b>Column Definitions:</b><br><br>"
             for col, tooltip in tooltip_data.items():
-                if col in stats_df_clean.columns:
+                if col in display_df.columns:
                     tooltip_html += f"<b>{col}:</b> {tooltip}<br><br>"
             tooltip_html += "</div>"
             
@@ -10548,19 +10557,39 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 st.markdown(tooltip_html, unsafe_allow_html=True)
             
             # Add sorting controls
-            col1, col2 = st.columns([1, 3])
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 sort_column = st.selectbox(
                     "Sort by:",
-                    options=stats_df_clean.columns.tolist(),
+                    options=display_df.columns.tolist(),
                     index=0,
                     key="no_cache_final_stats_sort_column",
                     help="Select a column to sort the table numerically"
                 )
+            # Initialize session state variables
+            if 'multi_backtest_final_stats_sorted_df' not in st.session_state:
+                st.session_state.multi_backtest_final_stats_sorted_df = None
+            if 'multi_backtest_final_stats_sort_ascending' not in st.session_state:
+                st.session_state.multi_backtest_final_stats_sort_ascending = None
+            
+            # Check for button clicks and update session state
+            sort_clicked = False
             with col2:
-                if st.button("🔄 Sort Table", key="no_cache_final_stats_sort_button"):
-                    stats_df_clean = sort_dataframe_numerically(stats_df_clean, sort_column)
-                    st.rerun()
+                if st.button("⬇️ Sort ↓", key="no_cache_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                    st.session_state.multi_backtest_final_stats_sort_ascending = False
+                    sort_clicked = True
+            with col3:
+                if st.button("⬆️ Sort ↑", key="no_cache_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                    st.session_state.multi_backtest_final_stats_sort_ascending = True
+                    sort_clicked = True
+            
+            # Sort and store if a button was clicked
+            if sort_clicked:
+                ascending = st.session_state.multi_backtest_final_stats_sort_ascending
+                # Always use the current display_df (which is the most up-to-date data)
+                sorted_df = sort_dataframe_numerically(display_df, sort_column, ascending=ascending)
+                st.session_state.multi_backtest_final_stats_sorted_df = sorted_df
+                st.rerun()
             
             # Display the dataframe with multiple fallback options
             try:
@@ -10693,6 +10722,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             st.session_state.multi_backtest_focused_analysis_start_date = None
         if 'multi_backtest_focused_analysis_end_date' not in st.session_state:
             st.session_state.multi_backtest_focused_analysis_end_date = None
+        if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
+            st.session_state.multi_backtest_focused_analysis_sorted_df = None
+        if 'multi_backtest_final_stats_sorted_df' not in st.session_state:
+            st.session_state.multi_backtest_final_stats_sorted_df = None
         
         # Date range controls
         col_date1, col_date2, col_metrics = st.columns([1, 1, 1])
@@ -10835,6 +10868,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         # Update session state when essential metrics checkbox changes
         if show_essential_only != st.session_state.multi_backtest_focused_analysis_show_essential:
             st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
+            # Clear any previous sorting when essential metrics setting changes
+            st.session_state.multi_backtest_focused_analysis_sorted_df = None
             # Recalculate if we have existing results
             if st.session_state.multi_backtest_focused_analysis_results is not None:
                 calculate_analysis = True
@@ -10894,10 +10929,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         
                         if show_essential_only:
                             focused_stats[portfolio_name] = {
+                                'Total Return': total_ret_val,
                                 'CAGR': cagr_val,
                                 'Max Drawdown': max_dd_val,
-                                'Volatility': vol_val,
-                                'Total Return': total_ret_val
+                                'Volatility': vol_val
                             }
                         else:
                             # For full analysis, we still need to calculate additional metrics not in Final Performance Statistics
@@ -10906,6 +10941,16 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             if isinstance(results, dict) and 'no_additions' in results:
                                 series = results['no_additions']
                                 if hasattr(series, 'index') and len(series.index) > 0:
+                                    # Filter series by date range for accurate final value calculation
+                                    start_datetime = pd.to_datetime(start_date)
+                                    end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+                                    mask = (series.index >= start_datetime) & (series.index < end_datetime)
+                                    filtered_series = series[mask]
+                                    
+                                    if len(filtered_series) > 0:
+                                        # Calculate CAGR for the filtered period
+                                        filtered_cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                    
                                     # Calculate returns for additional metrics
                                     returns = series.pct_change().fillna(0)
                                     
@@ -10951,6 +10996,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
                                     
                                     focused_stats[portfolio_name] = {
+                                        'Total Return': total_ret_val,  # From Final Performance Statistics
                                         'CAGR': cagr_val,  # From Final Performance Statistics
                                         'Max Drawdown': max_dd_val,  # From Final Performance Statistics
                                         'Volatility': vol_val,  # From Final Performance Statistics
@@ -10959,8 +11005,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         'Ulcer Index': ulcer_val,  # From Final Performance Statistics
                                         'UPI': upi_val,  # From Final Performance Statistics
                                         'Beta': extract_numeric(row.get('Beta', 'N/A')),  # From Final Performance Statistics
-                                        'Total Return': total_ret_val,  # From Final Performance Statistics
-                                        'Final Value (No Contributions)': series.iloc[-1],
+                                        'Final Value (No Contributions)': 10000 * ((1 + filtered_cagr) ** ((filtered_series.index[-1] - filtered_series.index[0]).days / 365.25)),
                                         'Median Drawdown': median_drawdown * 100,
                                         'Win Rate': win_rate,
                                         'Loss Rate': loss_rate,
@@ -11058,7 +11103,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     # Calculate additional instantaneous metrics
                                     total_return = (filtered_series.iloc[-1] / filtered_series.iloc[0] - 1)
                                     final_value = filtered_series.iloc[-1]
-                                    final_value_no_contrib = filtered_series.iloc[-1]
+                                    # For no contributions, start with $10,000 and apply CAGR
+                                    years = (filtered_series.index[-1] - filtered_series.index[0]).days / 365.25
+                                    cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                    final_value_no_contrib = 10000 * ((1 + cagr) ** years)
                                     total_money_added = 0  # Not available in no_additions series
                                     
                                     # Calculate median drawdown
@@ -11095,13 +11143,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     
                                     if show_essential_only:
                                         focused_stats[portfolio_name] = {
+                                            'Total Return': total_return * 100,
                                             'CAGR': cagr * 100,
                                             'Max Drawdown': max_drawdown * 100,
-                                            'Volatility': volatility * 100,
-                                            'Total Return': total_return * 100
+                                            'Volatility': volatility * 100
                                         }
                                     else:
                                         focused_stats[portfolio_name] = {
+                                            'Total Return': total_return * 100,
                                             'CAGR': cagr * 100,
                                             'Max Drawdown': max_drawdown * 100,
                                             'Volatility': volatility * 100,
@@ -11110,7 +11159,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             'Ulcer Index': ulcer_index,
                                             'UPI': upi,
                                             'Beta': beta,
-                                            'Total Return': total_return * 100,
                                             'Final Value (No Contributions)': final_value_no_contrib,
                                             'Median Drawdown': median_drawdown * 100,
                                             'Win Rate': win_rate,
@@ -11132,6 +11180,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 st.session_state.multi_backtest_focused_analysis_results = focused_stats
                 st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
                 st.session_state.multi_backtest_focused_analysis_period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+                # Clear any previous sorting when new results are calculated
+                st.session_state.multi_backtest_focused_analysis_sorted_df = None
                 
                 # Create focused stats DataFrame
                 focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
@@ -11171,6 +11221,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 
                 # Add column definitions expander
                 focused_tooltip_data = {
+                    'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                     'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
                     'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
                     'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
@@ -11204,7 +11255,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     st.markdown(focused_tooltip_html, unsafe_allow_html=True)
                 
                 # Add sorting controls for focused analysis
-                col1, col2 = st.columns([1, 3])
+                col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     focused_sort_column = st.selectbox(
                         "Sort by:",
@@ -11213,13 +11264,37 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         key="no_cache_focused_analysis_sort_column",
                         help="Select a column to sort the table numerically"
                     )
-                with col2:
-                    if st.button("🔄 Sort Table", key="no_cache_focused_analysis_sort_button"):
-                        focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
-                        st.rerun()
+                # Initialize session state variables
+                if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
+                    st.session_state.multi_backtest_focused_analysis_sorted_df = None
+                if 'multi_backtest_focused_analysis_sort_ascending' not in st.session_state:
+                    st.session_state.multi_backtest_focused_analysis_sort_ascending = None
                 
-                # Display the focused table
-                st.dataframe(focused_df, use_container_width=True)
+                # Check for button clicks and update session state
+                sort_clicked = False
+                with col2:
+                    if st.button("⬇️ Sort ↓", key="no_cache_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                        st.session_state.multi_backtest_focused_analysis_sort_ascending = False
+                        sort_clicked = True
+                with col3:
+                    if st.button("⬆️ Sort ↑", key="no_cache_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                        st.session_state.multi_backtest_focused_analysis_sort_ascending = True
+                        sort_clicked = True
+                
+                # Display the focused table (use sorted version if available)
+                sorted_df = st.session_state.multi_backtest_focused_analysis_sorted_df
+                display_df = sorted_df if sorted_df is not None else focused_df
+                
+                # Sort and store if a button was clicked
+                if sort_clicked:
+                    ascending = st.session_state.multi_backtest_focused_analysis_sort_ascending
+                    # Always use the current display_df (which is the most up-to-date data)
+                    sorted_df = sort_dataframe_numerically(display_df, focused_sort_column, ascending=ascending)
+                    st.session_state.multi_backtest_focused_analysis_sorted_df = sorted_df
+                    st.rerun()
+                
+                # Display the table
+                st.dataframe(display_df, use_container_width=True)
                 
                 # Show date range info
                 st.info(f"📅 **Analysis Period:** {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
@@ -11237,13 +11312,13 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             # Format the DataFrame based on current essential setting
             if show_essential_only:
                 # Filter to only show essential columns
-                essential_cols = ['CAGR', 'Max Drawdown', 'Volatility', 'Total Return']
+                essential_cols = ['Total Return', 'CAGR', 'Max Drawdown', 'Volatility']
                 if all(col in focused_df.columns for col in essential_cols):
                     focused_df = focused_df[essential_cols]
+                focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
                 focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
                 focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
                 focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
-                focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
             else:
                 # Format all columns
                 focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
@@ -11292,6 +11367,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             
             # Add column definitions expander
             focused_tooltip_data = {
+                'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                 'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
                 'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
                 'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
@@ -11325,7 +11401,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 st.markdown(focused_tooltip_html, unsafe_allow_html=True)
             
             # Add sorting controls for focused analysis
-            col1, col2 = st.columns([1, 3])
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 focused_sort_column = st.selectbox(
                     "Sort by:",
@@ -11334,13 +11410,37 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     key="no_cache_focused_analysis_sort_column_2",
                     help="Select a column to sort the table numerically"
                 )
-            with col2:
-                if st.button("🔄 Sort Table", key="no_cache_focused_analysis_sort_button_2"):
-                    focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
-                    st.rerun()
+            # Initialize session state variables
+            if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
+                st.session_state.multi_backtest_focused_analysis_sorted_df = None
+            if 'multi_backtest_focused_analysis_sort_ascending' not in st.session_state:
+                st.session_state.multi_backtest_focused_analysis_sort_ascending = None
             
-            # Display the focused analysis table
-            st.dataframe(focused_df, use_container_width=True)
+            # Check for button clicks and update session state
+            sort_clicked = False
+            with col2:
+                if st.button("⬇️ Sort ↓", key="no_cache_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
+                    st.session_state.multi_backtest_focused_analysis_sort_ascending = False
+                    sort_clicked = True
+            with col3:
+                if st.button("⬆️ Sort ↑", key="no_cache_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
+                    st.session_state.multi_backtest_focused_analysis_sort_ascending = True
+                    sort_clicked = True
+            
+            # Display the focused analysis table (use sorted version if available)
+            sorted_df = st.session_state.multi_backtest_focused_analysis_sorted_df
+            display_df = sorted_df if sorted_df is not None else focused_df
+            
+            # Sort and store if a button was clicked
+            if sort_clicked:
+                ascending = st.session_state.multi_backtest_focused_analysis_sort_ascending
+                # Always use the current display_df (which is the most up-to-date data)
+                sorted_df = sort_dataframe_numerically(display_df, focused_sort_column, ascending=ascending)
+                st.session_state.multi_backtest_focused_analysis_sorted_df = sorted_df
+                st.rerun()
+            
+            # Display the table
+            st.dataframe(display_df, use_container_width=True)
             
             # Show date range info - THIS IS THE KEY FOR PERSISTENCE
             if st.session_state.multi_backtest_focused_analysis_period is not None:
