@@ -59,10 +59,10 @@ def check_kill_request():
         st.stop()
 
 def emergency_kill():
-    """Emergency kill function that can be called from anywhere"""
-    st.error("🛑 **EMERGENCY KILL** - Forcing immediate termination...")
+    """Emergency kill function that stops backtest without crashing the app"""
+    st.error("🛑 **EMERGENCY KILL** - Forcing immediate backtest termination...")
     st.session_state.hard_kill_requested = True
-    hard_kill_process()
+    st.rerun()
 
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
