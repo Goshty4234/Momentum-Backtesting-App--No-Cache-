@@ -2970,7 +2970,7 @@ if active_portfolio:
 def get_trading_days(start_date, end_date):
     return pd.bdate_range(start=start_date, end=end_date)
 
-def sort_dataframe_numerically(df, column):
+def sort_dataframe_numerically(df, column, ascending=False):
     """Sort DataFrame by a specific column numerically, handling percentage strings and N/A values"""
     if column not in df.columns:
         return df
@@ -3000,7 +3000,7 @@ def sort_dataframe_numerically(df, column):
     df_sorted['_sort_key'] = df_sorted[column].apply(extract_numeric_value)
     
     # Sort by the numeric key
-    df_sorted = df_sorted.sort_values('_sort_key', ascending=False)
+    df_sorted = df_sorted.sort_values('_sort_key', ascending=ascending)
     
     # Drop the sorting key
     df_sorted = df_sorted.drop('_sort_key', axis=1)
@@ -8638,6 +8638,8 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             if 'stats_df_display' in locals():
                 st.session_state.strategy_comparison_stats_df_display = stats_df_display
             st.session_state.strategy_comparison_all_years = all_years
+            # Clear any previous sorting when new results are calculated
+            st.session_state.strategy_comparison_final_stats_sorted_df = None
             
             # Statistics table creation moved to main display section - EXACT same as Multi-Backtest
             # Save a snapshot used by the allocations UI so charts/tables remain static until rerun
@@ -9364,7 +9366,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 'Beta': 'Portfolio volatility relative to benchmark. <1 less volatile, >1 more volatile than market.',
                 'MWRR': 'Money-Weighted Rate of Return. Accounts for timing and size of cash flows.',
                 'Final Portfolio Value': 'Final value including all contributions and investment returns.',
-                'Final Value (No Contributions)': 'Final value excluding additional contributions (only initial investment).',
+                'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                 'Total Money Added': 'Total amount of money contributed (initial + periodic additions).'
             }
             
@@ -9413,21 +9415,25 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                         if total_count > 0 and numeric_count / total_count > 0.5:
                             safe_fmt_map[col] = fmt
             
+            # Use sorted dataframe if available, otherwise use original
+            sorted_df = st.session_state.get('strategy_comparison_final_stats_sorted_df', None)
+            display_df = sorted_df if sorted_df is not None else stats_df_clean
+            
             # Add tooltips to the dataframe
             if safe_fmt_map and not has_problematic_data:
                 try:
-                    styled_df = stats_df_clean.style.format(safe_fmt_map)
+                    styled_df = display_df.style.format(safe_fmt_map)
                 except Exception as e:
-                    styled_df = stats_df_clean
+                    styled_df = display_df
             else:
                 # Skip styling entirely if there's problematic data
-                styled_df = stats_df_clean
+                styled_df = display_df
             
             # Add tooltips using HTML
             tooltip_html = "<div style='background-color: #1e1e1e; color: white; padding: 10px; border-radius: 5px; font-size: 12px;'>"
             tooltip_html += "<b>Column Definitions:</b><br><br>"
             for col, tooltip in tooltip_data.items():
-                if col in stats_df_clean.columns:
+                if col in display_df.columns:
                     tooltip_html += f"<b>{col}:</b> {tooltip}<br><br>"
             tooltip_html += "</div>"
             
@@ -9436,7 +9442,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 st.markdown(tooltip_html, unsafe_allow_html=True)
             
             # Add sorting controls
-            col1, col2 = st.columns([1, 3])
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 sort_column = st.selectbox(
                     "Sort by:",
@@ -9446,8 +9452,14 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     help="Select a column to sort the table numerically"
                 )
             with col2:
-                if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_final_stats_sort_button"):
-                    stats_df_clean = sort_dataframe_numerically(stats_df_clean, sort_column)
+                if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                    sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=False)
+                    st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
+                    st.rerun()
+            with col3:
+                if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                    sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=True)
+                    st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
                     st.rerun()
             
             # Display the dataframe with multiple fallback options
@@ -9581,6 +9593,10 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             st.session_state.strategy_comparison_focused_analysis_start_date = None
         if 'strategy_comparison_focused_analysis_end_date' not in st.session_state:
             st.session_state.strategy_comparison_focused_analysis_end_date = None
+        if 'strategy_comparison_focused_analysis_sorted_df' not in st.session_state:
+            st.session_state.strategy_comparison_focused_analysis_sorted_df = None
+        if 'strategy_comparison_final_stats_sorted_df' not in st.session_state:
+            st.session_state.strategy_comparison_final_stats_sorted_df = None
         
         # Date range controls
         col_date1, col_date2, col_metrics = st.columns([1, 1, 1])
@@ -9812,7 +9828,10 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                 # Calculate additional instantaneous metrics
                                 total_return = (filtered_series.iloc[-1] / filtered_series.iloc[0] - 1)
                                 final_value = filtered_series.iloc[-1]
-                                final_value_no_contrib = filtered_series.iloc[-1]
+                                # For no contributions, start with $10,000 and apply CAGR
+                                years = (filtered_series.index[-1] - filtered_series.index[0]).days / 365.25
+                                cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                final_value_no_contrib = 10000 * ((1 + cagr) ** years)
                                 total_money_added = 0  # Not available in no_additions series
                                 
                                 # Calculate median drawdown
@@ -9849,13 +9868,14 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                 
                                 if show_essential_only:
                                     focused_stats[portfolio_name] = {
+                                        'Total Return': total_return * 100,
                                         'CAGR': cagr * 100,
                                         'Max Drawdown': max_drawdown * 100,
-                                        'Volatility': volatility * 100,
-                                        'Total Return': total_return * 100
+                                        'Volatility': volatility * 100
                                     }
                                 else:
                                     focused_stats[portfolio_name] = {
+                                        'Total Return': total_return * 100,
                                         'CAGR': cagr * 100,
                                         'Max Drawdown': max_drawdown * 100,
                                         'Volatility': volatility * 100,
@@ -9864,7 +9884,6 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                         'Ulcer Index': ulcer_index,
                                         'UPI': upi,
                                         'Beta': beta,
-                                        'Total Return': total_return * 100,
                                         'Final Value (No Contributions)': final_value_no_contrib,
                                         'Median Drawdown': median_drawdown * 100,
                                         'Win Rate': win_rate,
@@ -9886,6 +9905,8 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 st.session_state.strategy_comparison_focused_analysis_results = focused_stats
                 st.session_state.strategy_comparison_focused_analysis_show_essential = show_essential_only
                 st.session_state.strategy_comparison_focused_analysis_period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+                # Clear any previous sorting when new results are calculated
+                st.session_state.strategy_comparison_focused_analysis_sorted_df = None
                 
                 # Create focused stats DataFrame
                 focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
@@ -9925,6 +9946,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 
                 # Add column definitions expander
                 focused_tooltip_data = {
+                    'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                     'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
                     'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
                     'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
@@ -9958,7 +9980,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     st.markdown(focused_tooltip_html, unsafe_allow_html=True)
                 
                 # Add sorting controls for focused analysis
-                col1, col2 = st.columns([1, 3])
+                col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     focused_sort_column = st.selectbox(
                         "Sort by:",
@@ -9968,12 +9990,20 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                         help="Select a column to sort the table numerically"
                     )
                 with col2:
-                    if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_focused_analysis_sort_button"):
-                        focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
+                    if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                        sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
+                        st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
+                        st.rerun()
+                with col3:
+                    if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                        sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
+                        st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                         st.rerun()
                 
-                # Display the focused table
-                st.dataframe(focused_df, use_container_width=True)
+                # Display the focused table (use sorted version if available)
+                sorted_df = st.session_state.get('strategy_comparison_focused_analysis_sorted_df', None)
+                display_df = sorted_df if sorted_df is not None else focused_df
+                st.dataframe(display_df, use_container_width=True)
                 
                 # Show date range info
                 st.info(f"📅 **Analysis Period:** {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
@@ -9991,13 +10021,13 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             # Format the DataFrame based on current essential setting
             if show_essential_only:
                 # Filter to only show essential columns
-                essential_cols = ['CAGR', 'Max Drawdown', 'Volatility', 'Total Return']
+                essential_cols = ['Total Return', 'CAGR', 'Max Drawdown', 'Volatility']
                 if all(col in focused_df.columns for col in essential_cols):
                     focused_df = focused_df[essential_cols]
+                focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
                 focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
                 focused_df['Max Drawdown'] = focused_df['Max Drawdown'].apply(lambda x: f"{x:.2f}%")
                 focused_df['Volatility'] = focused_df['Volatility'].apply(lambda x: f"{x:.2f}%")
-                focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
             else:
                 # Format all columns
                 focused_df['CAGR'] = focused_df['CAGR'].apply(lambda x: f"{x:.2f}%")
@@ -10046,6 +10076,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             
             # Add column definitions expander
             focused_tooltip_data = {
+                'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                 'CAGR': 'Compound Annual Growth Rate - The annualized rate of return over the investment period',
                 'Max Drawdown': 'Maximum Drawdown - The largest peak-to-trough decline during the period',
                 'Volatility': 'Volatility - Standard deviation of returns, measuring price dispersion',
@@ -10079,7 +10110,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 st.markdown(focused_tooltip_html, unsafe_allow_html=True)
             
             # Add sorting controls for focused analysis
-            col1, col2 = st.columns([1, 3])
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 focused_sort_column = st.selectbox(
                     "Sort by:",
@@ -10089,12 +10120,20 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     help="Select a column to sort the table numerically"
                 )
             with col2:
-                if st.button("🔄 Sort Table", key="no_cache_strategy_comparison_focused_analysis_sort_button_2"):
-                    focused_df = sort_dataframe_numerically(focused_df, focused_sort_column)
+                if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
+                    sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
+                    st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
+                    st.rerun()
+            with col3:
+                if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
+                    sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
+                    st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                     st.rerun()
             
-            # Display the focused analysis table
-            st.dataframe(focused_df, use_container_width=True)
+            # Display the focused analysis table (use sorted version if available)
+            sorted_df = st.session_state.get('strategy_comparison_focused_analysis_sorted_df', None)
+            display_df = sorted_df if sorted_df is not None else focused_df
+            st.dataframe(display_df, use_container_width=True)
             
             # Show date range info
             if st.session_state.strategy_comparison_focused_analysis_period is not None:
