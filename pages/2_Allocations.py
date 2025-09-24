@@ -219,9 +219,76 @@ def get_risk_free_rate_robust(dates):
     except Exception:
         return _get_default_risk_free_rate(dates)
 
+def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
+    """
+    Parse ticker symbol to extract base ticker, leverage multiplier, and expense ratio.
+    
+    Args:
+        ticker_symbol: Ticker symbol with optional parameters (e.g., "SPY?L=3?E=0.84")
+        
+    Returns:
+        tuple: (base_ticker, leverage_multiplier, expense_ratio)
+        
+    Examples:
+        "SPY" -> ("SPY", 1.0, 0.0)
+        "SPY?L=3" -> ("SPY", 3.0, 0.0)
+        "QQQ?L=3?E=0.84" -> ("QQQ", 3.0, 0.84)
+        "QQQ?E=1?L=2" -> ("QQQ", 2.0, 1.0)  # Order doesn't matter
+    """
+    # Convert commas to dots for decimal separators (like case conversion)
+    ticker_symbol = ticker_symbol.replace(",", ".")
+    base_ticker = ticker_symbol
+    leverage = 1.0
+    expense_ratio = 0.0
+
+    # Parse leverage parameter first
+    if "?L=" in base_ticker:
+        try:
+            parts = base_ticker.split("?L=", 1)
+            base_ticker = parts[0]
+            leverage_part = parts[1]
+            
+            # Check if there are more parameters after leverage
+            if "?" in leverage_part:
+                leverage_str, remaining = leverage_part.split("?", 1)
+                leverage = float(leverage_str)
+                base_ticker += "?" + remaining
+            else:
+                leverage = float(leverage_part)
+                
+            # Validate leverage range (reasonable bounds for leveraged ETFs)
+            if leverage < 0.1 or leverage > 10.0:
+                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+        except (ValueError, IndexError) as e:
+            leverage = 1.0
+    
+    # Parse expense ratio parameter
+    if "?E=" in base_ticker:
+        try:
+            parts = base_ticker.split("?E=", 1)
+            base_ticker = parts[0]
+            expense_part = parts[1]
+            
+            # Check if there are more parameters after expense ratio
+            if "?" in expense_part:
+                expense_str, remaining = expense_part.split("?", 1)
+                expense_ratio = float(expense_str)
+                base_ticker += "?" + remaining
+            else:
+                expense_ratio = float(expense_part)
+                
+            # Validate expense ratio range (reasonable bounds for ETFs)
+            if expense_ratio < 0.0 or expense_ratio > 10.0:
+                raise ValueError(f"Expense ratio {expense_ratio} is outside reasonable range (0.0-10.0)")
+        except (ValueError, IndexError) as e:
+            expense_ratio = 0.0
+            
+    return base_ticker.strip(), leverage, expense_ratio
+
 def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     """
     Parse ticker symbol to extract base ticker and leverage multiplier.
+    Backward compatibility wrapper for parse_ticker_parameters.
     
     Args:
         ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3")
@@ -234,21 +301,8 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
         "SPY?L=3" -> ("SPY", 3.0)
         "QQQ?L=2" -> ("QQQ", 2.0)
     """
-    if "?L=" in ticker_symbol:
-        try:
-            base_ticker, leverage_part = ticker_symbol.split("?L=", 1)
-            leverage = float(leverage_part)
-            
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
-                
-            return base_ticker.strip(), leverage
-        except (ValueError, IndexError) as e:
-            # If parsing fails, treat as regular ticker with no leverage
-            return ticker_symbol.strip(), 1.0
-    else:
-        return ticker_symbol.strip(), 1.0
+    base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
+    return base_ticker, leverage
 
 def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
     """
@@ -3104,6 +3158,15 @@ def single_backtest(config, sim_index, reindexed_data):
                             if len(future_dates) > 0:
                                 div = df.loc[future_dates[0], "Dividends"]
                 var = df.loc[date, "Price_change"] if date in df.index else 0.0
+                
+                # Apply expense ratio drag if ticker has expense ratio parameter
+                if "?E=" in t:
+                    base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
+                    if expense_ratio > 0.0:
+                        # Apply daily expense drag: subtract daily expense ratio
+                        daily_expense_drag = expense_ratio / 100.0 / 365.25
+                        var = var - daily_expense_drag
+                
                 if include_dividends.get(t, False):
                     # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
                     # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
@@ -3160,6 +3223,15 @@ def single_backtest(config, sim_index, reindexed_data):
                         if len(future_dates) > 0:
                             div = df.loc[future_dates[0], "Dividends"]
             var = df.loc[date, "Price_change"] if date in df.index else 0.0
+            
+            # Apply expense ratio drag if ticker has expense ratio parameter
+            if "?E=" in t:
+                base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
+                if expense_ratio > 0.0:
+                    # Apply daily expense drag: subtract daily expense ratio
+                    daily_expense_drag = expense_ratio / 100.0 / 365.25
+                    var = var - daily_expense_drag
+            
             if include_dividends.get(t, False):
                 # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
                 # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
@@ -4288,18 +4360,28 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
 
 
-with st.expander("⚡ Leverage Guide", expanded=False):
+with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
     st.markdown("""
     **Leverage Format:** Use `TICKER?L=N` where N is the leverage multiplier
+    **Expense Ratio Format:** Use `TICKER?E=N` where N is the annual expense ratio percentage
     
     **Examples:**
     - **SPY?L=2** - 2x leveraged S&P 500
-    - **QQQ?L=3** - 3x leveraged NASDAQ-100  
-    - **TLT?L=2** - 2x leveraged 20+ Year Treasury
+    - **QQQ?L=3?E=0.84** - 3x leveraged NASDAQ-100 with 0.84% expense ratio (like TQQQ)
+    - **QQQ?E=1** - QQQ with 1% expense ratio
+    - **TLT?L=2?E=0.5** - 2x leveraged 20+ Year Treasury with 0.5% expense ratio
+    - **SPY?E=2?L=3** - Order doesn't matter: 3x leveraged S&P 500 with 2% expense ratio
+    - **QQQ?E=5** - QQQ with 5% expense ratio (high fee for testing)
+    
+    **Parameter Combinations:**
+    - **QQQ?L=3?E=0.84** - Simulates TQQQ (3x QQQ with 0.84% expense ratio)
+    - **SPY?L=2?E=0.95** - Simulates SSO (2x SPY with 0.95% expense ratio)
+    - **QQQ?E=0.2** - Simulates QQQ with 0.2% expense ratio
     
     **Important Notes:**
     - **Daily Reset:** Leverage resets daily (like real leveraged ETFs)
     - **Cost Drag:** Includes daily cost drag = (leverage - 1) × risk-free rate
+    - **Expense Drag:** Daily expense ratio drag = annual_expense_ratio / 365.25
     - **Volatility Decay:** High volatility can cause significant decay over time
     - **Risk Warning:** Leveraged products are high-risk and can lose value quickly
     
