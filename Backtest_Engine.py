@@ -73,12 +73,79 @@ def emergency_kill():
 # LEVERAGE ETF SIMULATION FUNCTIONS
 # =============================================================================
 
+def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
+    """
+    Parse ticker symbol to extract base ticker, leverage multiplier, and expense ratio.
+    
+    Args:
+        ticker_symbol: Ticker symbol with optional parameters (e.g., "SPY?L=3?E=0.84")
+        
+    Returns:
+        tuple: (base_ticker, leverage_multiplier, expense_ratio)
+        
+    Examples:
+        "SPY" -> ("SPY", 1.0, 0.0)
+        "SPY?L=3" -> ("SPY", 3.0, 0.0)
+        "QQQ?L=3?E=0.84" -> ("QQQ", 3.0, 0.84)
+        "QQQ?E=1?L=2" -> ("QQQ", 2.0, 1.0)  # Order doesn't matter
+    """
+    # Convert commas to dots for decimal separators (like case conversion)
+    ticker_symbol = ticker_symbol.replace(",", ".")
+    base_ticker = ticker_symbol
+    leverage = 1.0
+    expense_ratio = 0.0
+
+    # Parse leverage parameter first
+    if "?L=" in base_ticker:
+        try:
+            parts = base_ticker.split("?L=", 1)
+            base_ticker = parts[0]
+            leverage_part = parts[1]
+            
+            # Check if there are more parameters after leverage
+            if "?" in leverage_part:
+                leverage_str, remaining = leverage_part.split("?", 1)
+                leverage = float(leverage_str)
+                base_ticker += "?" + remaining
+            else:
+                leverage = float(leverage_part)
+                
+            # Validate leverage range (reasonable bounds for leveraged ETFs)
+            if leverage < 0.1 or leverage > 10.0:
+                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+        except (ValueError, IndexError) as e:
+            leverage = 1.0
+    
+    # Parse expense ratio parameter
+    if "?E=" in base_ticker:
+        try:
+            parts = base_ticker.split("?E=", 1)
+            base_ticker = parts[0]
+            expense_part = parts[1]
+            
+            # Check if there are more parameters after expense ratio
+            if "?" in expense_part:
+                expense_str, remaining = expense_part.split("?", 1)
+                expense_ratio = float(expense_str)
+                base_ticker += "?" + remaining
+            else:
+                expense_ratio = float(expense_part)
+                
+            # Validate expense ratio range (reasonable bounds for ETFs)
+            if expense_ratio < 0.0 or expense_ratio > 10.0:
+                raise ValueError(f"Expense ratio {expense_ratio} is outside reasonable range (0.0-10.0)")
+        except (ValueError, IndexError) as e:
+            expense_ratio = 0.0
+            
+    return base_ticker.strip(), leverage, expense_ratio
+
 def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     """
     Parse ticker symbol to extract base ticker and leverage multiplier.
+    Backward compatibility wrapper for parse_ticker_parameters.
     
     Args:
-        ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3" or "SPY?E=3")
+        ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3")
         
     Returns:
         tuple: (base_ticker, leverage_multiplier)
@@ -86,38 +153,10 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     Examples:
         "SPY" -> ("SPY", 1.0)
         "SPY?L=3" -> ("SPY", 3.0)
-        "QQQ?E=2" -> ("QQQ", 2.0)
-        "QQQ?E=1,4" -> ("QQQ", 1.4)  # Handles comma decimal separator
+        "QQQ?L=2" -> ("QQQ", 2.0)
     """
-    # Convert comma decimal separators to dots for proper parsing
-    ticker_symbol = ticker_symbol.replace(",", ".")
-    
-    if "?L=" in ticker_symbol:
-        try:
-            base_ticker, leverage_part = ticker_symbol.split("?L=", 1)
-            leverage = float(leverage_part)
-            
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
-                
-            return base_ticker.strip(), leverage
-        except (ValueError, IndexError) as e:
-            raise ValueError(f"Invalid leverage format in ticker '{ticker_symbol}'. Use format: TICKER?L=NUMBER (e.g., SPY?L=3)")
-    elif "?E=" in ticker_symbol:
-        try:
-            base_ticker, leverage_part = ticker_symbol.split("?E=", 1)
-            leverage = float(leverage_part)
-            
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
-                
-            return base_ticker.strip(), leverage
-        except (ValueError, IndexError) as e:
-            raise ValueError(f"Invalid leverage format in ticker '{ticker_symbol}'. Use format: TICKER?E=NUMBER (e.g., SPY?E=3)")
-    else:
-        return ticker_symbol.strip(), 1.0
+    base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
+    return base_ticker, leverage
 
 def get_risk_free_rate() -> float:
     """
@@ -148,7 +187,7 @@ def get_risk_free_rate() -> float:
         # Fallback to a reasonable default if any error occurs
         return 0.045  # 4.5% as default
 
-def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
+def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_ratio: float = 0.0) -> pd.DataFrame:
     """
     Apply daily leverage multiplier to price data, simulating leveraged ETF behavior.
     
@@ -193,6 +232,9 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
         logger.error(f"Error calculating daily_cost_drag: {e}")
         raise
     
+    # Calculate daily expense ratio drag: expense_ratio / 100 / 252 (annual to trading day)
+    daily_expense_drag = expense_ratio / 100.0 / 252
+    
     # Calculate leveraged prices by applying leverage to each day's price change
     # Start with the first price
     leveraged_prices = pd.Series(index=price_data.index, dtype=float)
@@ -217,8 +259,8 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
             # Calculate the actual price change
             price_change = current_price / previous_price - 1
             
-            # Apply leverage to the price change and subtract cost drag
-            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i]
+            # Apply leverage to the price change and subtract cost drag and expense ratio drag
+            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i] - daily_expense_drag
             
             # Apply the leveraged price change to the previous leveraged price
             leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
@@ -253,8 +295,8 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
         auto_adjust: Auto-adjust setting
     """
     try:
-        # Parse leverage from ticker symbol
-        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        # Parse leverage and expense ratio from ticker symbol
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
         ticker = yf.Ticker(base_ticker)
         
@@ -302,7 +344,7 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
         if leverage != 1.0:
             try:
                 logger.debug(f"About to apply leverage {leverage} to {base_ticker}. hist.index timezone: {getattr(hist.index, 'tz', None)}")
-                hist = apply_daily_leverage(hist, leverage)
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
                 logger.debug(f"Successfully applied leverage {leverage} to {base_ticker}")
             except Exception as e:
                 logger.error(f"Error applying leverage {leverage} to {base_ticker}: {e}")
