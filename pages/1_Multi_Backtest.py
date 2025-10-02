@@ -643,12 +643,13 @@ def get_gold_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from GOLD_COMPLETE_TICKER import create_safe_gold_ticker
+        from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
         
         # Get the complete gold data
-        gold_data = create_safe_gold_ticker()
+        gold_data = create_gold_complete_ticker()
         
         if gold_data is None:
+            print("DEBUG: Gold data is None, falling back to GLD")
             # Fallback to GLD if our custom ticker fails
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
@@ -659,8 +660,10 @@ def get_gold_complete_data(period="max"):
             'Dividends': [0.0] * len(gold_data)  # Gold doesn't pay dividends
         }, index=gold_data.index)
         
+        print(f"DEBUG: Gold data success - shape: {result.shape}, date range: {result.index.min()} to {result.index.max()}")
         return result
     except Exception as e:
+        print(f"DEBUG: Error in get_gold_complete_data: {e}")
         # Fallback to GLD if anything fails
         try:
             ticker = yf.Ticker("GLD")
@@ -676,7 +679,7 @@ def get_zroz_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
+        from Complete_Tickers.ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
         
         # Get the complete ZROZ data
         zroz_data = create_safe_zroz_ticker()
@@ -709,7 +712,7 @@ def get_tlt_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from TLT_COMPLETE_TICKER import create_safe_tlt_ticker
+        from Complete_Tickers.TLT_COMPLETE_TICKER import create_safe_tlt_ticker
         
         # Get the complete TLT data
         tlt_data = create_safe_tlt_ticker()
