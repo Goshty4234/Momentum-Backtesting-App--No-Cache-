@@ -165,6 +165,9 @@ def get_ticker_aliases():
         'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - With dividends
         'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - With dividends
         'GOLDF': 'GC=F',         # Gold Futures (2000+) - No dividends
+        'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -638,6 +641,9 @@ def get_ticker_aliases():
         'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - With dividends
         'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - With dividends
         'GOLDF': 'GC=F',         # Gold Futures (2000+) - No dividends
+        'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -656,12 +662,123 @@ def resolve_ticker_alias(ticker):
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_gold_complete_data(period="max"):
+    """Get complete gold data from our custom gold ticker"""
+    try:
+        # Import our gold ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
+        from GOLD_COMPLETE_TICKER import create_safe_gold_ticker
+        
+        # Get the complete gold data
+        gold_data = create_safe_gold_ticker()
+        
+        if gold_data is None:
+            # Fallback to GLD if our custom ticker fails
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': gold_data['Close'],
+            'Dividends': [0.0] * len(gold_data)  # Gold doesn't pay dividends
+        }, index=gold_data.index)
+        
+        return result
+    except Exception as e:
+        # Fallback to GLD if anything fails
+        try:
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_zroz_complete_data(period="max"):
+    """Get complete ZROZ data from our custom ZROZ ticker"""
+    try:
+        # Import our ZROZ ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
+        from ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
+        
+        # Get the complete ZROZ data
+        zroz_data = create_safe_zroz_ticker()
+        
+        if zroz_data is None:
+            # Fallback to ZROZ if our custom ticker fails
+            ticker = yf.Ticker("ZROZ")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': zroz_data['Close'],
+            'Dividends': [0.0] * len(zroz_data)  # ZROZ doesn't pay dividends
+        }, index=zroz_data.index)
+        
+        return result
+    except Exception as e:
+        # Fallback to ZROZ if anything fails
+        try:
+            ticker = yf.Ticker("ZROZ")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_tlt_complete_data(period="max"):
+    """Get complete TLT data from our custom TLT ticker"""
+    try:
+        # Import our TLT ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
+        from TLT_COMPLETE_TICKER import create_safe_tlt_ticker
+        
+        # Get the complete TLT data
+        tlt_data = create_safe_tlt_ticker()
+        
+        if tlt_data is None:
+            # Fallback to TLT if our custom ticker fails
+            ticker = yf.Ticker("TLT")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': tlt_data['Close'],
+            'Dividends': [0.0] * len(tlt_data)  # TLT doesn't pay dividends
+        }, index=tlt_data.index)
+        
+        return result
+    except Exception as e:
+        # Fallback to TLT if anything fails
+        try:
+            ticker = yf.Ticker("TLT")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
     """Cache ticker data with proper cache keys including all parameters"""
     # Resolve ticker alias if it exists
     resolved_ticker = resolve_ticker_alias(base_ticker)
+    
+    # Special handling for GOLD_COMPLETE - use our custom gold ticker
+    if resolved_ticker == "GOLD_COMPLETE":
+        return get_gold_complete_data(period)
+    
+    # Special handling for ZROZ_COMPLETE - use our custom ZROZ ticker
+    if resolved_ticker == "ZROZ_COMPLETE":
+        return get_zroz_complete_data(period)
+    
+    # Special handling for TLT_COMPLETE - use our custom TLT ticker
+    if resolved_ticker == "TLT_COMPLETE":
+        return get_tlt_complete_data(period)
     
     ticker = yf.Ticker(resolved_ticker)
     hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
@@ -6439,7 +6556,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
     # Get the actual ticker aliases from the function
     aliases = get_ticker_aliases()
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown("**📈 Stock Market Indices**")
@@ -6486,6 +6603,21 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                 })
                 st.rerun()
     
+    with col4:
+        st.markdown("**🔬 Synthetic Tickers**")
+        synthetic_aliases = {alias: ticker for alias, ticker in aliases.items() 
+                           if ticker in ['GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE']}
+        
+        for alias, ticker in synthetic_aliases.items():
+            if st.button(f"➕ {alias}", key=f"add_alias_{alias}", help=f"Add {alias} → {ticker}"):
+                portfolio_index = st.session_state.strategy_active_portfolio_index
+                st.session_state.strategy_portfolio_configs[portfolio_index]['stocks'].append({
+                    'ticker': ticker, 
+                    'allocation': 0.0, 
+                    'include_dividends': True
+                })
+                st.rerun()
+    
     st.markdown("---")
     
     # Ticker Aliases Section INSIDE the expander
@@ -6496,7 +6628,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2019+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
+    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLD50` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `ZROZ50` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `TLT50` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
 
 with st.sidebar.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
     st.markdown("""
