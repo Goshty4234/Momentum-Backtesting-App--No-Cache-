@@ -671,10 +671,10 @@ def get_gold_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from GOLD_COMPLETE_TICKER import create_safe_gold_ticker
+        from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
         
         # Get the complete gold data
-        gold_data = create_safe_gold_ticker()
+        gold_data = create_gold_complete_ticker()
         
         if gold_data is None:
             # Fallback to GLD if our custom ticker fails
@@ -704,7 +704,7 @@ def get_zroz_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
+        from Complete_Tickers.ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
         
         # Get the complete ZROZ data
         zroz_data = create_safe_zroz_ticker()
@@ -737,7 +737,7 @@ def get_tlt_complete_data(period="max"):
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         
-        from TLT_COMPLETE_TICKER import create_safe_tlt_ticker
+        from Complete_Tickers.TLT_COMPLETE_TICKER import create_safe_tlt_ticker
         
         # Get the complete TLT data
         tlt_data = create_safe_tlt_ticker()
