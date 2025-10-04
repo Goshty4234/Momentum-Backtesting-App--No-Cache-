@@ -89,8 +89,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTTR': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFTR': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -117,6 +117,18 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Synthetic Complete Tickers
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
+        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
     }
 
 def resolve_ticker_alias(ticker):
@@ -406,8 +418,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTTR': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFTR': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -434,6 +446,18 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Synthetic Complete Tickers
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
+        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
     }
 
 def resolve_ticker_alias(ticker):
@@ -455,6 +479,28 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         
         # Resolve ticker alias if it exists
         resolved_ticker = resolve_ticker_alias(base_ticker)
+        
+        # Special handling for synthetic complete tickers
+        if resolved_ticker == "SPYSIM_COMPLETE":
+            return get_spysim_complete_data(period)
+        if resolved_ticker == "GOLDSIM_COMPLETE":
+            return get_goldsim_complete_data(period)
+        if resolved_ticker == "GOLD_COMPLETE":
+            return get_gold_complete_data(period)
+        if resolved_ticker == "ZROZ_COMPLETE":
+            return get_zroz_complete_data(period)
+        if resolved_ticker == "TLT_COMPLETE":
+            return get_tlt_complete_data(period)
+        if resolved_ticker == "BTC_COMPLETE":
+            return get_bitcoin_complete_data(period)
+        if resolved_ticker == "KMLM_COMPLETE":
+            return get_kmlm_complete_data(period)
+        if resolved_ticker == "IEF_COMPLETE":
+            return get_ief_complete_data(period)
+        if resolved_ticker == "DBMF_COMPLETE":
+            return get_dbmf_complete_data(period)
+        if resolved_ticker == "TBILL_COMPLETE":
+            return get_tbill_complete_data(period)
         
         ticker = yf.Ticker(resolved_ticker)
         hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
@@ -478,6 +524,210 @@ def get_ticker_info(ticker_symbol):
         return info
     except Exception:
         return {}
+
+# Synthetic Complete Ticker Functions
+def get_spysim_complete_data(period="max"):
+    """Get complete SPYSIM data from our custom SPYSIM ticker"""
+    try:
+        from Complete_Tickers.SPYSIM_COMPLETE_TICKER import create_spysim_complete_ticker
+        spysim_data = create_spysim_complete_ticker()
+        if spysim_data is not None and not spysim_data.empty:
+            result = pd.DataFrame({
+                'Close': spysim_data,
+                'Dividends': [0.0] * len(spysim_data)
+            }, index=spysim_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("^SP500TR")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_goldsim_complete_data(period="max"):
+    """Get complete GOLDSIM data from our custom GOLDSIM ticker"""
+    try:
+        from Complete_Tickers.GOLDSIM_COMPLETE_TICKER import create_goldsim_complete_ticker
+        goldsim_data = create_goldsim_complete_ticker()
+        if goldsim_data is not None and not goldsim_data.empty:
+            result = pd.DataFrame({
+                'Close': goldsim_data,
+                'Dividends': [0.0] * len(goldsim_data)
+            }, index=goldsim_data.index)
+            return result
+        else:
+            print("⚠️ WARNING: GOLDSIM ticker returned empty data, falling back to GLD")
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+    except Exception as e:
+        print(f"⚠️ WARNING: GOLDSIM error: {e}, falling back to GLD")
+        try:
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_gold_complete_data(period="max"):
+    """Get complete gold data from our custom gold ticker"""
+    try:
+        from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
+        gold_data = create_gold_complete_ticker()
+        if gold_data is not None and not gold_data.empty:
+            result = pd.DataFrame({
+                'Close': gold_data,
+                'Dividends': [0.0] * len(gold_data)
+            }, index=gold_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_zroz_complete_data(period="max"):
+    """Get complete ZROZ data from our custom ZROZ ticker"""
+    try:
+        from Complete_Tickers.ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
+        zroz_data = create_safe_zroz_ticker()
+        if zroz_data is not None and not zroz_data.empty:
+            result = pd.DataFrame({
+                'Close': zroz_data,
+                'Dividends': [0.0] * len(zroz_data)
+            }, index=zroz_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("ZROZ")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_tlt_complete_data(period="max"):
+    """Get complete TLT data from our custom TLT ticker"""
+    try:
+        from Complete_Tickers.TLT_COMPLETE_TICKER import create_safe_tlt_ticker
+        tlt_data = create_safe_tlt_ticker()
+        if tlt_data is not None and not tlt_data.empty:
+            result = pd.DataFrame({
+                'Close': tlt_data,
+                'Dividends': [0.0] * len(tlt_data)
+            }, index=tlt_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("TLT")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_bitcoin_complete_data(period="max"):
+    """Get complete Bitcoin data from our custom Bitcoin ticker"""
+    try:
+        from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
+        bitcoin_data = create_bitcoin_complete_ticker()
+        if bitcoin_data is not None and not bitcoin_data.empty:
+            result = pd.DataFrame({
+                'Close': bitcoin_data,
+                'Dividends': [0.0] * len(bitcoin_data)
+            }, index=bitcoin_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("BTC-USD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_kmlm_complete_data(period="max"):
+    """Get complete KMLM data from our custom KMLM ticker"""
+    try:
+        from Complete_Tickers.KMLM_COMPLETE_TICKER import create_kmlm_complete_ticker
+        kmlm_data = create_kmlm_complete_ticker()
+        if kmlm_data is not None and not kmlm_data.empty:
+            result = pd.DataFrame({
+                'Close': kmlm_data,
+                'Dividends': [0.0] * len(kmlm_data)
+            }, index=kmlm_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("KMLM")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_ief_complete_data(period="max"):
+    """Get complete IEF data from our custom IEF ticker"""
+    try:
+        from Complete_Tickers.IEF_COMPLETE_TICKER import create_ief_complete_ticker
+        ief_data = create_ief_complete_ticker()
+        if ief_data is not None and not ief_data.empty:
+            result = pd.DataFrame({
+                'Close': ief_data,
+                'Dividends': [0.0] * len(ief_data)
+            }, index=ief_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("IEF")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_dbmf_complete_data(period="max"):
+    """Get complete DBMF data from our custom DBMF ticker"""
+    try:
+        from Complete_Tickers.DBMF_COMPLETE_TICKER import create_dbmf_complete_ticker
+        dbmf_data = create_dbmf_complete_ticker()
+        if dbmf_data is not None and not dbmf_data.empty:
+            result = pd.DataFrame({
+                'Close': dbmf_data,
+                'Dividends': [0.0] * len(dbmf_data)
+            }, index=dbmf_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("DBMF")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_tbill_complete_data(period="max"):
+    """Get complete TBILL data from our custom TBILL ticker"""
+    try:
+        from Complete_Tickers.TBILL_COMPLETE_TICKER import create_tbill_complete_ticker
+        tbill_data = create_tbill_complete_ticker()
+        if tbill_data is not None and not tbill_data.empty:
+            result = pd.DataFrame({
+                'Close': tbill_data,
+                'Dividends': [0.0] * len(tbill_data)
+            }, index=tbill_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("SGOV")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
 
 def calculate_portfolio_metrics(portfolio_config, allocation_data):
     """Cache heavy portfolio calculations to improve performance"""
@@ -3266,7 +3516,10 @@ def single_backtest(config, sim_index, reindexed_data):
         # If targeted rebalancing is enabled and not using momentum, only rebalance when thresholds are violated
         if config.get('use_targeted_rebalancing', False) and not config.get('use_momentum', True) and set(tickers):
             # Only check for rebalancing on rebalance dates
-            if date in dates_rebal:
+            # Normalize dates for comparison (remove timezone and time components)
+            date_normalized = pd.Timestamp(date).normalize()
+            dates_rebal_normalized = {pd.Timestamp(d).normalize() for d in dates_rebal}
+            if date_normalized in dates_rebal_normalized:
                 current_asset_values = {t: values[t][-1] for t in tickers}
                 current_total_value = sum(current_asset_values.values())
                 if current_total_value > 0:
@@ -3285,7 +3538,10 @@ def single_backtest(config, sim_index, reindexed_data):
                                 break
         else:
             # Original rebalancing logic for momentum strategies or when targeted rebalancing is disabled
-            if date in dates_rebal and set(tickers):
+            # Normalize dates for comparison (remove timezone and time components)
+            date_normalized = pd.Timestamp(date).normalize()
+            dates_rebal_normalized = {pd.Timestamp(d).normalize() for d in dates_rebal}
+            if date_normalized in dates_rebal_normalized and set(tickers):
                 should_rebalance = True
         
         if should_rebalance and set(tickers):
@@ -4092,7 +4348,7 @@ with col_freq_rebal:
 
 if "alloc_active_benchmark" not in st.session_state:
     st.session_state["alloc_active_benchmark"] = active_portfolio['benchmark_ticker']
-st.text_input("Benchmark Ticker (default: ^GSPC, used for beta calculation)", key="alloc_active_benchmark", on_change=update_benchmark)
+st.text_input("Benchmark Ticker (default: ^GSPC, starts 1927-12-30, used for beta calculation. Use SPYSIM for earlier dates, starts 1885-03-01)", key="alloc_active_benchmark", on_change=update_benchmark)
 
 st.subheader("Tickers")
 col_ticker_buttons = st.columns([0.3, 0.3, 0.3, 0.1])
@@ -4278,7 +4534,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     # Get the actual ticker aliases from the function
     aliases = get_ticker_aliases()
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown("**📈 Stock Indices**")
@@ -4298,7 +4554,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.alloc_rerun_flag = True
     
     with col2:
         st.markdown("**🏛️ Treasury Bonds & T-Bills**")
@@ -4326,7 +4582,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.alloc_rerun_flag = True
     
     with col3:
         st.markdown("**🥇 Gold & Commodities**")
@@ -4345,7 +4601,22 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.alloc_rerun_flag = True
+    
+    with col4:
+        st.markdown("**🔬 Synthetic Tickers**")
+        synthetic_aliases = {alias: ticker for alias, ticker in aliases.items() 
+                           if ticker in ['SPYSIM_COMPLETE', 'GOLDSIM_COMPLETE', 'GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE', 'BTC_COMPLETE', 'KMLM_COMPLETE', 'IEF_COMPLETE', 'DBMF_COMPLETE', 'TBILL_COMPLETE']}
+        
+        for alias, ticker in synthetic_aliases.items():
+            if st.button(f"➕ {alias}", key=f"add_alias_{alias}", help=f"Add {alias} → {ticker}"):
+                portfolio_index = st.session_state.alloc_active_portfolio_index
+                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].append({
+                    'ticker': alias,
+                    'allocation': 0.0, 
+                    'include_dividends': True
+                })
+                st.session_state.alloc_rerun_flag = True
     
     st.markdown("---")
     
@@ -4353,10 +4624,10 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("**💡 Ticker Aliases:** You can also use these shortcuts in the text input below:")
     st.markdown("- `SPX` → `^GSPC` (S&P 500 Price, 1927+), `SPXTR` → `^SP500TR` (S&P 500 Total Return, 1988+)")
     st.markdown("- `SPYTR` → `^SP500TR` (S&P 500 Total Return, 1988+), `QQQTR` → `^NDX` (NASDAQ 100, 1985+)")
-    st.markdown("- `TLTTR` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFTR` → `IEF` (7-10 Year Treasury ETF, 2002+)")
+    st.markdown("- `TLTETF` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFETF` → `IEF` (7-10 Year Treasury ETF, 2002+)")
     st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2020+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
-    st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
+    st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
 
 
@@ -4470,7 +4741,7 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
                 # Force immediate rerun
-                st.rerun()
+                st.session_state.alloc_rerun_flag = True
             else:
                 st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
         else:
