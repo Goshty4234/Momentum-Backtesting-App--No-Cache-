@@ -158,6 +158,292 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
     return base_ticker, leverage
 
+def get_ticker_aliases():
+    """Get dictionary of ticker aliases for synthetic tickers"""
+    return {
+        # Synthetic ticker aliases
+        'SPYSIM': 'SPYSIM_COMPLETE',
+        'GOLDSIM': 'GOLDSIM_COMPLETE', 
+        'GOLDX': 'GOLD_COMPLETE',
+        'ZROZX': 'ZROZ_COMPLETE',
+        'TLTTR': 'TLT_COMPLETE',
+        'BITCOINX': 'BTC_COMPLETE',
+        'KMLMX': 'KMLM_COMPLETE',
+        'IEFTR': 'IEF_COMPLETE',
+        'DBMFX': 'DBMF_COMPLETE',
+        'TBILL': 'TBILL_COMPLETE',
+        
+        # Modern ETF aliases (to avoid conflicts)
+        'TLTETF': 'TLT',
+        'IEFETF': 'IEF', 
+        'TBILL3M': '^IRX',
+        
+        # Standard aliases
+        'SPYTR': '^SP500TR',
+        'SP500': '^GSPC',
+        'VIX': '^VIX',
+        'DXY': 'DX-Y.NYB',
+        'GOLD': 'GLD',
+        'SILVER': 'SLV',
+        'BITCOIN': 'BTC-USD',
+        'ETHEREUM': 'ETH-USD',
+        'CRYPTO': 'BTC-USD',
+        'CRYPTO_BTC': 'BTC-USD',
+        'CRYPTO_ETH': 'ETH-USD',
+        'TREASURY_10Y': '^TNX',
+        'TREASURY_2Y': '^IRX',
+        'TREASURY_30Y': '^TYX',
+        'REAL_ESTATE': 'VNQ',
+        'COMMODITIES': 'DJP',
+        'ENERGY': 'XLE',
+        'TECH': 'XLK',
+        'HEALTHCARE': 'XLV',
+        'FINANCIALS': 'XLF',
+        'UTILITIES': 'XLU',
+        'CONSUMER_DISCRETIONARY': 'XLY',
+        'CONSUMER_STAPLES': 'XLP',
+        'INDUSTRIALS': 'XLI',
+        'MATERIALS': 'XLB',
+        'COMMUNICATION': 'XLC',
+        'EMERGING_MARKETS': 'EEM',
+        'DEVELOPED_MARKETS': 'EFA',
+        'SMALL_CAP': 'IWM',
+        'MID_CAP': 'IJH',
+        'LARGE_CAP': 'SPY',
+        'GROWTH': 'VUG',
+        'VALUE': 'VTV',
+        'QUALITY': 'QUAL',
+        'MOMENTUM': 'MTUM',
+        'LOW_VOLATILITY': 'USMV',
+        'DIVIDEND': 'VYM',
+        'HIGH_DIVIDEND': 'HDV',
+        'REIT': 'VNQ',
+        'INFRASTRUCTURE': 'IGF',
+        'CLEAN_ENERGY': 'ICLN',
+        'SEMICONDUCTORS': 'SMH',
+        'BIOTECH': 'IBB',
+        'AEROSPACE': 'ITA',
+        'DEFENSE': 'ITA',
+        'GOLD_MINERS': 'GDX',
+        'SILVER_MINERS': 'SIL',
+        'COPPER': 'JJC',
+        'OIL': 'USO',
+        'NATURAL_GAS': 'UNG',
+        'AGRICULTURE': 'DBA',
+        'LIVESTOCK': 'COW',
+        'CORN': 'CORN',
+        'SOYBEANS': 'SOYB',
+        'WHEAT': 'WEAT',
+        'SUGAR': 'SGG',
+        'COFFEE': 'JO',
+        'COTTON': 'BAL',
+        'LUMBER': 'WOOD',
+        'PLATINUM': 'PPLT',
+        'PALLADIUM': 'PALL',
+        'URANIUM': 'URA',
+        'LITHIUM': 'LIT',
+        'RARE_EARTH': 'REMX',
+        'STEEL': 'SLX',
+        'ALUMINUM': 'JJU',
+        'NICKEL': 'JJN',
+        'ZINC': 'ZINC',
+        'LEAD': 'LEDD',
+        'TIN': 'JJT',
+        'COBALT': 'COBC',
+        'MOLYBDENUM': 'MOLY',
+        'TUNGSTEN': 'TUNG',
+        'VANADIUM': 'VAN',
+        'CHROMIUM': 'CHRO',
+        'MANGANESE': 'MANG',
+        'SILICON': 'SILC',
+        'GRAPHITE': 'GRAPH',
+        'PHOSPHATE': 'PHOS',
+        'POTASH': 'POT',
+        'NITROGEN': 'NITR',
+        'SULFUR': 'SULF',
+        'BORON': 'BOR',
+        'FLUORINE': 'FLUO',
+        'CHLORINE': 'CHLO',
+        'BROMINE': 'BROM',
+        'IODINE': 'IODE',
+        'SELENIUM': 'SELE',
+        'TELLURIUM': 'TELL',
+        'GERMANIUM': 'GERM',
+        'GALLIUM': 'GALL',
+        'INDIUM': 'INDI',
+        'THALLIUM': 'THAL',
+        'BISMUTH': 'BISM',
+        'POLONIUM': 'POLO',
+        'ASTATINE': 'ASTA',
+        'RADON': 'RADO',
+        'FRANCIUM': 'FRAN',
+        'RADIUM': 'RADI',
+        'ACTINIUM': 'ACTI',
+        'THORIUM': 'THOR',
+        'PROTACTINIUM': 'PROT',
+        'URANIUM_235': 'U235',
+        'URANIUM_238': 'U238',
+        'PLUTONIUM': 'PLUT',
+        'AMERICIUM': 'AMER',
+        'CURIUM': 'CURI',
+        'BERKELIUM': 'BERK',
+        'CALIFORNIUM': 'CALI',
+        'EINSTEINIUM': 'EINS',
+        'FERMIUM': 'FERM',
+        'MENDELEVIUM': 'MEND',
+        'NOBELIUM': 'NOBE',
+        'LAWRENCIUM': 'LAWR',
+        'RUTHERFORDIUM': 'RUTH',
+        'DUBNIUM': 'DUBN',
+        'SEABORGIUM': 'SEAB',
+        'BOHRIUM': 'BOHR',
+        'HASSIUM': 'HASS',
+        'MEITNERIUM': 'MEIT',
+        'DARMSTADTIUM': 'DARM',
+        'ROENTGENIUM': 'ROEN',
+        'COPERNICIUM': 'COPE',
+        'NIHONIUM': 'NIHO',
+        'FLEROVIUM': 'FLER',
+        'MOSCOVIUM': 'MOSC',
+        'LIVERMORIUM': 'LIVE',
+        'TENNESSINE': 'TENN',
+        'OGANESSON': 'OGAN'
+    }
+
+def resolve_ticker_alias(ticker_symbol: str) -> str:
+    """
+    Resolve ticker alias to actual ticker symbol.
+    
+    Args:
+        ticker_symbol: Ticker symbol that might be an alias
+        
+    Returns:
+        str: Resolved ticker symbol
+    """
+    aliases = get_ticker_aliases()
+    return aliases.get(ticker_symbol.upper(), ticker_symbol)
+
+def get_synthetic_ticker_data(ticker_symbol: str, start_date=None, end_date=None, period=None):
+    """
+    Get data for synthetic tickers (GOLDX, GOLDSIM, SPYSIM, etc.)
+    
+    Args:
+        ticker_symbol: Synthetic ticker symbol
+        start_date: Start date for data
+        end_date: End date for data  
+        period: Period for data (e.g., 'max', '1y', '5y')
+        
+    Returns:
+        pd.DataFrame: Historical data with Close and Dividends columns
+    """
+    try:
+        if ticker_symbol == "GOLD_COMPLETE":
+            from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
+            gold_data = create_gold_complete_ticker()
+            if gold_data is not None and not gold_data.empty:
+                result = pd.DataFrame({
+                    'Close': gold_data,
+                    'Dividends': [0.0] * len(gold_data)
+                }, index=gold_data.index)
+                return result
+                
+        elif ticker_symbol == "GOLDSIM_COMPLETE":
+            from Complete_Tickers.GOLDSIM_COMPLETE_TICKER import create_goldsim_complete_ticker
+            goldsim_data = create_goldsim_complete_ticker()
+            if goldsim_data is not None and not goldsim_data.empty:
+                result = pd.DataFrame({
+                    'Close': goldsim_data,
+                    'Dividends': [0.0] * len(goldsim_data)
+                }, index=goldsim_data.index)
+                return result
+                
+        elif ticker_symbol == "SPYSIM_COMPLETE":
+            from Complete_Tickers.SPYSIM_COMPLETE_TICKER import create_spysim_complete_ticker
+            spysim_data = create_spysim_complete_ticker()
+            if spysim_data is not None and not spysim_data.empty:
+                result = pd.DataFrame({
+                    'Close': spysim_data,
+                    'Dividends': [0.0] * len(spysim_data)
+                }, index=spysim_data.index)
+                return result
+                
+        elif ticker_symbol == "ZROZ_COMPLETE":
+            from Complete_Tickers.ZROZ_COMPLETE_TICKER import create_safe_zroz_ticker
+            zroz_data = create_safe_zroz_ticker()
+            if zroz_data is not None and not zroz_data.empty:
+                result = pd.DataFrame({
+                    'Close': zroz_data,
+                    'Dividends': [0.0] * len(zroz_data)
+                }, index=zroz_data.index)
+                return result
+                
+        elif ticker_symbol == "TLT_COMPLETE":
+            from Complete_Tickers.TLT_COMPLETE_TICKER import create_safe_tlt_ticker
+            tlt_data = create_safe_tlt_ticker()
+            if tlt_data is not None and not tlt_data.empty:
+                result = pd.DataFrame({
+                    'Close': tlt_data,
+                    'Dividends': [0.0] * len(tlt_data)
+                }, index=tlt_data.index)
+                return result
+                
+        elif ticker_symbol == "BTC_COMPLETE":
+            from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
+            btc_data = create_bitcoin_complete_ticker()
+            if btc_data is not None and not btc_data.empty:
+                result = pd.DataFrame({
+                    'Close': btc_data,
+                    'Dividends': [0.0] * len(btc_data)
+                }, index=btc_data.index)
+                return result
+                
+        elif ticker_symbol == "KMLM_COMPLETE":
+            from Complete_Tickers.KMLM_COMPLETE_TICKER import create_kmlm_complete_ticker
+            kmlm_data = create_kmlm_complete_ticker()
+            if kmlm_data is not None and not kmlm_data.empty:
+                result = pd.DataFrame({
+                    'Close': kmlm_data,
+                    'Dividends': [0.0] * len(kmlm_data)
+                }, index=kmlm_data.index)
+                return result
+                
+        elif ticker_symbol == "IEF_COMPLETE":
+            from Complete_Tickers.IEF_COMPLETE_TICKER import create_ief_complete_ticker
+            ief_data = create_ief_complete_ticker()
+            if ief_data is not None and not ief_data.empty:
+                result = pd.DataFrame({
+                    'Close': ief_data,
+                    'Dividends': [0.0] * len(ief_data)
+                }, index=ief_data.index)
+                return result
+                
+        elif ticker_symbol == "DBMF_COMPLETE":
+            from Complete_Tickers.DBMF_COMPLETE_TICKER import create_dbmf_complete_ticker
+            dbmf_data = create_dbmf_complete_ticker()
+            if dbmf_data is not None and not dbmf_data.empty:
+                result = pd.DataFrame({
+                    'Close': dbmf_data,
+                    'Dividends': [0.0] * len(dbmf_data)
+                }, index=dbmf_data.index)
+                return result
+                
+        elif ticker_symbol == "TBILL_COMPLETE":
+            from Complete_Tickers.TBILL_COMPLETE_TICKER import create_tbill_complete_ticker
+            tbill_data = create_tbill_complete_ticker()
+            if tbill_data is not None and not tbill_data.empty:
+                result = pd.DataFrame({
+                    'Close': tbill_data,
+                    'Dividends': [0.0] * len(tbill_data)
+                }, index=tbill_data.index)
+                return result
+                
+    except ImportError as e:
+        print(f"⚠️ WARNING: Import error for {ticker_symbol}: {e}")
+    except Exception as e:
+        print(f"⚠️ WARNING: Error creating {ticker_symbol}: {e}")
+    
+    return pd.DataFrame()
+
 def get_risk_free_rate() -> float:
     """
     Get the current risk-free rate from Yahoo Finance (10-Year Treasury Rate).
@@ -295,6 +581,26 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
         auto_adjust: Auto-adjust setting
     """
     try:
+        # Resolve ticker alias first
+        resolved_ticker = resolve_ticker_alias(ticker_symbol)
+        
+        # Check if this is a synthetic ticker
+        if resolved_ticker.endswith('_COMPLETE'):
+            synthetic_data = get_synthetic_ticker_data(resolved_ticker, start_date, end_date, period)
+            if not synthetic_data.empty:
+                # Parse leverage and expense ratio from original ticker symbol
+                base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
+                
+                # Apply leverage and expense ratio to synthetic data
+                if leverage != 1.0:
+                    synthetic_data['Close'] = synthetic_data['Close'] * leverage
+                if expense_ratio > 0:
+                    # Apply expense ratio as a daily drag
+                    daily_expense = (expense_ratio / 100) / 365
+                    synthetic_data['Close'] = synthetic_data['Close'] * (1 - daily_expense) ** (synthetic_data.index - synthetic_data.index[0]).days
+                
+                return synthetic_data[['Close', 'Dividends']]
+        
         # Parse leverage and expense ratio from ticker symbol
         base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
@@ -1569,7 +1875,8 @@ def _rebalance_portfolio(
     calc_volatility = use_volatility_flag
     beta_window_days = beta_window_days_val
     exclude_days_beta = exclude_days_beta_val
-    benchmark_ticker = benchmark_ticker_val
+    # Resolve benchmark ticker alias
+    benchmark_ticker = resolve_ticker_alias(benchmark_ticker_val)
     vol_window_days = vol_window_days_val
     exclude_days_vol = exclude_days_vol_val
     
@@ -2729,9 +3036,9 @@ _ss_default("end_date", date.today())  # allow today; loader will handle exclusi
 
 # Add portfolio settings to session state defaults
 _ss_default("initial_value", 10000)
-_ss_default("added_amount", 1000)
+_ss_default("added_amount", 10000)
 _ss_default("rebalancing_frequency", "Monthly")
-_ss_default("added_frequency", "Monthly")
+_ss_default("added_frequency", "Annually")
 _ss_default("start_with_radio_key", "oldest")
 _ss_default("collect_dividends_as_cash", False)
 
@@ -3521,16 +3828,16 @@ def clear_everything():
     st.session_state.start_with_radio_key = "oldest"
     # Portfolio settings
     st.session_state.initial_value = 10000
-    st.session_state.added_amount = 1000
+    st.session_state.added_amount = 10000
     st.session_state.rebalancing_frequency = "Monthly"
-    st.session_state.added_frequency = "Monthly"
+    st.session_state.added_frequency = "Annually"
     # Reset widget keys to match
     st.session_state["initial_value_input"] = 10000
     st.session_state["initial_value_input_int"] = 10000
-    st.session_state["added_amount_input"] = 1000
-    st.session_state["added_amount_input_int"] = 1000
+    st.session_state["added_amount_input"] = 10000
+    st.session_state["added_amount_input_int"] = 10000
     st.session_state["rebalancing_frequency_widget"] = "Monthly"
-    st.session_state["added_frequency_widget"] = "Monthly"
+    st.session_state["added_frequency_widget"] = "Annually"
     # Portfolio drag stored as float
     st.session_state.portfolio_drag_pct = 0.0
 
@@ -4374,7 +4681,7 @@ with st.sidebar:
         default_benchmark = st.session_state.pop("_import_benchmark_ticker")
     
     benchmark_ticker = st.text_input(
-                        "Benchmark Ticker (default: ^GSPC, used for beta calculation)", value=default_benchmark
+                        "Benchmark Ticker (default: ^GSPC, starts 1927-12-30, used for beta calculation. Use SPYSIM for earlier dates, starts 1885-03-01)", value=default_benchmark
     ).replace(",", ".").upper()
 
 
