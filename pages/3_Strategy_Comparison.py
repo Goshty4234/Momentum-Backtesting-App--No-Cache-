@@ -9126,6 +9126,28 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 # Fallback to regular Close column
                 vix_close = vix_data['Close'].dropna()
             
+            # Add flat line before VIX data starts (like interest rates do)
+            if len(vix_close) > 0:
+                first_vix_date = vix_close.index[0]
+                first_vix_value = vix_close.iloc[0]
+                
+                # If VIX data starts after our backtest period, add flat line
+                if first_vix_date > pd.Timestamp(first_date):
+                    # Create flat line from start to first VIX date
+                    flat_dates = pd.date_range(start=first_date, end=first_vix_date, freq='D')
+                    fig_vix.add_trace(go.Scatter(
+                        x=flat_dates, 
+                        y=[first_vix_value] * len(flat_dates), 
+                        mode='lines', 
+                        name='VIX Index (Pre-Data)', 
+                        line=dict(color='red', dash='dash'),
+                        hovertemplate='<b>VIX Index (Pre-Data)</b><br>' +
+                                     'Date: %{x}<br>' +
+                                     'VIX: %{y:.2f}<br>' +
+                                     '<extra></extra>'
+                    ))
+            
+            # Add actual VIX data
             fig_vix.add_trace(go.Scatter(
                 x=vix_close.index, 
                 y=vix_close.values, 
