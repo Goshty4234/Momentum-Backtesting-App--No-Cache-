@@ -148,8 +148,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTTR': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFTR': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -168,6 +168,21 @@ def get_ticker_aliases():
         'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
         'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
+        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -624,8 +639,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTTR': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFTR': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -644,6 +659,21 @@ def get_ticker_aliases():
         'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
         'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
+        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -762,6 +792,82 @@ def get_tlt_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
+def get_bitcoin_complete_data(period="max"):
+    """Get complete Bitcoin data from our custom Bitcoin ticker"""
+    try:
+        # Import our Bitcoin ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
+        from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
+        
+        # Get the complete Bitcoin data
+        bitcoin_data = create_bitcoin_complete_ticker()
+        
+        if bitcoin_data is None:
+            # Fallback to BTC-USD if our custom ticker fails
+            ticker = yf.Ticker("BTC-USD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': bitcoin_data,
+            'Dividends': [0.0] * len(bitcoin_data)  # Bitcoin doesn't pay dividends
+        }, index=bitcoin_data.index)
+        
+        return result
+    except Exception as e:
+        # Fallback to BTC-USD if anything fails
+        try:
+            ticker = yf.Ticker("BTC-USD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_spysim_complete_data(period="max"):
+    """Get complete SPYSIM data from our custom SPYSIM ticker"""
+    try:
+        from Complete_Tickers.SPYSIM_COMPLETE_TICKER import create_spysim_complete_ticker
+        spysim_data = create_spysim_complete_ticker()
+        if spysim_data is not None and not spysim_data.empty:
+            result = pd.DataFrame({
+                'Close': spysim_data,
+                'Dividends': [0.0] * len(spysim_data)
+            }, index=spysim_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("^SP500TR")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_goldsim_complete_data(period="max"):
+    """Get complete GOLDSIM data from our custom GOLDSIM ticker"""
+    try:
+        from Complete_Tickers.GOLDSIM_COMPLETE_TICKER import create_goldsim_complete_ticker
+        goldsim_data = create_goldsim_complete_ticker()
+        if goldsim_data is not None and not goldsim_data.empty:
+            result = pd.DataFrame({
+                'Close': goldsim_data,
+                'Dividends': [0.0] * len(goldsim_data)
+            }, index=goldsim_data.index)
+            return result
+        else:
+            print("⚠️ WARNING: GOLDSIM ticker returned empty data, falling back to GLD")
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+    except Exception as e:
+        print(f"⚠️ WARNING: GOLDSIM error: {e}, falling back to GLD")
+        try:
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
     """Cache ticker data with proper cache keys including all parameters"""
@@ -779,6 +885,18 @@ def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", a
     # Special handling for TLT_COMPLETE - use our custom TLT ticker
     if resolved_ticker == "TLT_COMPLETE":
         return get_tlt_complete_data(period)
+    
+    # Special handling for BTC_COMPLETE - use our custom Bitcoin ticker
+    if resolved_ticker == "BTC_COMPLETE":
+        return get_bitcoin_complete_data(period)
+    
+    # Special handling for SPYSIM_COMPLETE - use our custom SPYSIM ticker
+    if resolved_ticker == "SPYSIM_COMPLETE":
+        return get_spysim_complete_data(period)
+    
+    # Special handling for GOLDSIM_COMPLETE - use our custom GOLDSIM ticker
+    if resolved_ticker == "GOLDSIM_COMPLETE":
+        return get_goldsim_complete_data(period)
     
     ticker = yf.Ticker(resolved_ticker)
     hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
@@ -4006,7 +4124,10 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         
         # Check if we should rebalance
         should_rebalance = False
-        if date in dates_rebal and set(tickers):
+        # Normalize dates for comparison (remove timezone and time components)
+        date_normalized = pd.Timestamp(date).normalize()
+        dates_rebal_normalized = {pd.Timestamp(d).normalize() for d in dates_rebal}
+        if date_normalized in dates_rebal_normalized and set(tickers):
             should_rebalance = True
         elif rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"] and set(tickers):
             # Buy & Hold: rebalance whenever there's cash available
@@ -6133,18 +6254,18 @@ if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
                         help="Select all portfolios for deletion", use_container_width=True):
                 for name in portfolio_names:
                     st.session_state.strategy_comparison_portfolio_checkboxes[name] = True
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
         
         with col2:
             if st.button("❌ Clear All", key="strategy_comparison_clear_all_portfolios", 
                         help="Clear all portfolio selections", use_container_width=True):
                 st.session_state.strategy_comparison_portfolio_checkboxes = {}
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
         
         with col3:
             if st.button("🔄 Refresh", key="strategy_comparison_refresh_selections", 
                         help="Refresh the selection list", use_container_width=True):
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
         
         # Portfolio checkboxes with scrollable container
         st.markdown("---")
@@ -6394,7 +6515,7 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
                 # Force immediate rerun
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
             else:
                 st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
         else:
@@ -6571,7 +6692,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     
     with col2:
         st.markdown("**🏛️ Treasury Bonds & T-Bills**")
@@ -6586,7 +6707,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     
     with col3:
         st.markdown("**🥇 Gold & Commodities**")
@@ -6601,12 +6722,12 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     
     with col4:
         st.markdown("**🔬 Synthetic Tickers**")
         synthetic_aliases = {alias: ticker for alias, ticker in aliases.items() 
-                           if ticker in ['GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE']}
+                           if ticker in ['SPYSIM_COMPLETE', 'GOLDSIM_COMPLETE', 'GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE', 'BTC_COMPLETE', 'KMLM_COMPLETE', 'IEF_COMPLETE', 'DBMF_COMPLETE', 'TBILL_COMPLETE']}
         
         for alias, ticker in synthetic_aliases.items():
             if st.button(f"➕ {alias}", key=f"add_alias_{alias}", help=f"Add {alias} → {ticker}"):
@@ -6616,7 +6737,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     
     st.markdown("---")
     
@@ -6624,11 +6745,11 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("**💡 Ticker Aliases:** You can also use these shortcuts in the text input below:")
     st.markdown("- `SPX` → `^GSPC` (S&P 500, 1957+), `SPXTR` → `^SP500TR` (S&P 500 with dividends, 1957+)")
     st.markdown("- `SPYTR` → `^SP500TR` (S&P 500 Total Return, 1957+), `QQQTR` → `^NDX` (NASDAQ 100, 1985+)")
-    st.markdown("- `TLTTR` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFTR` → `IEF` (7-10 Year Treasury ETF, 2002+)")
+    st.markdown("- `TLTETF` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFETF` → `IEF` (7-10 Year Treasury ETF, 2002+)")
     st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2019+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
-    st.markdown("- `TBILL` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLD50` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `ZROZ50` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `TLT50` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
+    st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
+    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLD50` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `ZROZ50` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `TLT50` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `BTC50` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
 
 with st.sidebar.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
     st.markdown("""
@@ -7028,7 +7149,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 # Sync back to session state
                 st.session_state['strategy_comparison_active_variant_expanded'] = True
                 st.success("✅ Expander state PINNED for this portfolio!")
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     
     with col_unpin:
         if current_state:
@@ -7037,7 +7158,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 # Sync back to session state
                 st.session_state['strategy_comparison_active_variant_expanded'] = False
                 st.success("🔓 Expander state UNPINNED for this portfolio!")
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
 
     st.markdown("**Select parameters to vary and customize their values:**")
     
@@ -7232,7 +7353,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # Add new threshold button
             if st.button("➕ Add Threshold Value", key=f"add_threshold_{portfolio_index}"):
                 st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
             
             # Display existing threshold inputs
             for i, threshold in enumerate(st.session_state[f"threshold_filters_{portfolio_index}"]):
@@ -7254,12 +7375,12 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 with col_remove:
                     if st.button("🗑️", key=f"remove_threshold_{portfolio_index}_{i}", help="Remove this threshold"):
                         st.session_state[f"threshold_filters_{portfolio_index}"].pop(i)
-                        st.rerun()
+                        st.session_state.strategy_comparison_rerun_flag = True
             
             # If no thresholds exist, add a default one
             if not st.session_state[f"threshold_filters_{portfolio_index}"]:
                 st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
         
         # Store threshold options in variant params if any are selected
         if threshold_options:
@@ -7316,7 +7437,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # Add new max allocation button
             if st.button("➕ Add Max Allocation Value", key=f"add_max_allocation_{portfolio_index}"):
                 st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
             
             # Display existing max allocation inputs
             for i, max_allocation in enumerate(st.session_state[f"max_allocation_filters_{portfolio_index}"]):
@@ -7338,12 +7459,12 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 with col_remove:
                     if st.button("🗑️", key=f"remove_max_allocation_{portfolio_index}_{i}", help="Remove this max allocation"):
                         st.session_state[f"max_allocation_filters_{portfolio_index}"].pop(i)
-                        st.rerun()
+                        st.session_state.strategy_comparison_rerun_flag = True
             
             # If no max allocations exist, add a default one
             if not st.session_state[f"max_allocation_filters_{portfolio_index}"]:
                 st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
         
         # Store max allocation options in variant params if any are selected
         if max_allocation_options:
@@ -7616,7 +7737,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio removed.")
                     st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
                 
-                st.rerun()
+                st.session_state.strategy_comparison_rerun_flag = True
     else:
         st.warning("⚠️ Select at least one parameter to vary")
 
@@ -7752,7 +7873,7 @@ if len(st.session_state.strategy_comparison_portfolio_configs) > 1 and st.sessio
 
 if "strategy_comparison_active_benchmark" not in st.session_state:
     st.session_state["strategy_comparison_active_benchmark"] = active_portfolio['benchmark_ticker']
-st.text_input("Benchmark Ticker (default: ^GSPC, used for beta calculation)", key="strategy_comparison_active_benchmark", on_change=update_benchmark)
+st.text_input("Benchmark Ticker (default: ^GSPC, starts 1927-12-30, used for beta calculation. Use SPYSIM for earlier dates, starts 1885-03-01)", key="strategy_comparison_active_benchmark", on_change=update_benchmark)
 
 
 st.subheader("Strategy")
@@ -8991,6 +9112,80 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             st.error(f"Error creating drawdown chart: {e}")
             st.write("Chart data not available")
 
+        # VIX Index Plot (for correlation with drawdowns)
+        fig_vix = go.Figure()
+        try:
+            # Get VIX data for the same date range
+            vix_data = yf.download('^VIX', start=first_date, end=last_date, progress=False)
+            
+            # VIX data has multi-level columns, need to access it properly
+            # The structure is ('Close', '^VIX') instead of just 'Close'
+            if ('Close', '^VIX') in vix_data.columns:
+                vix_close = vix_data[('Close', '^VIX')].dropna()
+            else:
+                # Fallback to regular Close column
+                vix_close = vix_data['Close'].dropna()
+            
+            fig_vix.add_trace(go.Scatter(
+                x=vix_close.index, 
+                y=vix_close.values, 
+                mode='lines', 
+                name='VIX Index', 
+                line=dict(color='red'),
+                hovertemplate='<b>VIX Index</b><br>' +
+                             'Date: %{x}<br>' +
+                             'VIX: %{y:.2f}<br>' +
+                             '<extra></extra>'
+            ))
+            
+        except Exception as e:
+            # Fallback: create a simple line at default VIX if fetching fails
+            x_dates = pd.date_range(start=first_date, end=last_date, freq='D')
+            fig_vix.add_trace(go.Scatter(
+                x=x_dates, 
+                y=[20.0] * len(x_dates), 
+                mode='lines', 
+                name='VIX Index (Default)', 
+                line=dict(color='red')
+            ))
+        
+        fig_vix.update_layout(
+            title="VIX Index (Fear Gauge)",
+            xaxis_title="Date",
+            legend_title="Index",
+            hovermode="x unified",
+            template="plotly_dark",
+            # EXACT same formatting as the other plots
+            xaxis=dict(
+                type='date',  # Explicitly set as date type
+                tickformat="%Y-%m-%d",  # Proper date format
+                tickmode="auto",
+                nticks=10,  # Reasonable number of ticks
+                tickangle=45,  # Angle labels for better readability
+                automargin=True,  # Ensure labels fit
+                range=None  # Let Plotly auto-range to ensure perfect alignment
+            ),
+            legend=dict(
+                orientation="h",  # Horizontal legend
+                yanchor="top",
+                y=1.15,
+                xanchor="center",
+                x=0.5
+            ),
+            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            height=600,  # Same height as the other plots
+            yaxis=dict(
+                title="VIX Level", 
+                title_standoff=20,
+                side="left",
+                position=0.0,  # Force left alignment for perfect positioning
+                range=[0, 80] if 'vix_close' in locals() and len(vix_close) > 0 else [0, 80]
+            )
+        )
+        st.plotly_chart(fig_vix, use_container_width=True, key="vix_chart")
+        # Store in session state for PDF export
+        st.session_state.fig_vix = fig_vix
+
         # Multi-Portfolio PE Ratio Comparison
         if 'strategy_comparison_all_allocations' in st.session_state and st.session_state.strategy_comparison_all_allocations:
             st.markdown("---")
@@ -9791,12 +9986,12 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
                     sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=False)
                     st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
-                    st.rerun()
+                    st.session_state.strategy_comparison_rerun_flag = True
             with col3:
                 if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
                     sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=True)
                     st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
-                    st.rerun()
+                    st.session_state.strategy_comparison_rerun_flag = True
             
             # Display the dataframe with multiple fallback options
             try:
@@ -10295,12 +10490,12 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
                         sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
                         st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
-                        st.rerun()
+                        st.session_state.strategy_comparison_rerun_flag = True
                 with col3:
                     if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
                         sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
                         st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
-                        st.rerun()
+                        st.session_state.strategy_comparison_rerun_flag = True
                 
                 # Display the focused table (use sorted version if available)
                 sorted_df = st.session_state.get('strategy_comparison_focused_analysis_sorted_df', None)
@@ -10425,12 +10620,12 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
                     sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
                     st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
-                    st.rerun()
+                    st.session_state.strategy_comparison_rerun_flag = True
             with col3:
                 if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
                     sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
                     st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
-                    st.rerun()
+                    st.session_state.strategy_comparison_rerun_flag = True
             
             # Display the focused analysis table (use sorted version if available)
             sorted_df = st.session_state.get('strategy_comparison_focused_analysis_sorted_df', None)
