@@ -7,14 +7,18 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import json
 import io
+import re
+import time
+from numba import jit
 import concurrent.futures
-import time as time_module
+from functools import lru_cache
 import os
 import signal
 import sys
 import threading
 import logging
 import warnings
+import multiprocessing as mp
 
 # Suppress specific Streamlit threading warnings
 warnings.filterwarnings('ignore')
@@ -26,9 +30,8 @@ logging.getLogger("streamlit.runtime.scriptrunner.script_runner").propagate = Fa
 pd.set_option("styler.render.max_elements", 1000000)  # Allow up to 1M cells for styling
 
 # =============================================================================
-# HARD KILL MECHANISM
+# HARD KILL FUNCTIONS
 # =============================================================================
-
 def hard_kill_process():
     """Completely kill the current process and all background threads"""
     try:
@@ -36,11 +39,11 @@ def hard_kill_process():
         for thread in threading.enumerate():
             if thread != threading.current_thread():
                 thread.join(timeout=0.1)
-        
+
         # Force garbage collection
         import gc
         gc.collect()
-        
+
         # On Windows, use os._exit for immediate termination
         if os.name == 'nt':
             os._exit(1)
@@ -63,65 +66,8 @@ def emergency_kill():
     st.session_state.hard_kill_requested = True
     st.rerun()
 
-# =============================================================================
-# HELPER FUNCTIONS FOR FOCUSED ANALYSIS
-# =============================================================================
-
-def calculate_cagr(values, dates):
-    if len(values) < 2:
-        return np.nan
-    start_val = values[0]
-    end_val = values[-1]
-    years = (dates[-1] - dates[0]).days / 365.25
-    if years <= 0 or start_val == 0:
-        return np.nan
-    return (end_val / start_val) ** (1 / years) - 1
-
-def calculate_volatility(returns):
-    # Annualized volatility - same as Backtest_Engine.py
-    return returns.std() * np.sqrt(365) if len(returns) > 1 else np.nan
-
-def calculate_sharpe(returns, risk_free_rate):
-    """Calculates the Sharpe ratio."""
-    # Create a constant risk-free rate series aligned with returns
-    daily_rf_rate = risk_free_rate / 365.25
-    rf_series = pd.Series(daily_rf_rate, index=returns.index)
-    
-    aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
-    if aligned_returns.empty:
-        return np.nan
-    
-    excess_returns = aligned_returns - aligned_rf
-    if excess_returns.std() == 0:
-        return np.nan
-        
-    return excess_returns.mean() / excess_returns.std() * np.sqrt(365)
-
-def calculate_sortino(returns, risk_free_rate):
-    """Calculates the Sortino ratio."""
-    # Create a constant risk-free rate series aligned with returns
-    daily_rf_rate = risk_free_rate / 365.25
-    rf_series = pd.Series(daily_rf_rate, index=returns.index)
-    
-    aligned_returns, aligned_rf = returns.align(rf_series, join='inner')
-    if aligned_returns.empty:
-        return np.nan
-        
-    downside_returns = aligned_returns[aligned_returns < aligned_rf]
-    if downside_returns.empty or downside_returns.std() == 0:
-        # If no downside returns, Sortino is infinite or undefined.
-        # We can return nan or a very high value. nan is safer.
-        return np.nan
-    
-    downside_std = downside_returns.std()
-    
-    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365)
-
-def calculate_upi(cagr, ulcer_index):
-    """Calculates the Ulcer Performance Index (UPI = CAGR / Ulcer Index, both as decimals)."""
-    if ulcer_index is None or pd.isna(ulcer_index) or ulcer_index == 0:
-        return np.nan
-    return cagr / (ulcer_index / 100)
+# Note: Signal handler removed to prevent Streamlit errors
+# Interrupt handling is now done through the existing hard_kill_requested mechanism
 
 # =============================================================================
 # TICKER ALIASES FUNCTIONS
@@ -148,8 +94,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',         # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',         # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -158,7 +104,7 @@ def get_ticker_aliases():
         'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
         
         # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
+        'ZEROX': 'ZEROX',        # Cash doing nothing - zero return
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -169,20 +115,21 @@ def get_ticker_aliases():
         'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        # New short aliases for complete tickers (ordered by asset class)
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
         'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
-        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
-        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
         'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
-        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
-        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
-        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
-        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -194,12 +141,182 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Special Dynamic Portfolio Tickers
+        'SP500TOP20': 'SP500TOP20',  # Dynamic S&P 500 Top 20 (rebalances yearly based on historical data)
     }
 
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
+
+def parse_raw_sp500_csv():
+    """Parse the raw S&P 500 CSV data into a structured DataFrame"""
+    try:
+        import pandas as pd
+        
+        st.write("🔍 DEBUG: Starting to parse raw S&P 500 CSV")
+        
+        # Read the raw CSV file
+        df = pd.read_csv('TOP 20 S&P 500 compagnies over time.csv', header=None)
+        
+        st.write(f"🔍 DEBUG: Raw CSV has {len(df)} rows")
+        st.write(f"🔍 DEBUG: First 10 rows: {df.head(10).values.tolist()}")
+        
+        # The data is structured as: value, company, value, company, etc.
+        # We need to parse it into Year, Rank, Company, Ticker, Market_Cap_Billions format
+        
+        parsed_data = []
+        current_year = 1989  # Starting year
+        rank = 1
+        
+        i = 0
+        while i < len(df):
+            row = df.iloc[i, 0]
+            
+            # Check if this is a year (numeric value)
+            if pd.isna(row) or row == '':
+                i += 1
+                continue
+                
+            try:
+                # Try to convert to float to see if it's a market cap value
+                market_cap = float(row)
+                
+                # If we have a market cap, the next row should be the company name
+                if i + 1 < len(df):
+                    company = str(df.iloc[i + 1, 0])
+                    
+                    # Skip if company name is empty or NaN
+                    if company and company != '' and company != 'nan':
+                        # Extract ticker from company name
+                        ticker = extract_ticker_from_company(company)
+                        
+                        parsed_data.append({
+                            'Year': current_year,
+                            'Rank': rank,
+                            'Company': company,
+                            'Ticker': ticker,
+                            'Market_Cap_Billions': market_cap
+                        })
+                        
+                        # Debug output for first few entries
+                        if len(parsed_data) <= 25:  # First year + some of second year
+                            st.write(f"🔍 DEBUG: Parsed {company} -> {ticker} (Rank {rank}, Year {current_year})")
+                        
+                        rank += 1
+                        if rank > 20:  # Reset for next year
+                            st.write(f"🔍 DEBUG: Completed year {current_year}, moving to {current_year + 1}")
+                            rank = 1
+                            current_year += 1
+                
+                i += 2  # Skip both market cap and company name
+                
+            except (ValueError, TypeError):
+                # If conversion fails, it might be a year or other data
+                i += 1
+                continue
+        
+        if parsed_data:
+            return pd.DataFrame(parsed_data)
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"Error parsing S&P 500 CSV: {e}")
+        return None
+
+def extract_ticker_from_company(company_name):
+    """Extract ticker symbol from company name - simplified mapping"""
+    # This is a simplified mapping - you may need to expand this
+    ticker_mapping = {
+        'Apple': 'AAPL',
+        'Microsoft': 'MSFT',
+        'Amazon': 'AMZN',
+        'Alphabet': 'GOOGL',
+        'Tesla': 'TSLA',
+        'Meta/Facebook': 'META',
+        'Meta Platforms': 'META',
+        'NVIDIA': 'NVDA',
+        'Berkshire Hathaway': 'BRK-B',
+        'Exxon Mobil': 'XOM',
+        'Johnson & Johnson': 'JNJ',
+        'JPMorgan Chase': 'JPM',
+        'Visa': 'V',
+        'Procter & Gamble': 'PG',
+        'UnitedHealth': 'UNH',
+        'Mastercard': 'MA',
+        'Walmart': 'WMT',
+        'Chevron': 'CVX',
+        'Home Depot': 'HD',
+        'Pfizer': 'PFE',
+        'Bank of America': 'BAC',
+        'Coca-Cola': 'KO',
+        'Merck': 'MRK',
+        'PepsiCo': 'PEP',
+        'Wells Fargo': 'WFC',
+        'Intel': 'INTC',
+        'Cisco Systems': 'CSCO',
+        'Verizon': 'VZ',
+        'AT&T': 'T',
+        'General Electric': 'GE',
+        'IBM': 'IBM',
+        'Oracle': 'ORCL',
+        'Boeing': 'BA',
+        '3M': 'MMM',
+        'McDonald\'s': 'MCD',
+        'Walt Disney': 'DIS',
+        'AIG': 'AIG',
+        'Bristol-Myers Squibb': 'BMY',
+        'Eli Lilly': 'LLY',
+        'Schlumberger': 'SLB',
+        'Altria Group': 'MO',
+        'Fannie Mae': 'FNMA',
+        'Kellogg\'s': 'K',
+        'Citigroup': 'C',
+        'Qualcomm': 'QCOM',
+        'UPS': 'UPS',
+        'Netflix': 'NFLX',
+        'AbbVie': 'ABBV',
+        'Palantir Technologies': 'PLTR'
+    }
+    
+    return ticker_mapping.get(company_name, company_name.replace(' ', '').upper()[:4])
+
+def is_special_dynamic_ticker(ticker):
+    """Check if ticker is a special dynamic portfolio ticker"""
+    special_tickers = ['SP500TOP20']
+    return ticker.upper() in special_tickers
+
+def get_dynamic_portfolio_data(ticker):
+    """Get dynamic portfolio data for special tickers"""
+    if ticker.upper() == 'SP500TOP20':
+        try:
+            import pandas as pd
+            # Try to read the template CSV first
+            try:
+                df = pd.read_csv('TOP_20_SP500_COMPLETE_TEMPLATE.csv')
+            except:
+                # If template doesn't exist, parse the raw CSV
+                df = parse_raw_sp500_csv()
+            
+            if df is not None:
+                # Get all unique tickers that need to be downloaded
+                all_tickers = df['Ticker'].unique()
+                start_year = df['Year'].min()
+                end_year = df['Year'].max()
+                
+                return {
+                    'type': 'dynamic_portfolio',
+                    'name': f'Dynamic S&P 500 Top 20 ({start_year}-{end_year})',
+                    'tickers': all_tickers.tolist(),
+                    'historical_data': df.to_dict('records')
+                }
+        except Exception as e:
+            print(f"Error getting dynamic portfolio data: {e}")
+            return None
+    return None
 
 # =============================================================================
 # RISK-FREE RATE FUNCTIONS
@@ -282,7 +399,7 @@ def get_risk_free_rate_robust(dates):
     except Exception:
         return _get_default_risk_free_rate(dates)
 import contextlib
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 import warnings
 import os
 import plotly.io as pio
@@ -396,16 +513,18 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
     Examples:
         "SPY" -> ("SPY", 1.0, 0.0)
         "SPY?L=3" -> ("SPY", 3.0, 0.0)
+        "QQQ?E=1" -> ("QQQ", 1.0, 1.0)  # 1% expense ratio
         "QQQ?L=3?E=0.84" -> ("QQQ", 3.0, 0.84)
         "QQQ?E=1?L=2" -> ("QQQ", 2.0, 1.0)  # Order doesn't matter
     """
-    # Convert commas to dots for decimal separators (like case conversion)
+    # Convert commas to dots for decimal separators
     ticker_symbol = ticker_symbol.replace(",", ".")
+    
     base_ticker = ticker_symbol
     leverage = 1.0
     expense_ratio = 0.0
-
-    # Parse leverage parameter first
+    
+    # Parse leverage parameter
     if "?L=" in base_ticker:
         try:
             parts = base_ticker.split("?L=", 1)
@@ -416,14 +535,16 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             if "?" in leverage_part:
                 leverage_str, remaining = leverage_part.split("?", 1)
                 leverage = float(leverage_str)
-                base_ticker += "?" + remaining
+                base_ticker += "?" + remaining  # Add back remaining parameters
             else:
                 leverage = float(leverage_part)
-                
+            
             # Validate leverage range (reasonable bounds for leveraged ETFs)
             if leverage < 0.1 or leverage > 10.0:
                 raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+                
         except (ValueError, IndexError) as e:
+            # If parsing fails, treat as regular ticker with no leverage
             leverage = 1.0
     
     # Parse expense ratio parameter
@@ -437,22 +558,24 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             if "?" in expense_part:
                 expense_str, remaining = expense_part.split("?", 1)
                 expense_ratio = float(expense_str)
-                base_ticker += "?" + remaining
+                base_ticker += "?" + remaining  # Add back remaining parameters
             else:
                 expense_ratio = float(expense_part)
-                
+            
             # Validate expense ratio range (reasonable bounds for ETFs)
             if expense_ratio < 0.0 or expense_ratio > 10.0:
                 raise ValueError(f"Expense ratio {expense_ratio} is outside reasonable range (0.0-10.0)")
+                
         except (ValueError, IndexError) as e:
+            # If parsing fails, treat as regular ticker with no expense ratio
             expense_ratio = 0.0
-            
+    
     return base_ticker.strip(), leverage, expense_ratio
 
 def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     """
     Parse ticker symbol to extract base ticker and leverage multiplier.
-    Backward compatibility wrapper for parse_ticker_parameters.
+    This is a backward compatibility wrapper for the new parameter parsing function.
     
     Args:
         ticker_symbol: Ticker symbol, potentially with leverage (e.g., "SPY?L=3")
@@ -463,25 +586,26 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     Examples:
         "SPY" -> ("SPY", 1.0)
         "SPY?L=3" -> ("SPY", 3.0)
-        "QQQ?L=2" -> ("QQQ", 2.0)
+        "QQQ?E=1" -> ("QQQ", 1.0)  # E=1 is expense ratio, not leverage
     """
     base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
     return base_ticker, leverage
 
-def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFrame:
+def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_ratio: float = 0.0) -> pd.DataFrame:
     """
-    Apply daily leverage multiplier to price data, simulating leveraged ETF behavior.
+    Apply daily leverage multiplier and expense ratio to price data, simulating leveraged ETF behavior.
     
     Leveraged ETFs reset daily, so we apply the leverage to daily returns and then
     compound the results to get the leveraged price series. Includes daily cost drag
-    equivalent to (leverage - 1) × risk_free_rate.
+    equivalent to (leverage - 1) × risk_free_rate plus daily expense ratio drag.
     
     Args:
         price_data: DataFrame with 'Close' column containing price data
         leverage: Leverage multiplier (e.g., 3.0 for 3x leverage)
+        expense_ratio: Annual expense ratio in percentage (e.g., 1.0 for 1% annual expense)
         
     Returns:
-        DataFrame with leveraged price data including cost drag
+        DataFrame with leveraged price data including cost drag and expense ratio drag
     """
     if leverage == 1.0:
         return price_data.copy()
@@ -504,6 +628,9 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
         daily_cost_drag = (leverage - 1) * risk_free_rates
     except Exception as e:
         raise
+    
+    # Calculate daily expense ratio drag: expense_ratio / 100 / 365.25 (annual to daily)
+    daily_expense_drag = expense_ratio / 100.0 / 365.25
     
     # Calculate leveraged prices by applying leverage to each day's price change
     # Start with the first price
@@ -529,8 +656,8 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
             # Calculate the actual price change
             price_change = current_price / previous_price - 1
             
-            # Apply leverage to the price change and subtract cost drag
-            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i]
+            # Apply leverage to the price change and subtract cost drag and expense ratio drag
+            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i] - daily_expense_drag
             
             # Apply the leveraged price change to the previous leveraged price
             leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
@@ -570,8 +697,8 @@ def get_ticker_aliases():
         'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
         
         # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'TLTETF': 'TLT',         # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',         # 7-10 Year Treasury Bond ETF (2002+) - With coupons
         'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
         'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
         'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
@@ -580,7 +707,7 @@ def get_ticker_aliases():
         'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
         
         # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
+        'ZEROX': 'ZEROX',        # Cash doing nothing - zero return
         
         # Gold & Commodities
         'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
@@ -591,20 +718,21 @@ def get_ticker_aliases():
         'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        # New short aliases for complete tickers (ordered by asset class)
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
         'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
         'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
         'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
-        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
-        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
         'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
-        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
-        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
-        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
-        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
         'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
         'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
         'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
@@ -616,6 +744,9 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Special Dynamic Portfolio Tickers
+        'SP500TOP20': 'SP500TOP20',  # Dynamic S&P 500 Top 20 (rebalances yearly based on historical data)
     }
 
 def resolve_ticker_alias(ticker):
@@ -623,78 +754,85 @@ def resolve_ticker_alias(ticker):
     aliases = get_ticker_aliases()
     return aliases.get(ticker.upper(), ticker)
 
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def generate_zero_return_data(period="max"):
-    """Generate synthetic zero return data for ZEROX ticker
-    
-    Args:
-        period: Data period (max, 1y, 5y, etc.)
-    
-    Returns:
-        pandas.DataFrame with Close and Dividends columns, constant price of $100
-    """
+    """Generate synthetic zero return data for ZEROX ticker"""
     try:
-        # Get a reference ticker to determine date range
         ref_ticker = yf.Ticker("SPY")
         ref_hist = ref_ticker.history(period=period)
-        
         if ref_hist.empty:
-            # Fallback: create 1 year of data
             end_date = pd.Timestamp.now()
             start_date = end_date - pd.Timedelta(days=365)
             dates = pd.date_range(start=start_date, end=end_date, freq='D')
         else:
             dates = ref_hist.index
-        
-        # Create zero return data: constant price of $100, no dividends
         zero_data = pd.DataFrame({
             'Close': [100.0] * len(dates),
             'Dividends': [0.0] * len(dates)
         }, index=dates)
-        
         return zero_data
     except Exception:
-        # Ultimate fallback: create minimal data
         end_date = pd.Timestamp.now()
         start_date = end_date - pd.Timedelta(days=30)
         dates = pd.date_range(start=start_date, end=end_date, freq='D')
-        
         zero_data = pd.DataFrame({
             'Close': [100.0] * len(dates),
             'Dividends': [0.0] * len(dates)
         }, index=dates)
-        
         return zero_data
 
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def get_gold_complete_data(period="max"):
-    """Get complete gold data from our custom gold ticker"""
+    """Get complete gold data from historical CSV and GLD"""
     try:
-        # Import our gold ticker
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        # Load historical data directly
+        import pandas as pd
+        df = pd.read_csv('Complete_Tickers/Historical CSV/Gold_Futures_Complete.csv')
         
-        from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
+        # Parse dates
+        df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+        df.set_index('Date', inplace=True)
         
-        # Get the complete gold data
-        gold_data = create_gold_complete_ticker()
+        # Rename columns
+        df.columns = ['Close', 'Open', 'High', 'Low', 'Volume', 'Change_Percent']
         
-        if gold_data is None:
-            print("DEBUG: Gold data is None, falling back to GLD")
-            # Fallback to GLD if our custom ticker fails
-            ticker = yf.Ticker("GLD")
-            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        # Get GLD data for recent updates
+        gld_ticker = yf.Ticker("GLD")
+        gld_data = gld_ticker.history(period="max", auto_adjust=True)
         
-        # Convert to the expected format
+        if not gld_data.empty:
+            # Make timezone-naive for comparison
+            gld_data.index = gld_data.index.tz_localize(None)
+            
+            # Scale GLD to match historical data at 2004
+            historical_2004_price = df.loc['2004-11-18', 'Close'] if '2004-11-18' in df.index else df.loc[df.index[df.index.year == 2004].max(), 'Close']
+            gld_2004_price = gld_data.loc[gld_data.index[gld_data.index.year == 2004].min(), 'Close']
+            scaling_factor = historical_2004_price / gld_2004_price
+            
+            # Scale GLD data
+            gld_scaled = gld_data.copy()
+            gld_scaled['Close'] = gld_scaled['Close'] * scaling_factor
+            gld_scaled['Open'] = gld_scaled['Open'] * scaling_factor
+            gld_scaled['High'] = gld_scaled['High'] * scaling_factor
+            gld_scaled['Low'] = gld_scaled['Low'] * scaling_factor
+            
+            # Combine data
+            combined_data = pd.concat([df, gld_scaled])
+            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
+            combined_data = combined_data.sort_index()
+        else:
+            combined_data = df
+        
+        # Convert to expected format
         result = pd.DataFrame({
-            'Close': gold_data['Close'],
-            'Dividends': [0.0] * len(gold_data)  # Gold doesn't pay dividends
-        }, index=gold_data.index)
+            'Close': combined_data['Close'],
+            'Dividends': [0.0] * len(combined_data)
+        }, index=combined_data.index)
         
-        print(f"DEBUG: Gold data success - shape: {result.shape}, date range: {result.index.min()} to {result.index.max()}")
         return result
+        
     except Exception as e:
-        print(f"DEBUG: Error in get_gold_complete_data: {e}")
-        # Fallback to GLD if anything fails
+        # Fallback to GLD
         try:
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
@@ -800,6 +938,86 @@ def get_bitcoin_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
+def get_ief_complete_data(period="max"):
+    """Get complete IEF data from our custom IEF ticker"""
+    try:
+        from Complete_Tickers.IEF_COMPLETE_TICKER import create_ief_complete_ticker
+        ief_data = create_ief_complete_ticker()
+        if ief_data is not None and not ief_data.empty:
+            result = pd.DataFrame({
+                'Close': ief_data,
+                'Dividends': [0.0] * len(ief_data)
+            }, index=ief_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("IEF")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_kmlm_complete_data(period="max"):
+    """Get complete KMLM data from our custom KMLM ticker"""
+    try:
+        from Complete_Tickers.KMLM_COMPLETE_TICKER import create_kmlm_complete_ticker
+        kmlm_data = create_kmlm_complete_ticker()
+        if kmlm_data is not None and not kmlm_data.empty:
+            result = pd.DataFrame({
+                'Close': kmlm_data,
+                'Dividends': [0.0] * len(kmlm_data)
+            }, index=kmlm_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("KMLM")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_dbmf_complete_data(period="max"):
+    """Get complete DBMF data from our custom DBMF ticker"""
+    try:
+        from Complete_Tickers.DBMF_COMPLETE_TICKER import create_dbmf_complete_ticker
+        dbmf_data = create_dbmf_complete_ticker()
+        if dbmf_data is not None and not dbmf_data.empty:
+            result = pd.DataFrame({
+                'Close': dbmf_data,
+                'Dividends': [0.0] * len(dbmf_data)
+            }, index=dbmf_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("DBMF")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
+def get_tbill_complete_data(period="max"):
+    """Get complete TBILL data from our custom TBILL ticker"""
+    try:
+        from Complete_Tickers.TBILL_COMPLETE_TICKER import create_tbill_complete_ticker
+        tbill_data = create_tbill_complete_ticker()
+        if tbill_data is not None and not tbill_data.empty:
+            result = pd.DataFrame({
+                'Close': tbill_data,
+                'Dividends': [0.0] * len(tbill_data)
+            }, index=tbill_data.index)
+            return result
+        else:
+            return None
+    except Exception as e:
+        try:
+            ticker = yf.Ticker("SGOV")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        except:
+            return pd.DataFrame()
+
 def get_spysim_complete_data(period="max"):
     """Get complete SPYSIM data from our custom SPYSIM ticker"""
     try:
@@ -823,8 +1041,10 @@ def get_spysim_complete_data(period="max"):
 def get_goldsim_complete_data(period="max"):
     """Get complete GOLDSIM data from our custom GOLDSIM ticker"""
     try:
+        # Try importing the GOLDSIM ticker
         from Complete_Tickers.GOLDSIM_COMPLETE_TICKER import create_goldsim_complete_ticker
         goldsim_data = create_goldsim_complete_ticker()
+        
         if goldsim_data is not None and not goldsim_data.empty:
             result = pd.DataFrame({
                 'Close': goldsim_data,
@@ -833,27 +1053,35 @@ def get_goldsim_complete_data(period="max"):
             return result
         else:
             print("⚠️ WARNING: GOLDSIM ticker returned empty data, falling back to GLD")
+            # Fallback to GLD if GOLDSIM fails
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+            
+    except ImportError as e:
+        print(f"⚠️ WARNING: GOLDSIM import error: {e}, falling back to GLD")
+        # Fallback to GLD if import fails
+        ticker = yf.Ticker("GLD")
+        return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
     except Exception as e:
-        print(f"⚠️ WARNING: GOLDSIM error: {e}, falling back to GLD")
+        print(f"⚠️ WARNING: GOLDSIM function error: {e}, falling back to GLD")
+        # Fallback to GLD if everything fails
         try:
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
 
-def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Fetch fresh ticker data from Yahoo Finance (no caching)
+def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period
-        auto_adjust: Auto-adjust setting
+        period: Data period (used in cache key to prevent conflicts)
+        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
     """
     try:
-        # Parse leverage from ticker symbol
-        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        # Parse parameters from ticker symbol
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
         # Resolve ticker alias if it exists
         resolved_ticker = resolve_ticker_alias(base_ticker)
@@ -878,6 +1106,22 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         if resolved_ticker == "BTC_COMPLETE":
             return get_bitcoin_complete_data(period)
         
+        # Special handling for IEF_COMPLETE - use our custom IEF ticker
+        if resolved_ticker == "IEF_COMPLETE":
+            return get_ief_complete_data(period)
+        
+        # Special handling for KMLM_COMPLETE - use our custom KMLM ticker
+        if resolved_ticker == "KMLM_COMPLETE":
+            return get_kmlm_complete_data(period)
+        
+        # Special handling for DBMF_COMPLETE - use our custom DBMF ticker
+        if resolved_ticker == "DBMF_COMPLETE":
+            return get_dbmf_complete_data(period)
+        
+        # Special handling for TBILL_COMPLETE - use our custom TBILL ticker
+        if resolved_ticker == "TBILL_COMPLETE":
+            return get_tbill_complete_data(period)
+        
         # Special handling for SPYSIM_COMPLETE - use our custom SPYSIM ticker
         if resolved_ticker == "SPYSIM_COMPLETE":
             return get_spysim_complete_data(period)
@@ -892,16 +1136,17 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         if hist.empty:
             return hist
             
-        # Apply leverage if specified
-        if leverage != 1.0:
-            hist = apply_daily_leverage(hist, leverage)
+        # Apply leverage and/or expense ratio if specified
+        if leverage != 1.0 or expense_ratio != 0.0:
+            hist = apply_daily_leverage(hist, leverage, expense_ratio)
             
         return hist
     except Exception:
         return pd.DataFrame()
 
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def get_ticker_info(ticker_symbol):
-    """Fetch fresh ticker info from Yahoo Finance (no caching)"""
+    """Cache ticker info to improve performance across multiple tabs"""
     try:
         # Parse leverage from ticker symbol
         base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
@@ -2497,25 +2742,25 @@ def generate_simple_pdf_report(custom_name=""):
                             # Add minimal spacing after pie chart before timer section
                             story.append(Spacer(1, 5))
                             
-                            # Add Next Rebalance Timer information - simple text display
+                            # Add Next Rebalance Timer information - calculate fresh for PDF
                             story.append(Paragraph(f"Next Rebalance Timer - {portfolio_name}", subheading_style))
                             story.append(Spacer(1, 5))
                             
-                            # Calculate timer information from portfolio configuration and allocation data
+                            # Calculate timer information fresh for PDF using the actual last rebalance date
                             try:
                                 # Get portfolio configuration
                                 portfolio_cfg = None
-                                if 'multi_backtest_snapshot_data' in st.session_state:
-                                    snapshot = st.session_state['multi_backtest_snapshot_data']
-                                    portfolio_configs = snapshot.get('portfolio_configs', [])
-                                    portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
+                                for cfg in st.session_state.multi_backtest_portfolio_configs:
+                                    if cfg.get('name') == portfolio_name:
+                                        portfolio_cfg = cfg
+                                        break
                                 
                                 if portfolio_cfg:
                                     rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                                     initial_value = portfolio_cfg.get('initial_value', 10000)
                                     
                                     # Get last rebalance date from allocation data
-                                    all_allocations = snapshot.get('all_allocations', {})
+                                    all_allocations = st.session_state.get('multi_all_allocations', {})
                                     portfolio_allocations = all_allocations.get(portfolio_name, {})
                                     
                                     if portfolio_allocations:
@@ -2579,9 +2824,9 @@ def generate_simple_pdf_report(custom_name=""):
                                     else:
                                         story.append(Paragraph("No allocation data available for timer calculation", styles['Normal']))
                                 else:
-                                    story.append(Paragraph("Portfolio configuration not available", styles['Normal']))
+                                    story.append(Paragraph("Portfolio configuration not found", styles['Normal']))
                             except Exception as e:
-                                story.append(Paragraph(f"Error calculating timer information: {str(e)}", styles['Normal']))
+                                story.append(Paragraph(f"Error calculating timer: {str(e)}", styles['Normal']))
                             
                             # Add page break so Allocation Details starts on a new page
                             story.append(PageBreak())
@@ -3172,7 +3417,17 @@ st.markdown("""
 st.set_page_config(layout="wide", page_title="Multi-Portfolio Analysis")
 
 st.title("Multi-Portfolio Backtest")
+
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
+
+# Performance Settings
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.markdown("### 🚀 Performance Settings")
+with col2:
+    use_parallel = st.checkbox("Parallel Processing", value=False,
+                              help="⚠️ Process multiple portfolios simultaneously using threading. May help with 3+ portfolios but can be slower due to Streamlit overhead. Try both modes to see what's faster for your setup.")
+    st.session_state.use_parallel_processing = use_parallel
 
 # Portfolio name is handled in the main UI below
 
@@ -3292,6 +3547,167 @@ def get_portfolio_value(portfolio_name):
                     portfolio_value = float(latest_value)
     return portfolio_value
 
+def create_allocation_evolution_chart(portfolio_name, allocs_data):
+    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
+    try:
+        # Convert to DataFrame for easier processing
+        alloc_df = pd.DataFrame(allocs_data).T
+        alloc_df.index = pd.to_datetime(alloc_df.index)
+        alloc_df = alloc_df.sort_index()
+        
+        # Get all unique tickers (excluding None)
+        all_tickers = set()
+        for date, allocs in allocs_data.items():
+            for ticker in allocs.keys():
+                if ticker is not None:
+                    all_tickers.add(ticker)
+        all_tickers = sorted(list(all_tickers))
+        
+        # Fill missing values with 0 for unavailable assets (instead of forward fill)
+        alloc_df = alloc_df.fillna(0)
+        
+        # Convert to percentages
+        alloc_df = alloc_df * 100
+        
+        # Create the evolution chart
+        fig_evolution = go.Figure()
+        
+        # Color palette for different tickers
+        colors = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+        ]
+        
+        # Add a trace for each ticker
+        for i, ticker in enumerate(all_tickers):
+            if ticker in alloc_df.columns:
+                # Get the allocation data for this ticker
+                ticker_data = alloc_df[ticker].dropna()
+                
+                if not ticker_data.empty:  # Only add if we have data
+                    fig_evolution.add_trace(go.Scatter(
+                        x=ticker_data.index,
+                        y=ticker_data.values,
+                        mode='lines',
+                        name=ticker,
+                        line=dict(color=colors[i % len(colors)], width=2),
+                        hovertemplate=f'<b>{ticker}</b><br>' +
+                                    'Date: %{x}<br>' +
+                                    'Allocation: %{y:.1f}%<br>' +
+                                    '<extra></extra>'
+                    ))
+        
+        # Update layout
+        fig_evolution.update_layout(
+            title=f"Portfolio Allocation Evolution - {portfolio_name}",
+            xaxis_title="Date",
+            yaxis_title="Allocation (%)",
+            template='plotly_dark',
+            height=600,
+            hovermode='closest',
+            hoverdistance=100,
+            spikedistance=1000,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.01
+            )
+        )
+        
+        return fig_evolution
+        
+    except Exception as e:
+        st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
+        return None
+
+def process_allocation_dataframe(portfolio_name, allocation_data):
+    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
+    try:
+        # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
+        all_tickers = set()
+        for date, alloc_dict in allocation_data.items():
+            all_tickers.update(alloc_dict.keys())
+        
+        # Create a complete DataFrame with all dates and all tickers
+        all_dates = sorted(allocation_data.keys())
+        complete_data = {}
+        
+        for date in all_dates:
+            alloc_dict = allocation_data[date]
+            complete_data[date] = {ticker: alloc_dict.get(ticker, 0) for ticker in all_tickers}
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(complete_data).T
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        
+        # Convert to percentages
+        df = df * 100
+        
+        # Sort tickers with CASH always last
+        ticker_list = sorted(list(all_tickers))
+        if 'CASH' in ticker_list:
+            ticker_list.remove('CASH')
+            ticker_list.append('CASH')
+        
+        # Reorder DataFrame columns to match the desired order
+        df = df[ticker_list]
+        
+        return df, ticker_list
+        
+    except Exception as e:
+        st.error(f"Error processing allocation data for {portfolio_name}: {str(e)}")
+        return None, []
+
+def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
+    """Create pie chart for portfolio allocation (NO_CACHE version)"""
+    try:
+        if not allocation_data:
+            return None
+            
+        # Filter out zero allocations and None values
+        filtered_data = {k: v for k, v in allocation_data.items() if v > 0 and k is not None}
+        
+        if not filtered_data:
+            return None
+            
+        # Convert to percentages
+        total = sum(filtered_data.values())
+        if total == 0:
+            return None
+            
+        percentages = {k: (v / total) * 100 for k, v in filtered_data.items()}
+        
+        # Create pie chart
+        fig = go.Figure(data=[go.Pie(
+            labels=list(percentages.keys()),
+            values=list(percentages.values()),
+            textinfo='percent+label',
+            textposition='auto',
+            hovertemplate='<b>%{label}</b><br>Allocation: %{percent}<br>Value: %{value:.1f}%<extra></extra>',
+            marker=dict(
+                colors=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                       '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                       '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5']
+            )
+        )])
+        
+        fig.update_layout(
+            title=f"{portfolio_name} - {title_suffix}",
+            template='plotly_dark',
+            height=400,
+            showlegend=True
+        )
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating pie chart for {portfolio_name}: {str(e)}")
+        return None
+
 def sort_dataframe_numerically(df, column, ascending=False):
     """Sort DataFrame by a specific column numerically, handling percentage strings and N/A values"""
     if column not in df.columns:
@@ -3335,7 +3751,7 @@ def get_dates_by_freq(freq, start, end, market_days):
         return set(market_days)
     elif freq == "calendar_day":
         return set(pd.date_range(start=start, end=end, freq='D'))
-    elif freq == "week" or freq == "Weekly":
+    elif freq == "Weekly":
         # Use first trading day of each week (Monday) - start from first Monday, not actual start date
         dates = []
         # Find the first Monday on or after start date
@@ -3359,7 +3775,7 @@ def get_dates_by_freq(freq, start, end, market_days):
             current_date += pd.Timedelta(weeks=1)
         
         return set(dates)
-    elif freq == "2weeks" or freq == "Biweekly":
+    elif freq == "Biweekly":
         # Use first trading day of every other week (every 2 weeks starting from first Monday)
         dates = []
         # Find the first Monday on or after start date
@@ -3383,7 +3799,7 @@ def get_dates_by_freq(freq, start, end, market_days):
             current_date += pd.Timedelta(weeks=2)
         
         return set(dates)
-    elif freq == "month" or freq == "Monthly":
+    elif freq == "Monthly":
         # Use 1st of each month - start from January of start year, not actual start date
         dates = []
         start_year = start.year
@@ -3415,7 +3831,7 @@ def get_dates_by_freq(freq, start, end, market_days):
                 current_year += 1
         
         return set(dates)
-    elif freq == "3months" or freq == "Quarterly":
+    elif freq == "Quarterly":
         # Use 1st of January, April, July, October
         dates = []
         start_year = start.year
@@ -3438,7 +3854,7 @@ def get_dates_by_freq(freq, start, end, market_days):
                         dates.append(market_day_quarter)
         
         return set(dates)
-    elif freq == "6months" or freq == "Semiannually":
+    elif freq == "Semiannually":
         # Use 1st of January and July
         dates = []
         start_year = start.year
@@ -3566,7 +3982,7 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
     Calculate the next rebalance date based on rebalancing frequency and last rebalance date.
     Excludes today and yesterday as mentioned in the requirements.
     """
-    if rebalancing_frequency == 'none':
+    if not last_rebalance_date or rebalancing_frequency == 'none':
         return None, None, None
     
     # Convert to datetime if it's a pandas Timestamp
@@ -3576,15 +3992,11 @@ def calculate_next_rebalance_date(rebalancing_frequency, last_rebalance_date):
     today = datetime.now().date()
     yesterday = today - timedelta(days=1)
     
-    # If no last rebalance date, use yesterday as base
-    if not last_rebalance_date:
-        base_date = yesterday
+    # If last rebalance was today or yesterday, use the day before yesterday as base
+    if last_rebalance_date.date() >= yesterday:
+        base_date = yesterday - timedelta(days=1)
     else:
-        # If last rebalance was today or yesterday, use the day before yesterday as base
-        if last_rebalance_date.date() >= yesterday:
-            base_date = yesterday - timedelta(days=1)
-        else:
-            base_date = last_rebalance_date.date()
+        base_date = last_rebalance_date.date()
     
     # Calculate next rebalance date based on frequency
     if rebalancing_frequency == 'market_day':
@@ -3793,9 +4205,37 @@ def calculate_total_money_added(config, start_date, end_date):
     return initial_value + total_additions
 
 # -----------------------
+# PERFORMANCE OPTIMIZATIONS (Safe - No Logic Changes)
+# -----------------------
+
+@jit(nopython=True)
+def fast_calculate_returns(prices):
+    """Fast calculation of price changes using Numba JIT"""
+    returns = np.zeros_like(prices)
+    for i in range(1, len(prices)):
+        if prices[i-1] > 0:
+            returns[i] = (prices[i] - prices[i-1]) / prices[i-1]
+    return returns
+
+@jit(nopython=True)
+def fast_momentum_calculation(returns, window):
+    """Fast momentum calculation using Numba JIT"""
+    momentum = np.zeros_like(returns)
+    for i in range(window, len(returns)):
+        momentum[i] = np.sum(returns[i-window+1:i+1])
+    return momentum
+
+@lru_cache(maxsize=128)
+def cached_momentum_calculation(ticker_data_hash, window):
+    """Cache momentum calculations to avoid recomputation"""
+    # This is a placeholder - actual implementation would hash the data
+    return None
+
+# -----------------------
 # Single-backtest core (adapted from your code, robust)
 # -----------------------
 def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_allocations"):
+    
     stocks_list = config['stocks']
     tickers = [s['ticker'] for s in stocks_list if s['ticker']]
     # Filter tickers to those present in reindexed_data to avoid KeyErrors for invalid tickers
@@ -3844,6 +4284,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     # Get regular rebalancing dates
     dates_rebal = sorted(get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index))
     
+    
     # Handle first rebalance strategy - replace first rebalance date if needed
     first_rebalance_strategy = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
     if first_rebalance_strategy == "momentum_window_complete" and use_momentum and momentum_windows:
@@ -3878,7 +4319,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             normalized_weights = [0 for _ in filtered_windows]
         else:
             normalized_weights = [w["weight"] / total_weight for w in filtered_windows]
-        start_dates_config = {t: reindexed_data[t].first_valid_index() for t in tickers if t in reindexed_data}
+        start_dates_config = {t: reindexed_data[t].first_valid_index() for t in tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)}
         for t in current_assets:
             is_valid, asset_returns = True, 0.0
             for idx, window in enumerate(filtered_windows):
@@ -3922,7 +4363,16 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         # compute beta and volatility metrics when requested
         beta_vals = {}
         vol_vals = {}
-        df_bench = current_data.get(benchmark_ticker)
+        # Get config parameters (same as in single_backtest)
+        calc_beta = config.get('calc_beta', False)
+        calc_volatility = config.get('calc_volatility', False)
+        benchmark_ticker = config.get('benchmark_ticker', '^GSPC')
+        beta_window_days = config.get('beta_window_days', 365)
+        exclude_days_beta = config.get('exclude_days_beta', 30)
+        vol_window_days = config.get('vol_window_days', 365)
+        exclude_days_vol = config.get('exclude_days_vol', 30)
+        
+        df_bench = reindexed_data.get(benchmark_ticker)
         if calc_beta:
             start_beta = date - pd.Timedelta(days=beta_window_days)
             end_beta = date - pd.Timedelta(days=exclude_days_beta)
@@ -3931,7 +4381,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             end_vol = date - pd.Timedelta(days=exclude_days_vol)
 
         for t in list(rets.keys()):
-            df_t = current_data.get(t)
+            df_t = reindexed_data.get(t)
             if calc_beta and df_bench is not None and isinstance(df_t, pd.DataFrame):
                 mask_beta = (df_t.index >= start_beta) & (df_t.index <= end_beta)
                 returns_t_beta = df_t.loc[mask_beta, 'Price_change']
@@ -4261,6 +4711,13 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     historical_allocations[sim_index[0]]['CASH'] = unallocated_cash[0] / initial_value if initial_value > 0 else 0
     
     for i in range(len(sim_index)):
+        # Check for interrupt every 100 iterations
+        if i % 100 == 0:
+            # Check if interrupt was requested
+            if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
+                print("🛑 Hard kill requested - stopping backtest")
+                break
+        
         date = sim_index[i]
         if i == 0: continue
         
@@ -4278,9 +4735,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 # --- Dividend fix: find the correct trading day for dividend ---
                 div = 0.0
                 # CRITICAL FIX: For leveraged tickers, get dividends from the base ticker, not the leveraged ticker
-                if "?L=" in t:
+                if "?L=" in t or "?E=" in t:
                     # For leveraged tickers, get dividend data from the base ticker
-                    base_ticker, leverage = parse_leverage_ticker(t)
+                    base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
                     if base_ticker in reindexed_data:
                         base_df = reindexed_data[base_ticker]
                         if "Dividends" in base_df.columns:
@@ -4326,9 +4783,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                         # Reinvest dividends (original behavior)
                         # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
                         # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
-                        if "?L=" in t:
+                        if "?L=" in t or "?E=" in t:
                             # For leveraged tickers, get the base ticker's dividend rate (not amount)
-                            base_ticker, leverage = parse_leverage_ticker(t)
+                            base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
                             if base_ticker in reindexed_data:
                                 base_df = reindexed_data[base_ticker]
                                 base_price_prev = base_df.loc[date_prev, "Close"]
@@ -4357,9 +4814,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             # --- Dividend fix: find the correct trading day for dividend ---
             div = 0.0
             # CRITICAL FIX: For leveraged tickers, get dividends from the base ticker, not the leveraged ticker
-            if "?L=" in t:
+            if "?L=" in t or "?E=" in t:
                 # For leveraged tickers, get dividend data from the base ticker
-                base_ticker, leverage = parse_leverage_ticker(t)
+                base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
                 if base_ticker in reindexed_data:
                     base_df = reindexed_data[base_ticker]
                     if "Dividends" in base_df.columns:
@@ -4405,9 +4862,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     # Reinvest dividends (original behavior)
                     # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
                     # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
-                    if "?L=" in t:
+                    if "?L=" in t or "?E=" in t:
                         # For leveraged tickers, get the base ticker's dividend rate (not amount)
-                        base_ticker, leverage = parse_leverage_ticker(t)
+                        base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
                         if base_ticker in reindexed_data:
                             base_df = reindexed_data[base_ticker]
                             base_price_prev = base_df.loc[date_prev, "Close"]
@@ -4436,16 +4893,66 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         
         # Check if we should rebalance
         should_rebalance = False
+        
+        # First check if it's a regular rebalancing date
         # Normalize dates for comparison (remove timezone and time components)
         date_normalized = pd.Timestamp(date).normalize()
         dates_rebal_normalized = {pd.Timestamp(d).normalize() for d in dates_rebal}
+        
         if date_normalized in dates_rebal_normalized and set(tickers):
-            should_rebalance = True
+            # If targeted rebalancing is enabled, check thresholds first
+            if config.get('use_targeted_rebalancing', False):
+                # Calculate current allocations as percentages
+                current_total = sum(values[t][-1] for t in tickers) + unallocated_cash[-1] + unreinvested_cash[-1]
+                if current_total > 0:
+                    current_allocations = {t: values[t][-1] / current_total for t in tickers}
+                    
+                    # Check if any ticker exceeds its targeted rebalancing thresholds
+                    targeted_settings = config.get('targeted_rebalancing_settings', {})
+                    threshold_exceeded = False
+                    
+                    for ticker in tickers:
+                        if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
+                            current_allocation_pct = current_allocations.get(ticker, 0) * 100
+                            max_threshold = targeted_settings[ticker].get('max_allocation', 100.0)
+                            min_threshold = targeted_settings[ticker].get('min_allocation', 0.0)
+                            
+                            # Check if allocation exceeds max or falls below min threshold
+                            if current_allocation_pct > max_threshold or current_allocation_pct < min_threshold:
+                                threshold_exceeded = True
+                                break
+                    
+                    # Only rebalance if thresholds are exceeded
+                    should_rebalance = threshold_exceeded
+                else:
+                    # If no current value, don't rebalance
+                    should_rebalance = False
+            else:
+                # Regular rebalancing - always rebalance on scheduled dates
+                should_rebalance = True
         elif rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"] and set(tickers):
             # Buy & Hold: rebalance whenever there's cash available
             total_cash = unallocated_cash[-1] + unreinvested_cash[-1]
             if total_cash > 0:
                 should_rebalance = True
+        
+        # Handle cash distribution when no rebalancing occurs but cash is available
+        if not should_rebalance:
+            total_cash = unallocated_cash[-1] + unreinvested_cash[-1]
+            if total_cash > 0:
+                # Distribute cash proportionally to current holdings
+                current_total_value = sum(values[t][-1] for t in tickers)
+                if current_total_value > 0:
+                    # Calculate current proportions
+                    current_proportions = {t: values[t][-1] / current_total_value for t in tickers}
+                    
+                    # Distribute cash proportionally
+                    for t in tickers:
+                        values[t][-1] += total_cash * current_proportions.get(t, 0)
+                    
+                    # Clear cash
+                    unallocated_cash[-1] = 0
+                    unreinvested_cash[-1] = 0
         
         if should_rebalance:
             if use_momentum:
@@ -4703,6 +5210,544 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
 
     return results["Total_with_dividends_plus_cash"], results['Portfolio_Value_No_Additions'], historical_allocations, historical_metrics
 
+def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version="v2_year_aware"):
+    """
+    Year-aware backtest that treats dynamic tickers EXACTLY like regular tickers
+    but with year-specific ticker selection based on CSV data
+    """
+    import pandas as pd
+    
+    def calculate_momentum(date, current_assets, momentum_windows):
+        """Momentum calculation function (same as in single_backtest)"""
+        cumulative_returns, valid_assets = {}, []
+        filtered_windows = [w for w in momentum_windows if w["weight"] > 0]
+        # Normalize weights so they sum to 1 (same as app.py)
+        total_weight = sum(w["weight"] for w in filtered_windows)
+        if total_weight == 0:
+            normalized_weights = [0 for _ in filtered_windows]
+        else:
+            normalized_weights = [w["weight"] / total_weight for w in filtered_windows]
+        start_dates_config = {t: reindexed_data[t].first_valid_index() for t in current_assets if t in reindexed_data and not isinstance(reindexed_data[t], str)}
+        for t in current_assets:
+            is_valid, asset_returns = True, 0.0
+            for idx, window in enumerate(filtered_windows):
+                lookback, exclude = window["lookback"], window["exclude"]
+                weight = normalized_weights[idx]
+                start_mom = date - pd.Timedelta(days=lookback)
+                end_mom = date - pd.Timedelta(days=exclude)
+                if start_dates_config.get(t, pd.Timestamp.max) > start_mom:
+                    is_valid = False; break
+                df_t = reindexed_data[t]
+                price_start_index = df_t.index.asof(start_mom)
+                price_end_index = df_t.index.asof(end_mom)
+                if pd.isna(price_start_index) or pd.isna(price_end_index):
+                    is_valid = False; break
+                price_start = df_t.loc[price_start_index, "Close"]
+                price_end = df_t.loc[price_end_index, "Close"]
+                if pd.isna(price_start) or pd.isna(price_end) or price_start == 0:
+                    is_valid = False; break
+                ret = (price_end - price_start) / price_start
+                asset_returns += ret * weight
+            if is_valid:
+                cumulative_returns[t] = asset_returns
+                valid_assets.append(t)
+        return cumulative_returns, valid_assets
+
+    def calculate_momentum_weights(returns, valid_assets, date, momentum_strategy='Classic', negative_momentum_strategy='Cash'):
+        """Momentum weights calculation function (EXACT same as in single_backtest)"""
+        # Mirror approach used in allocations/app.py: compute weights from raw momentum
+        # (Classic or Relative) and then optionally post-filter by inverse volatility
+        # and inverse absolute beta (multiplicative), then renormalize. This avoids
+        # dividing by beta directly which flips signs when beta is negative.
+        if not valid_assets:
+            return {}, {}
+        # Keep only non-nan momentum values
+        rets = {t: returns.get(t, np.nan) for t in valid_assets}
+        rets = {t: rets[t] for t in rets if not pd.isna(rets[t])}
+        if not rets:
+            return {}, {}
+
+        metrics = {t: {} for t in rets.keys()}
+
+        # compute beta and volatility metrics when requested
+        beta_vals = {}
+        vol_vals = {}
+        # Get config parameters (same as in single_backtest)
+        calc_beta = config.get('calc_beta', False)
+        calc_volatility = config.get('calc_volatility', False)
+        benchmark_ticker = config.get('benchmark_ticker', '^GSPC')
+        beta_window_days = config.get('beta_window_days', 365)
+        exclude_days_beta = config.get('exclude_days_beta', 30)
+        vol_window_days = config.get('vol_window_days', 365)
+        exclude_days_vol = config.get('exclude_days_vol', 30)
+        
+        df_bench = reindexed_data.get(benchmark_ticker)
+        if calc_beta:
+            start_beta = date - pd.Timedelta(days=beta_window_days)
+            end_beta = date - pd.Timedelta(days=exclude_days_beta)
+        if calc_volatility:
+            start_vol = date - pd.Timedelta(days=vol_window_days)
+            end_vol = date - pd.Timedelta(days=exclude_days_vol)
+
+        for t in list(rets.keys()):
+            df_t = reindexed_data.get(t)
+            if calc_beta and df_bench is not None and isinstance(df_t, pd.DataFrame):
+                mask_beta = (df_t.index >= start_beta) & (df_t.index <= end_beta)
+                returns_t_beta = df_t.loc[mask_beta, 'Price_change']
+                mask_bench_beta = (df_bench.index >= start_beta) & (df_bench.index <= end_beta)
+                returns_bench_beta = df_bench.loc[mask_bench_beta, 'Price_change']
+                if len(returns_t_beta) < 2 or len(returns_bench_beta) < 2:
+                    beta_vals[t] = np.nan
+                else:
+                    variance = np.var(returns_bench_beta)
+                    beta_vals[t] = (np.cov(returns_t_beta, returns_bench_beta)[0,1] / variance) if variance > 0 else np.nan
+                metrics[t]['Beta'] = beta_vals[t]
+            if calc_volatility and isinstance(df_t, pd.DataFrame):
+                mask_vol = (df_t.index >= start_vol) & (df_t.index <= end_vol)
+                returns_t_vol = df_t.loc[mask_vol, 'Price_change']
+                if len(returns_t_vol) < 2:
+                    vol_vals[t] = np.nan
+                else:
+                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365)
+                metrics[t]['Volatility'] = vol_vals[t]
+
+        # attach raw momentum
+        for t in rets:
+            metrics[t]['Momentum'] = rets[t]
+
+        # Build initial weights from raw momentum (Classic or Relative)
+        weights = {}
+        rets_keys = list(rets.keys())
+        all_negative = all(rets[t] <= 0 for t in rets_keys)
+        relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
+
+        if all_negative:
+            if negative_momentum_strategy == 'Cash':
+                weights = {t: 0.0 for t in rets_keys}
+            elif negative_momentum_strategy == 'Equal weight':
+                weights = {t: 1.0 / len(rets_keys) for t in rets_keys}
+            else:  # Relative momentum
+                min_score = min(rets[t] for t in rets_keys)
+                offset = -min_score + 0.01
+                shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
+                ssum = sum(shifted.values())
+                weights = {t: shifted[t] / ssum for t in shifted}
+        else:
+            if relative_mode:
+                min_score = min(rets[t] for t in rets_keys)
+                offset = -min_score + 0.01 if min_score < 0 else 0.01
+                shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
+                ssum = sum(shifted.values())
+                weights = {t: shifted[t] / ssum for t in shifted}
+            else:
+                positive_scores = {t: rets[t] for t in rets_keys if rets[t] > 0}
+                if positive_scores:
+                    ssum = sum(positive_scores.values())
+                    weights = {t: (positive_scores.get(t, 0.0) / ssum) for t in rets_keys}
+                else:
+                    weights = {t: 0.0 for t in rets_keys}
+
+        # Post-filtering: multiply weights by inverse vol and inverse |beta| when requested
+        if (calc_volatility or calc_beta) and weights:
+            filter_scores = {}
+            for t in weights:
+                score = 1.0
+                if calc_volatility:
+                    v = metrics.get(t, {}).get('Volatility', np.nan)
+                    if not pd.isna(v) and v > 0:
+                        score *= 1.0 / v
+                if calc_beta:
+                    b = metrics.get(t, {}).get('Beta', np.nan)
+                    if not pd.isna(b) and b != 0:
+                        score *= 1.0 / abs(b)
+                filter_scores[t] = score
+
+            filtered = {t: weights.get(t, 0.0) * filter_scores.get(t, 1.0) for t in weights}
+            total_filtered = sum(filtered.values())
+            if total_filtered > 0:
+                weights = {t: filtered[t] / total_filtered for t in filtered}
+
+        return weights, metrics
+    import numpy as np
+    
+    # Get dynamic portfolio data for year-aware ticker selection
+    dynamic_portfolio_data = None
+    special_ticker = None
+    for stock in config['stocks']:
+        if is_special_dynamic_ticker(stock['ticker']):
+            special_ticker = stock['ticker']
+            dynamic_portfolio_data = get_dynamic_portfolio_data(stock['ticker'])
+            break
+    
+    if not dynamic_portfolio_data:
+        # Fallback to regular backtest if no dynamic data
+        return single_backtest(config, sim_index, reindexed_data)
+    
+    # READ CSV AND GET ALL TICKERS TO DOWNLOAD
+    try:
+        df = pd.read_csv('TOP_20_SP500_COMPLETE_TEMPLATE.csv')
+        all_tickers = df['Ticker'].unique().tolist()
+    except:
+        all_tickers = ['XOM', 'IBM', 'GE', 'BMY', 'MRK', 'KO', 'WMT', 'PG', 'VZ', 'JNJ', 'LLY', 'PEP', 'DIS', 'T', 'MMM', 'AIG', 'BA', 'MCD', 'PFE', 'SLB']
+    
+    # CREATE YEAR-TO-TICKERS MAPPING
+    year_tickers_map = {}
+    for year in df['Year'].unique():
+        year_stocks = df[df['Year'] == year].sort_values('Rank').head(20)
+        year_tickers_map[year] = year_stocks['Ticker'].tolist()
+    
+    # CREATE CONFIG WITH ALL TICKERS (so they get downloaded)
+    modified_config = config.copy()
+    modified_config['stocks'] = []
+    
+    # Add all tickers with 0% allocation (they'll be used dynamically during rebalancing)
+    for ticker in all_tickers:
+        modified_config['stocks'].append({
+            'ticker': ticker,
+            'allocation': 0.0  # 0% initially, will be set to 5% during rebalancing
+        })
+    
+    # Add the special ticker with 100% (this triggers the dynamic logic)
+    modified_config['stocks'].append({
+        'ticker': 'SP500TOP20',
+        'allocation': 100.0
+    })
+    
+    # MODIFY THE SINGLE_BACKTEST TO USE YEAR-AWARE REBALANCING
+    # We need to override the rebalancing logic to use year-specific tickers
+    
+    # Get original parameters
+    rebalancing_frequency = config.get('rebalancing_frequency', 'Monthly')
+    use_momentum = config.get('use_momentum', False)
+    momentum_windows = config.get('momentum_windows', [])
+    initial_value = config.get('initial_value', 10000)
+    added_amount = config.get('added_amount', 0)
+    added_frequency = config.get('added_frequency', 'None')
+    
+    # Initialize portfolio values
+    values = {t: [initial_value if t == 'SP500TOP20' else 0] for t in all_tickers + ['SP500TOP20']}
+    unallocated_cash = [0]
+    unreinvested_cash = [0]
+    
+    # Historical tracking
+    historical_allocations = {}
+    historical_metrics = {}
+    
+    # PRE-CALCULATE ADDITION DATES (like normal portfolios)
+    dates_added = set()
+    if added_frequency != "None" and added_amount > 0:
+        for date in sim_index:
+            is_addition_date = False
+            if added_frequency == "Daily":
+                is_addition_date = True
+            elif added_frequency == "Weekly" and date.weekday() == 0:
+                is_addition_date = True
+            elif added_frequency == "Monthly" and date.day == 1:
+                is_addition_date = True
+            elif added_frequency == "Quarterly" and date.month in [1, 4, 7, 10] and date.day == 1:
+                is_addition_date = True
+            elif added_frequency == "Annually" and date.month == 1 and date.day == 1:
+                is_addition_date = True
+            
+            if is_addition_date:
+                dates_added.add(date)
+    
+    # Process each date
+    for i, date in enumerate(sim_index):
+        if i == 0:
+            continue
+            
+        # GET CURRENT YEAR'S TICKERS
+        current_year = date.year
+        if current_year in year_tickers_map:
+            current_year_tickers = year_tickers_map[current_year]
+        else:
+            current_year_tickers = year_tickers_map.get(1989, all_tickers[:20])
+        
+        # FILTER TO ONLY AVAILABLE TICKERS
+        available_tickers = [t for t in current_year_tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)]
+        
+        # CHECK IF WE SHOULD REBALANCE
+        should_rebalance = False
+        if rebalancing_frequency == "Daily":
+            should_rebalance = True
+        elif rebalancing_frequency == "Weekly":
+            should_rebalance = date.weekday() == 0
+        elif rebalancing_frequency == "Monthly":
+            should_rebalance = date.day == 1
+        elif rebalancing_frequency == "Quarterly":
+            should_rebalance = date.month in [1, 4, 7, 10] and date.day == 1
+        elif rebalancing_frequency == "Annually":
+            should_rebalance = date.month == 1 and date.day == 1
+        
+        if should_rebalance and available_tickers:
+            # CALCULATE CURRENT TOTAL VALUE
+            current_total = sum(values[t][-1] for t in all_tickers + ['SP500TOP20'])
+            
+            # ADD PERIODIC CONTRIBUTIONS - Use pre-calculated dates
+            if date in dates_added:
+                current_total += added_amount
+            
+            if use_momentum:
+                # MOMENTUM-BASED REBALANCING - Use the SAME momentum logic as regular backtests
+                # Just pass the dynamic tickers instead of user-entered tickers
+                returns, valid_assets = calculate_momentum(date, set(available_tickers), momentum_windows)
+                if valid_assets:
+                    weights, metrics_on_rebal = calculate_momentum_weights(
+                        returns, valid_assets, date, config.get('momentum_strategy', 'Classic'), 
+                        config.get('negative_momentum_strategy', 'Cash')
+                    )
+                    
+                    # Reset all values
+                    for t in all_tickers + ['SP500TOP20']:
+                        values[t].append(0)
+                    
+                    # Set values based on momentum weights
+                    for t in available_tickers:
+                        if t in weights:
+                            values[t][-1] = current_total * weights[t]
+                        else:
+                            values[t][-1] = 0
+                    
+                    # Update cash
+                    unallocated_cash.append(current_total * weights.get('CASH', 0))
+                    unreinvested_cash.append(0)
+                    
+                    # Store metrics
+                    historical_metrics[date] = metrics_on_rebal
+                else:
+                    # No valid momentum data, use equal weights
+                    equal_weight = current_total / len(available_tickers)
+                    for t in all_tickers + ['SP500TOP20']:
+                        values[t].append(0)
+                    for t in available_tickers:
+                        values[t][-1] = equal_weight
+                    unallocated_cash.append(0)
+                    unreinvested_cash.append(0)
+            else:
+                # EQUAL WEIGHT REBALANCING
+                equal_weight = current_total / len(available_tickers)
+                
+                # Reset all values
+                for t in all_tickers + ['SP500TOP20']:
+                    values[t].append(0)
+                
+                # Set values for current year's tickers
+                for t in available_tickers:
+                    values[t][-1] = equal_weight
+                
+                unallocated_cash.append(0)
+                unreinvested_cash.append(0)
+            
+            # Store allocation snapshot AS PERCENTAGES (like normal backtest)
+            allocation_snapshot = {t: values[t][-1] / current_total for t in available_tickers if values[t][-1] > 0}
+            allocation_snapshot['CASH'] = unallocated_cash[-1] / current_total if current_total > 0 else 0
+            historical_allocations[date] = allocation_snapshot
+        else:
+            # NO REBALANCING - just update values based on price changes
+            for t in all_tickers + ['SP500TOP20']:
+                if t in reindexed_data and not isinstance(reindexed_data[t], str) and t != 'SP500TOP20':
+                    try:
+                        if i < len(reindexed_data[t]):
+                            price_change = reindexed_data[t].iloc[i]['Price_change']
+                            values[t].append(values[t][-1] * (1 + price_change))
+                        else:
+                            values[t].append(values[t][-1])
+                    except:
+                        values[t].append(values[t][-1])
+                else:
+                    values[t].append(values[t][-1])
+            
+            unallocated_cash.append(unallocated_cash[-1])
+            unreinvested_cash.append(unreinvested_cash[-1])
+            
+            # ADD PERIODIC CONTRIBUTIONS (even when not rebalancing) - Use pre-calculated dates
+            if date in dates_added:
+                unallocated_cash[-1] += added_amount
+            
+            # Store current allocation snapshot (even when not rebalancing)
+            current_total = sum(values[t][-1] for t in all_tickers + ['SP500TOP20']) + unallocated_cash[-1] + unreinvested_cash[-1]
+            if current_total > 0:
+                allocation_snapshot = {t: values[t][-1] / current_total for t in all_tickers + ['SP500TOP20'] if values[t][-1] > 0}
+                allocation_snapshot['CASH'] = (unallocated_cash[-1] + unreinvested_cash[-1]) / current_total
+                historical_allocations[date] = allocation_snapshot
+    
+    # CALCULATE TOTAL PORTFOLIO VALUE
+    total_series = pd.Series(0, index=sim_index)
+    total_series_no_additions = pd.Series(0, index=sim_index)
+    
+    for i, date in enumerate(sim_index):
+        total_value = sum(values[t][i] for t in all_tickers + ['SP500TOP20']) + unallocated_cash[i] + unreinvested_cash[i]
+        total_series.iloc[i] = total_value
+        
+        # Calculate without additions - Use pre-calculated dates
+        no_additions_value = total_value
+        if added_frequency != "None" and added_amount > 0:
+            # Count contributions made up to this date (excluding initial investment)
+            contributions_made = sum(1 for j in range(i + 1) if sim_index[j] in dates_added and j > 0)
+            no_additions_value = total_value - (contributions_made * added_amount)
+        
+        total_series_no_additions.iloc[i] = max(no_additions_value, initial_value)
+    
+    # CALCULATE TODAY_WEIGHTS_MAP (like normal backtest)
+    today_weights_map = {}
+    
+    if use_momentum:
+        # MOMENTUM: Calculate what allocation would be TODAY using momentum
+        try:
+            # Get today's date (last date in simulation)
+            today_date = sim_index[-1]
+            
+            # Get current year tickers for today
+            current_year = today_date.year
+            if current_year in year_tickers_map:
+                current_year_tickers = year_tickers_map[current_year]
+                available_tickers = [t for t in current_year_tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)]
+                
+                if available_tickers:
+                    # Calculate momentum for today
+                    returns, valid_assets = calculate_momentum(today_date, set(available_tickers), momentum_windows)
+                    if valid_assets:
+                        weights, _ = calculate_momentum_weights(
+                            returns, valid_assets, today_date, 
+                            config.get('momentum_strategy', 'Classic'), 
+                            config.get('negative_momentum_strategy', 'Cash')
+                        )
+                        
+                        # Apply weights to available tickers
+                        total_weight = sum(weights.values())
+                        if total_weight > 0:
+                            for ticker, weight in weights.items():
+                                today_weights_map[ticker] = weight
+                        
+                        # Add CASH if total < 1.0
+                        current_total = sum(today_weights_map.values())
+                        if current_total < 1.0:
+                            today_weights_map['CASH'] = 1.0 - current_total
+                        else:
+                            today_weights_map['CASH'] = 0.0
+                    else:
+                        # All momentum negative - go to cash
+                        today_weights_map['CASH'] = 1.0
+                else:
+                    # No available tickers - go to cash
+                    today_weights_map['CASH'] = 1.0
+            else:
+                # No data for current year - go to cash
+                today_weights_map['CASH'] = 1.0
+        except Exception as e:
+            # Fallback to equal weight if momentum calculation fails
+            if current_year in year_tickers_map:
+                current_year_tickers = year_tickers_map[current_year]
+                available_tickers = [t for t in current_year_tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)]
+                if available_tickers:
+                    equal_weight = 1.0 / len(available_tickers)
+                    for ticker in available_tickers:
+                        today_weights_map[ticker] = equal_weight
+                    today_weights_map['CASH'] = 0.0
+                else:
+                    today_weights_map['CASH'] = 1.0
+            else:
+                today_weights_map['CASH'] = 1.0
+    else:
+        # EQUAL WEIGHT: Calculate what allocation would be TODAY (5% each)
+        try:
+            # Get current year tickers for today
+            today_date = sim_index[-1]
+            current_year = today_date.year
+            
+            if current_year in year_tickers_map:
+                current_year_tickers = year_tickers_map[current_year]
+                available_tickers = [t for t in current_year_tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)]
+                
+                if available_tickers:
+                    # Equal weight (5% each for 20 stocks = 100%)
+                    equal_weight = 1.0 / len(available_tickers)
+                    for ticker in available_tickers:
+                        today_weights_map[ticker] = equal_weight
+                    today_weights_map['CASH'] = 0.0
+                else:
+                    # No available tickers - go to cash
+                    today_weights_map['CASH'] = 1.0
+            else:
+                # No data for current year - go to cash
+                today_weights_map['CASH'] = 1.0
+        except Exception as e:
+            # Fallback to cash if calculation fails
+            today_weights_map['CASH'] = 1.0
+    
+    return total_series, total_series_no_additions, historical_allocations, historical_metrics, today_weights_map
+
+def calculate_momentum_allocations_dynamic(tickers, reindexed_data, momentum_windows, current_year):
+    """
+    Calculate momentum-based allocations for the given tickers in dynamic portfolio
+    """
+    import pandas as pd
+    import numpy as np
+    
+    st.write(f"🔍 DEBUG: calculate_momentum_allocations_dynamic called with:")
+    st.write(f"🔍 DEBUG: tickers = {tickers} (type: {type(tickers)})")
+    st.write(f"🔍 DEBUG: momentum_windows = {momentum_windows} (type: {type(momentum_windows)})")
+    st.write(f"🔍 DEBUG: current_year = {current_year} (type: {type(current_year)})")
+    
+    # Ensure tickers is a list
+    if not isinstance(tickers, list):
+        tickers = list(tickers) if hasattr(tickers, '__iter__') else []
+        st.write(f"🔍 DEBUG: Converted tickers to list: {tickers}")
+    
+    # Get momentum scores for each ticker
+    momentum_scores = {}
+    
+    for ticker in tickers:
+        if ticker not in reindexed_data:
+            continue
+            
+        ticker_data = reindexed_data[ticker]
+        total_momentum = 0
+        
+        # Ensure momentum_windows is a list
+        if not isinstance(momentum_windows, list):
+            momentum_windows = []
+            
+        for window in momentum_windows:
+            if not isinstance(window, dict) or 'lookback' not in window or 'weight' not in window:
+                continue
+            lookback = window['lookback']
+            weight = window['weight']
+            
+            # Calculate momentum for this window
+            try:
+                # Get data for the lookback period
+                end_date = f"{current_year}-01-01"
+                start_date = pd.to_datetime(end_date) - pd.Timedelta(days=lookback)
+                
+                window_data = ticker_data[
+                    (ticker_data.index >= start_date) & 
+                    (ticker_data.index <= end_date)
+                ]
+                
+                # Ensure window_data is a DataFrame/Series and has more than 1 row
+                if hasattr(window_data, '__len__') and len(window_data) > 1:
+                    momentum = (window_data['Close'].iloc[-1] / window_data['Close'].iloc[0]) - 1
+                    total_momentum += momentum * weight
+            except:
+                continue
+        
+        momentum_scores[ticker] = max(total_momentum, 0)  # Only positive momentum
+    
+    # Convert momentum scores to allocations
+    if momentum_scores:
+        total_momentum = sum(momentum_scores.values())
+        if total_momentum > 0:
+            allocations = {}
+            for ticker, score in momentum_scores.items():
+                allocations[ticker] = (score / total_momentum) * 100
+            return allocations
+    
+    # Fallback to equal weight if momentum calculation fails
+    equal_weight = 100.0 / len(tickers)
+    return {ticker: equal_weight for ticker in tickers}
+
 
 # -----------------------
 # PAGE-SCOPED SESSION STATE INITIALIZATION - MULTI-BACKTEST PAGE
@@ -4900,19 +5945,19 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     
     # Map frequency names to what the get_dates_by_freq function expects (capitalized)
     frequency_mapping = {
-        'monthly': 'month',
-        'weekly': 'week',
-        'bi-weekly': '2weeks',
-        'biweekly': '2weeks',
-        'quarterly': '3months',
-        'semi-annually': '6months',
-        'semiannually': '6months',
-        'annually': 'year',
-        'yearly': 'year',
+        'monthly': 'Monthly',
+        'weekly': 'Weekly',
+        'bi-weekly': 'Biweekly',
+        'biweekly': 'Biweekly',
+        'quarterly': 'Quarterly',
+        'semi-annually': 'Semiannually',
+        'semiannually': 'Semiannually',
+        'annually': 'Annually',
+        'yearly': 'Annually',
         'market_day': 'market_day',
         'calendar_day': 'calendar_day',
-        'never': 'none',
-        'none': 'none'
+        'never': 'Never',
+        'none': 'Never'
     }
     fusion_rebalancing_frequency = frequency_mapping.get(fusion_rebalancing_frequency.lower(), fusion_rebalancing_frequency)
     
@@ -5056,6 +6101,12 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     
     # Calculate fusion portfolio value for each date
     for date_idx, current_date in enumerate(sim_index):
+        # Check for interrupt every 100 iterations
+        if date_idx % 100 == 0:
+            # Check if interrupt was requested
+            if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
+                print("🛑 Hard kill requested - stopping fusion calculation")
+                break
         # Check if this is a fusion rebalancing date
         is_fusion_rebalance = current_date in fusion_rebalancing_dates
         
@@ -5135,6 +6186,12 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     print(f"📊 BUILDING FUSION HISTORICAL DATA:")
     
     for date_idx, current_date in enumerate(sim_index):
+        # Check for interrupt every 100 iterations
+        if date_idx % 100 == 0:
+            # Check if interrupt was requested
+            if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
+                print("🛑 Hard kill requested - stopping historical data building")
+                break
         # Store fusion portfolio allocations (between portfolios)
         fusion_historical_allocations[current_date] = {}
         fusion_historical_metrics[current_date] = {}
@@ -5465,21 +6522,22 @@ def add_stock_callback():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'].append({'ticker': '', 'allocation': 0.0, 'include_dividends': True})
     # Removed rerun flag - no need to refresh entire page for adding a stock
 
-def remove_stock_callback(ticker):
-    """Immediate stock removal callback"""
+def remove_stock_callback(index):
+    """Immediate stock removal callback using index"""
     try:
         active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
         stocks = active_portfolio['stocks']
         
-        # Find and remove the stock with matching ticker
-        for i, stock in enumerate(stocks):
-            if stock['ticker'] == ticker:
-                stocks.pop(i)
-                # If this was the last stock, add an empty one
-                if len(stocks) == 0:
-                    stocks.append({'ticker': '', 'allocation': 0.0, 'include_dividends': True})
-                st.session_state.multi_backtest_rerun_flag = True
-                break
+        # Remove the stock at the specified index
+        if 0 <= index < len(stocks):
+            stocks.pop(index)
+            
+            # If this was the last stock, add an empty one
+            if len(stocks) == 0:
+                stocks.append({'ticker': '', 'allocation': 0.0, 'include_dividends': True})
+            
+            # Always trigger rerun to update the visual display
+            st.session_state.multi_backtest_rerun_flag = True
     except (IndexError, KeyError):
         pass
 
@@ -5857,7 +6915,7 @@ def paste_json_callback():
                 'Semiannually': 'Semiannually',
                 'Annually': 'Annually',
                 # Legacy format mapping
-                'none': 'none',
+                'none': 'Never',
                 'week': 'Weekly',
                 '2weeks': 'Biweekly',
                 'month': 'Monthly',
@@ -6473,9 +7531,21 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
     if "multi_backtest_portfolio_checkboxes" not in st.session_state:
         st.session_state.multi_backtest_portfolio_checkboxes = {}
     
+    # Clean up orphaned checkbox states (remove checkboxes for portfolios that no longer exist)
+    existing_portfolio_names = set(portfolio_names)
+    checkbox_keys_to_remove = []
+    for checkbox_name in st.session_state.multi_backtest_portfolio_checkboxes.keys():
+        if checkbox_name not in existing_portfolio_names:
+            checkbox_keys_to_remove.append(checkbox_name)
+    
+    for key in checkbox_keys_to_remove:
+        del st.session_state.multi_backtest_portfolio_checkboxes[key]
+    
     # Enhanced dropdown with built-in selection controls
     with st.sidebar.expander("📋 Manage Multiple Portfolios", expanded=False):
-        st.caption(f"Total portfolios: {len(portfolio_names)}")
+        # Calculate actual portfolio count (filter out empty names)
+        actual_portfolio_count = len([name for name in portfolio_names if name and name.strip()])
+        st.caption(f"Total portfolios: {actual_portfolio_count}")
         
         # Create checkboxes for each portfolio
         st.markdown("**Select portfolios to delete:**")
@@ -6487,18 +7557,18 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
                         help="Select all portfolios for deletion", use_container_width=True):
                 for name in portfolio_names:
                     st.session_state.multi_backtest_portfolio_checkboxes[name] = True
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
         
         with col2:
             if st.button("❌ Clear All", key="multi_backtest_clear_all_portfolios", 
                         help="Clear all portfolio selections", use_container_width=True):
                 st.session_state.multi_backtest_portfolio_checkboxes = {}
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
         
         with col3:
             if st.button("🔄 Refresh", key="multi_backtest_refresh_selections", 
                         help="Refresh the selection list", use_container_width=True):
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
         
         # Portfolio checkboxes with scrollable container
         st.markdown("---")
@@ -6524,23 +7594,23 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
                 if portfolio_name not in st.session_state.multi_backtest_portfolio_checkboxes:
                     st.session_state.multi_backtest_portfolio_checkboxes[portfolio_name] = False
                 
-                # Create a unique callback function for each portfolio
-                def create_portfolio_callback(portfolio_name):
-                    def callback():
-                        # Toggle the current state
-                        current_state = st.session_state.multi_backtest_portfolio_checkboxes.get(portfolio_name, False)
-                        st.session_state.multi_backtest_portfolio_checkboxes[portfolio_name] = not current_state
-                    return callback
-                
-                # Create checkbox for each portfolio with callback
+                # Create checkbox for each portfolio - use on_change with lambda to capture portfolio_name
                 checkbox_key = f"multi_backtest_portfolio_checkbox_{hash(portfolio_name)}"
+                
+                def create_callback(name):
+                    return lambda: None  # We'll handle the state in the checkbox value directly
+                
+                # Create checkbox with direct value binding (no callback needed)
                 is_checked = st.checkbox(
                     f"🗑️ {portfolio_name}",
                     value=st.session_state.multi_backtest_portfolio_checkboxes[portfolio_name],
                     key=checkbox_key,
-                    help=f"Select {portfolio_name} for deletion",
-                    on_change=create_portfolio_callback(portfolio_name)
+                    help=f"Select {portfolio_name} for deletion"
                 )
+                
+                # Update session state directly based on checkbox value
+                if is_checked != st.session_state.multi_backtest_portfolio_checkboxes[portfolio_name]:
+                    st.session_state.multi_backtest_portfolio_checkboxes[portfolio_name] = is_checked
         
         # Get selected portfolios from checkboxes
         selected_portfolios_for_deletion = [
@@ -6556,8 +7626,11 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
         
         # Show selection summary
         if selected_portfolios_for_deletion:
-            st.info(f"📊 Selected: {len(selected_portfolios_for_deletion)} portfolio(s)")
-            st.caption(f"Selected: {', '.join(selected_portfolios_for_deletion[:3])}{'...' if len(selected_portfolios_for_deletion) > 3 else ''}")
+            st.info(f"📊 Selected: {len(selected_portfolios_for_deletion)} of {actual_portfolio_count} portfolio(s)")
+            if len(selected_portfolios_for_deletion) <= 3:
+                st.caption(f"Selected: {', '.join(selected_portfolios_for_deletion)}")
+            else:
+                st.caption(f"Selected: {', '.join(selected_portfolios_for_deletion[:3])} and {len(selected_portfolios_for_deletion) - 3} more...")
             
             # Bulk delete button with confirmation
             confirm_deletion = st.checkbox(
@@ -6657,7 +7730,6 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                     )
                     
                     if selected_portfolios:
-                        
                         # Simple allocation inputs
                         st.markdown("**Allocations (%)**")
                         allocations = {}
@@ -6705,12 +7777,21 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             name_parts = []
                             for portfolio_name, percentage in sorted_allocs:
                                 if percentage > 0:  # Only include non-zero allocations
-                                    name_parts.append(f"{portfolio_name} {percentage:.0f}%")
+                                    # Handle both decimal (0.0-1.0) and percentage (0-100) formats
+                                    if percentage <= 1.0:
+                                        # Already in decimal format
+                                        name_parts.append(f"{portfolio_name} {percentage*100:.0f}%")
+                                    else:
+                                        # Already in percentage format
+                                        name_parts.append(f"{portfolio_name} {percentage:.0f}%")
                             
                             if name_parts:
                                 return f"Fusion Portfolio {' '.join(name_parts)} ({rebalancing_freq})"
                             else:
                                 return f"Fusion {len(existing_fusion_portfolios) + 1} ({rebalancing_freq})"
+                        
+                        # Portfolio name will be generated after frequency selection
+                        
                         
                         # Fusion portfolio has its own independent rebalancing frequency
                         # This ensures momentum portfolios don't override fusion frequency
@@ -6740,33 +7821,6 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             key="fusion_name_input"
                         )
                         
-                        # Fusion-specific date selection
-                        st.subheader("📅 Fusion Portfolio Date Range")
-                        fusion_use_custom_dates = st.checkbox(
-                            "Use custom date range for this fusion",
-                            key="fusion_use_custom_dates",
-                            help="Enable to set custom start and end dates specifically for this fusion portfolio"
-                        )
-                        
-                        if fusion_use_custom_dates:
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                fusion_start_date = st.date_input(
-                                    "Fusion Start Date",
-                                    value=datetime(2020, 1, 1),
-                                    key="fusion_start_date"
-                                )
-                            with col2:
-                                fusion_end_date = st.date_input(
-                                    "Fusion End Date",
-                                    value=datetime.now(),
-                                    key="fusion_end_date"
-                                )
-                        else:
-                            # Use main sidebar dates
-                            fusion_start_date = st.session_state.get("multi_backtest_start_date", datetime(2020, 1, 1))
-                            fusion_end_date = st.session_state.get("multi_backtest_end_date", datetime.now())
-                        
                         # Information about independent rebalancing
                         st.info(f"""
                         **Independent Rebalancing System:**
@@ -6775,10 +7829,6 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                         - This allows maximum flexibility for different strategies
                         - **Fusion frequency is completely independent** of individual portfolio frequencies
                         """)
-                        
-                        # Clear fusion selections when creating new fusion
-                        if "fusion_portfolios_select" in st.session_state:
-                            del st.session_state["fusion_portfolios_select"]
                         
                         # Create button
                         if st.button("🔗 Create Fusion", type="primary"):
@@ -6796,8 +7846,6 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                                 'added_frequency': first_portfolio.get('added_frequency', 'Monthly'),
                                 'rebalancing_frequency': fusion_rebalancing_frequency,  # Use fusion's own independent frequency
                                 'benchmark_ticker': first_portfolio.get('benchmark_ticker', '^GSPC'),
-                                'start_date': fusion_start_date,
-                                'end_date': fusion_end_date,
                                 'fusion_portfolio': {
                                     'enabled': True,
                                     'selected_portfolios': selected_portfolios,
@@ -6807,7 +7855,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             
                             st.session_state.multi_backtest_portfolio_configs.append(new_fusion_portfolio)
                             st.success(f"✅ Created: {fusion_name}")
-                            st.session_state.multi_backtest_rerun_flag = True
+                            st.rerun()
                 
                 elif fusion_action.startswith("Edit:"):
                     # Edit existing fusion portfolio
@@ -6908,7 +7956,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             # Update fusion frequency to maintain independence
                             fusion_portfolio['rebalancing_frequency'] = fusion_rebalancing_frequency
                             st.success(f"✅ Updated: {fusion_name}")
-                            st.session_state.multi_backtest_rerun_flag = True
+                            st.rerun()
                 
                 elif fusion_action.startswith("Delete:"):
                     # Delete existing fusion portfolio
@@ -6924,7 +7972,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                     if st.button("🗑️ Delete Fusion", type="primary"):
                         st.session_state.multi_backtest_portfolio_configs.remove(fusion_portfolio)
                         st.success(f"✅ Deleted: {fusion_name}")
-                        st.session_state.multi_backtest_rerun_flag = True
+                        st.rerun()
             else:
                 st.info("Create at least 2 regular portfolios to use fusion feature")
 
@@ -7081,14 +8129,14 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             if st.button("📌 Pin Expanded", key=f"pin_expanded_{portfolio_index}", type="primary"):
                 active_portfolio['variant_expander_expanded'] = True
                 st.success("✅ Expander state PINNED for this portfolio!")
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
     
     with col_unpin:
         if current_state:
             if st.button("🔓 Unpin", key=f"unpin_expanded_{portfolio_index}", type="secondary"):
                 active_portfolio['variant_expander_expanded'] = False
                 st.success("🔓 Expander state UNPINNED for this portfolio!")
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
 
     st.markdown("**Select parameters to vary and customize their values:**")
     
@@ -7665,7 +8713,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio removed.")
                     st.info(f"📊 Total portfolios: {len(st.session_state.multi_backtest_portfolio_configs)}")
                 
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
     else:
         st.warning("⚠️ Select at least one parameter to vary")
 
@@ -7909,7 +8957,7 @@ for i in range(len(active_portfolio['stocks'])):
         
     with col_b:
         st.write("")
-        if st.button("Remove", key=f"multi_backtest_rem_stock_{st.session_state.multi_backtest_active_portfolio_index}_{i}_{stock['ticker']}_{id(stock)}", on_click=remove_stock_callback, args=(stock['ticker'],)):
+        if st.button("Remove", key=f"multi_backtest_rem_stock_{st.session_state.multi_backtest_active_portfolio_index}_{i}", on_click=remove_stock_callback, args=(i,)):
             pass
 
 if st.button("Add Ticker", on_click=add_stock_callback):
@@ -8026,11 +9074,13 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     with col4:
         st.markdown("**🔬 Synthetic Tickers**")
         synthetic_tickers = {
-            # Ordered by asset class: Bonds → Gold → Managed Futures → Bitcoin
+            # Ordered by asset class: Stocks → Bonds → Gold → Managed Futures → Bitcoin
+            'Complete S&P 500 Simulation (1885+)': 'SPYSIM_COMPLETE',
             'Complete TBILL Dataset (1948+)': 'TBILL_COMPLETE',
             'Complete IEF Dataset (1962+)': 'IEF_COMPLETE',
             'Complete TLT Dataset (1962+)': 'TLT_COMPLETE',
             'Complete ZROZ Dataset (1962+)': 'ZROZ_COMPLETE',
+            'Complete Gold Simulation (1968+)': 'GOLDSIM_COMPLETE',
             'Complete Gold Dataset (1975+)': 'GOLD_COMPLETE',
             'Complete KMLM Dataset (1992+)': 'KMLM_COMPLETE',
             'Complete DBMF Dataset (2000+)': 'DBMF_COMPLETE',
@@ -8054,33 +9104,24 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `SPX` → `^GSPC` (S&P 500 Price, 1927+), `SPXTR` → `^SP500TR` (S&P 500 Total Return, 1988+)")
     st.markdown("- `SPYTR` → `^SP500TR` (S&P 500 Total Return, 1988+), `QQQTR` → `^NDX` (NASDAQ 100, 1985+)")
     st.markdown("- `TLTETF` → `TLT` (20+ Year Treasury ETF, 2002+), `IEFETF` → `IEF` (7-10 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZROZX` → `ZROZ` (25+ Year Zero Coupon Treasury, 2009+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2020+)")
+    st.markdown("- `TLTTR` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `IEFTR` → `IEF_COMPLETE` (Complete IEF Dataset, 1962+)")
+    st.markdown("- `ZROZX` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2020+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLD50` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `ZROZ50` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `TLT50` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `BTC50` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
+    st.markdown("- `ZEROX` → `ZERO` (Cash doing nothing), `SPYSIM` → `SPYSIM_COMPLETE` (Complete S&P 500 Simulation, 1885+), `TBILL` → `TBILL_COMPLETE` (Complete TBILL Dataset, 1948+), `IEFTR` → `IEF_COMPLETE` (Complete IEF Dataset, 1962+), `TLTTR` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `ZROZX` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `GOLDSIM` → `GOLDSIM_COMPLETE` (Complete Gold Simulation, 1968+), `GOLDX` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `KMLMX` → `KMLM_COMPLETE` (Complete KMLM Dataset, 1992+), `DBMFX` → `DBMF_COMPLETE` (Complete DBMF Dataset, 2000+), `BITCOINX` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+)")
 
-with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
+with st.expander("⚡ Leverage Guide", expanded=False):
     st.markdown("""
     **Leverage Format:** Use `TICKER?L=N` where N is the leverage multiplier
-    **Expense Ratio Format:** Use `TICKER?E=N` where N is the annual expense ratio percentage
     
     **Examples:**
     - **SPY?L=2** - 2x leveraged S&P 500
-    - **QQQ?L=3?E=0.84** - 3x leveraged NASDAQ-100 with 0.84% expense ratio (like TQQQ)
-    - **QQQ?E=1** - QQQ with 1% expense ratio
-    - **TLT?L=2?E=0.5** - 2x leveraged 20+ Year Treasury with 0.5% expense ratio
-    - **SPY?E=2?L=3** - Order doesn't matter: 3x leveraged S&P 500 with 2% expense ratio
-    - **QQQ?E=5** - QQQ with 5% expense ratio (high fee for testing)
-    
-    **Parameter Combinations:**
-    - **QQQ?L=3?E=0.84** - Simulates TQQQ (3x QQQ with 0.84% expense ratio)
-    - **SPY?L=2?E=0.95** - Simulates SSO (2x SPY with 0.95% expense ratio)
-    - **QQQ?E=0.2** - Simulates QQQ with 0.2% expense ratio
+    - **QQQ?L=3** - 3x leveraged NASDAQ-100  
+    - **TLT?L=2** - 2x leveraged 20+ Year Treasury
     
     **Important Notes:**
     - **Daily Reset:** Leverage resets daily (like real leveraged ETFs)
     - **Cost Drag:** Includes daily cost drag = (leverage - 1) × risk-free rate
-    - **Expense Drag:** Daily expense ratio drag = annual_expense_ratio / 365.25
     - **Volatility Decay:** High volatility can cause significant decay over time
     - **Risk Warning:** Leveraged products are high-risk and can lose value quickly
     
@@ -8100,9 +9141,9 @@ with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
 # Leverage Summary Section
 leveraged_tickers = []
 for stock in active_portfolio['stocks']:
-    if "?L=" in stock['ticker']:
+    if "?L=" in stock['ticker'] or "?E=" in stock['ticker']:
         try:
-            base_ticker, leverage = parse_leverage_ticker(stock['ticker'])
+            base_ticker, leverage, expense_ratio = parse_ticker_parameters(stock['ticker'])
             leveraged_tickers.append((base_ticker, leverage))
         except:
             pass
@@ -8203,7 +9244,7 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
                 # Force immediate rerun
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
             else:
                 st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
         else:
@@ -8747,9 +9788,6 @@ def clear_all_outputs():
     st.session_state.multi_all_results = None
     st.session_state.multi_all_allocations = None
     st.session_state.multi_all_metrics = None
-    # Clear sorted states
-    st.session_state.multi_backtest_final_stats_sorted_df = None
-    st.session_state.multi_backtest_focused_analysis_sorted_df = None
     st.session_state.multi_backtest_all_drawdowns = None
     st.session_state.multi_backtest_stats_df_display = None
     st.session_state.multi_backtest_all_years = None
@@ -8772,16 +9810,33 @@ if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_containe
     clear_all_outputs()
     st.rerun()
 
+# Cancel Run Button
+if st.sidebar.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
+    st.session_state.hard_kill_requested = True
+    st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
+    st.rerun()
+
+# Emergency Stop Button (Second Option)
+if st.sidebar.button("🛑 EMERGENCY STOP", type="secondary", use_container_width=True, help="Stop backtest gracefully - Use when backtest is running normally"):
+    st.toast("🛑 **EMERGENCY STOP** - Stopping backtest gracefully...", icon="⏹️")
+    st.session_state.hard_kill_requested = True
+    st.rerun()
+
+# Emergency Kill Button (Last Resort)
+if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
+    st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
+    emergency_kill()
+
 # Move Run Backtest to the left sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
-    # Reset kill flag when starting new run
+    # Reset kill request when starting new backtest
     st.session_state.hard_kill_requested = False
     
     # Pre-backtest validation check for all portfolios
     configs_to_run = st.session_state.multi_backtest_portfolio_configs
     valid_configs = True
     validation_errors = []
-
+    
     for cfg in configs_to_run:
         # Check if this is a fusion portfolio
         is_fusion = 'fusion_portfolio' in cfg and cfg['fusion_portfolio'].get('enabled', False)
@@ -8833,6 +9888,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         progress_bar = st.empty()
         progress_bar.progress(0, text="Initializing multi-portfolio backtest...")
         
+        # Emergency stop button will be added during actual backtest execution
+        
         # Check for kill request
         check_kill_request()
         
@@ -8843,8 +9900,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         # CRITICAL FIX: Add base tickers for leveraged tickers to ensure dividend data is available
         base_tickers_to_add = set()
         for ticker in all_tickers:
-            if "?L=" in ticker:
-                base_ticker, leverage = parse_leverage_ticker(ticker)
+            if "?L=" in ticker or "?E=" in ticker:
+                base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker)
                 base_tickers_to_add.add(base_ticker)
 
         # Add base tickers to the list if they're not already there
@@ -8865,13 +9922,33 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         with contextlib.redirect_stdout(buffer):
             data = {}
             invalid_tickers = []
-            for i, t in enumerate(all_tickers):
+            
+            # Handle special dynamic tickers - expand them to individual tickers
+            special_tickers = [t for t in all_tickers if is_special_dynamic_ticker(t)]
+            individual_tickers_to_download = set()
+            
+            for special_ticker in special_tickers:
+                dynamic_data = get_dynamic_portfolio_data(special_ticker)
+                if dynamic_data:
+                    individual_tickers_to_download.update(dynamic_data['tickers'])
+            
+            # Combine regular tickers with individual tickers from special tickers
+            all_tickers_to_download = set(all_tickers) | individual_tickers_to_download
+            # Remove special tickers from download list (we'll handle them separately)
+            all_tickers_to_download = [t for t in all_tickers_to_download if not is_special_dynamic_ticker(t)]
+            
+            total_downloads = len(all_tickers_to_download) + len(special_tickers)
+            download_count = 0
+            
+            # Download individual tickers
+            for i, t in enumerate(all_tickers_to_download):
                 # Check for kill request during data download
                 check_kill_request()
                 
                 try:
-                    progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
-                    progress_bar.progress((i + 1) / (len(all_tickers) + 1), text=progress_text)
+                    download_count += 1
+                    progress_text = f"Downloading data for {t} ({download_count}/{total_downloads})..."
+                    progress_bar.progress(download_count / total_downloads, text=progress_text)
                     hist = get_ticker_data(t, period="max", auto_adjust=False)
                     if hist.empty:
                         invalid_tickers.append(t)
@@ -8885,14 +9962,22 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     data[t] = hist
                 except Exception as e:
                     invalid_tickers.append(t)
+            
+            # Add special tickers to data with placeholder (they'll be handled in backtest)
+            for special_ticker in special_tickers:
+                download_count += 1
+                progress_text = f"Processing special ticker {special_ticker} ({download_count}/{total_downloads})..."
+                progress_bar.progress(download_count / total_downloads, text=progress_text)
+                data[special_ticker] = "special_dynamic_ticker"
             # Display invalid ticker warnings in Streamlit UI
             if invalid_tickers:
                 # Separate portfolio tickers from benchmark tickers
                 portfolio_tickers = set(s['ticker'] for cfg in st.session_state.multi_backtest_portfolio_configs for s in cfg['stocks'] if s['ticker'])
                 benchmark_tickers = set(cfg.get('benchmark_ticker') for cfg in st.session_state.multi_backtest_portfolio_configs if 'benchmark_ticker' in cfg)
                 
-                portfolio_invalid = [t for t in invalid_tickers if t in portfolio_tickers]
-                benchmark_invalid = [t for t in invalid_tickers if t in benchmark_tickers]
+                # Filter out special tickers from invalid list since they don't need data download
+                portfolio_invalid = [t for t in invalid_tickers if t in portfolio_tickers and not is_special_dynamic_ticker(t)]
+                benchmark_invalid = [t for t in invalid_tickers if t in benchmark_tickers and not is_special_dynamic_ticker(t)]
                 
                 if portfolio_invalid:
                     st.warning(f"The following portfolio tickers are invalid and will be skipped: {', '.join(portfolio_invalid)}")
@@ -8900,9 +9985,14 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     st.warning(f"The following benchmark tickers are invalid and will be skipped: {', '.join(benchmark_invalid)}")
             
             # BULLETPROOF VALIDATION: Check for valid tickers and stop gracefully if none
-            if not data:
-                if invalid_tickers and len(invalid_tickers) == len(all_tickers):
-                    st.error(f"❌ **No valid tickers found!** All tickers are invalid: {', '.join(invalid_tickers)}. Please check your ticker symbols and try again.")
+            # But don't count special tickers as invalid
+            special_tickers_in_portfolio = [t for t in all_tickers if is_special_dynamic_ticker(t)]
+            regular_tickers = [t for t in all_tickers if not is_special_dynamic_ticker(t)]
+            valid_regular_tickers = [t for t in regular_tickers if t in data]
+            
+            if not data and not special_tickers_in_portfolio:
+                if invalid_tickers and len(invalid_tickers) == len(regular_tickers):
+                    st.error(f"❌ **No valid tickers found!** All regular tickers are invalid: {', '.join(invalid_tickers)}. Please check your ticker symbols and try again.")
                 else:
                     st.error("❌ **No valid tickers found!** No data downloaded; aborting.")
                 progress_bar.empty()
@@ -8913,9 +10003,16 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             else:
                 # Persist raw downloaded price data so later recomputations can access benchmark series
                 st.session_state.multi_backtest_raw_data = data
-                # Determine common date range for all portfolios
-                common_start = max(df.first_valid_index() for df in data.values())
-                common_end = min(df.last_valid_index() for df in data.values())
+                # Determine common date range for all portfolios (filter out special ticker placeholders)
+                valid_data_frames = [df for df in data.values() if not isinstance(df, str)]
+                if valid_data_frames:
+                    common_start = max(df.first_valid_index() for df in valid_data_frames)
+                    common_end = min(df.last_valid_index() for df in valid_data_frames)
+                else:
+                    # Fallback if no valid data frames (e.g., only special tickers)
+                    # Use a reasonable default date range for special tickers
+                    common_start = pd.Timestamp('1989-01-01')  # Start of S&P 500 data
+                    common_end = pd.Timestamp.now()
                 
                 # Get all portfolio tickers (excluding benchmarks)
                 all_portfolio_tickers = set()
@@ -8940,7 +10037,13 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 
                 global_start_with = st.session_state.get('multi_backtest_start_with', 'all')
                 if global_start_with == 'all':
-                    final_start = max(data[t].first_valid_index() for t in valid_portfolio_tickers)
+                    # Filter out special ticker placeholders when calculating start date
+                    valid_ticker_data = [data[t] for t in valid_portfolio_tickers if not isinstance(data[t], str)]
+                    if valid_ticker_data:
+                        final_start = max(df.first_valid_index() for df in valid_ticker_data)
+                    else:
+                        # Fallback for special tickers only - use a reasonable start date
+                        final_start = pd.Timestamp('1989-01-01')
                 else:  # global_start_with == 'oldest'
                     # For 'oldest', we need to find the portfolio that starts the LATEST
                     # (has the most recent earliest asset), then use that portfolio's earliest asset
@@ -8949,17 +10052,24 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                         portfolio_tickers = [stock['ticker'] for stock in cfg.get('stocks', []) if stock['ticker']]
                         valid_portfolio_tickers_for_cfg = [t for t in portfolio_tickers if t in data]
                         if valid_portfolio_tickers_for_cfg:
-                            # Find the earliest asset in this portfolio
-                            portfolio_earliest = min(data[t].first_valid_index() for t in valid_portfolio_tickers_for_cfg)
-                            portfolio_earliest_dates[cfg['name']] = portfolio_earliest
+                            # Find the earliest asset in this portfolio (filter out special ticker placeholders)
+                            valid_ticker_data_for_cfg = [data[t] for t in valid_portfolio_tickers_for_cfg if not isinstance(data[t], str)]
+                            if valid_ticker_data_for_cfg:
+                                portfolio_earliest = min(df.first_valid_index() for df in valid_ticker_data_for_cfg)
+                                portfolio_earliest_dates[cfg['name']] = portfolio_earliest
                     
                     if portfolio_earliest_dates:
                         # Find the portfolio with the LATEST earliest asset
                         latest_starting_portfolio = max(portfolio_earliest_dates.items(), key=lambda x: x[1])
                         final_start = latest_starting_portfolio[1]
                     else:
-                        # Fallback to original logic
-                        final_start = min(data[t].first_valid_index() for t in valid_portfolio_tickers)
+                        # Fallback to original logic (filter out special ticker placeholders)
+                        valid_ticker_data = [data[t] for t in valid_portfolio_tickers if not isinstance(data[t], str)]
+                        if valid_ticker_data:
+                            final_start = min(df.first_valid_index() for df in valid_ticker_data)
+                        else:
+                            # Fallback for special tickers only - use a reasonable start date
+                            final_start = pd.Timestamp('1989-01-01')
                 
                 # Apply user date constraints if any
                 for cfg in st.session_state.multi_backtest_portfolio_configs:
@@ -8977,23 +10087,30 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Create simulation index for the entire period
                 simulation_index = pd.date_range(start=final_start, end=common_end, freq='D')
                 
-                # Reindex all data to the simulation period (only valid tickers)
+                # Reindex all data to the simulation period (all tickers that have data)
                 data_reindexed = {}
-                for t in all_tickers:
+                # Process ALL tickers in data, not just all_tickers (to include individual tickers from special tickers)
+                for t in data.keys():
                     if t in data:  # Only process tickers that have data
-                        df = data[t].reindex(simulation_index)
-                        df["Close"] = df["Close"].ffill()
-                        df["Dividends"] = df["Dividends"].fillna(0)
-                        df["Price_change"] = df["Close"].pct_change(fill_method=None).fillna(0)
-                        data_reindexed[t] = df
+                        ticker_data = data[t]
+                        # Skip special ticker placeholders (they'll be handled in special backtest functions)
+                        if isinstance(ticker_data, str):
+                            data_reindexed[t] = ticker_data  # Keep as string for special handling
+                        else:
+                            # Regular ticker data - reindex it
+                            df = ticker_data.reindex(simulation_index)
+                            df["Close"] = df["Close"].ffill()
+                            df["Dividends"] = df["Dividends"].fillna(0)
+                            df["Price_change"] = df["Close"].pct_change(fill_method=None).fillna(0)
+                            data_reindexed[t] = df
+                
                 
                 progress_bar.progress(1.0, text="Executing multi-portfolio backtest analysis...")
                 
-                # Check for kill request before main execution
-                check_kill_request()
+                # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO CACHE VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -9006,58 +10123,44 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                # Create temporary status containers that will be cleared at the end
-                status_container = st.empty()
-                status_container.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with FUSION PRIORITY SYSTEM...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (CACHED)...**")
                 
-                # =============================================================================
-                # FUSION PRIORITY SYSTEM - Fusion portfolios ALWAYS run last
-                # =============================================================================
+                # Start timing for performance measurement
+                import time as time_module
+                start_time = time_module.time()
                 
-                # Step 1: Separate individual and fusion portfolios
-                individual_portfolios = []
+                # Separate regular and fusion portfolios for two-phase processing
+                regular_portfolios = []
                 fusion_portfolios = []
                 
-                for i, cfg in enumerate(st.session_state.multi_backtest_portfolio_configs):
+                for i, cfg in enumerate(st.session_state.multi_backtest_portfolio_configs, start=1):
                     if 'fusion_portfolio' in cfg and cfg['fusion_portfolio'].get('enabled', False):
                         fusion_portfolios.append((i, cfg))
                     else:
-                        individual_portfolios.append((i, cfg))
+                        regular_portfolios.append((i, cfg))
                 
-                st.info(f"📊 **Portfolio Separation:** {len(individual_portfolios)} individual, {len(fusion_portfolios)} fusion")
-                
-                # Step 2: Process individual portfolios FIRST
-                if individual_portfolios:
-                    status_container.info(f"🚀 **Phase 1: Processing {len(individual_portfolios)} individual portfolios...**")
-                    
-                    # Check for kill request before processing portfolios
-                    check_kill_request()
-                    
-                    # Start timing
-                    start_time = time_module.time()
-                    
-                    for i, (original_index, cfg) in enumerate(individual_portfolios, start=1):
-                        # Check for kill request during portfolio processing
-                        check_kill_request()
+                # Process portfolios in parallel for maximum speed
+                def process_single_regular_portfolio(args):
+                    """Process a single regular portfolio - designed for parallel execution"""
+                    i, cfg = args
+                    try:
+                        # Suppress Streamlit warnings in threads
+                        import warnings
+                        import logging
+                        warnings.filterwarnings('ignore', message='.*ScriptRunContext.*')
+                        logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
                         
-                        try:
-                            # Update progress for individual portfolios
-                            progress_percent = i / len(individual_portfolios)
-                            progress_bar.progress(progress_percent, text=f"Phase 1 - Individual: {i}/{len(individual_portfolios)}: {cfg.get('name', f'Portfolio {i}')}")
-                            
-                            name = cfg.get('name', f'Portfolio {i}')
-                            
-                            # Ensure unique key for storage
-                            base_name = name
-                            unique_name = base_name
-                            suffix = 1
-                            while unique_name in all_results or unique_name in all_allocations:
-                                unique_name = f"{base_name} ({suffix})"
-                                suffix += 1
-                            
-                            # Run single backtest for this individual portfolio
+                        name = cfg.get('name', f'Portfolio {i}')
+                        
+                        # Check if this portfolio contains a special dynamic ticker
+                        has_special_ticker = any(is_special_dynamic_ticker(stock['ticker']) for stock in cfg['stocks'])
+                        
+                        if has_special_ticker:
+                            # Use year-aware backtest for dynamic tickers
+                            total_series, total_series_no_additions, historical_allocations, historical_metrics, today_weights_map = single_backtest_year_aware(cfg, simulation_index, data_reindexed)
+                        else:
+                            # Regular backtest for normal tickers
                             total_series, total_series_no_additions, historical_allocations, historical_metrics = single_backtest(cfg, simulation_index, data_reindexed)
-                            
                             # Compute today_weights_map for regular portfolios
                             today_weights_map = {}
                             try:
@@ -9103,7 +10206,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                             norm['CASH'] = final_alloc.get('CASH', 0)
                                         else:
                                             norm = final_alloc
-                                        today_weights_map = norm
+                                            today_weights_map = norm
                             except Exception as e:
                                 # If computation fails, use user-defined allocations as fallback
                                 today_weights_map = {}
@@ -9117,223 +10220,334 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     today_weights_map['CASH'] = 1.0 - total_alloc
                                 else:
                                     today_weights_map['CASH'] = 0
+                        
+                        if total_series is not None and len(total_series) > 0:
+                            # Prepare results for this portfolio
+                            result = {
+                                'index': i-1,  # 0-based index for mapping
+                                'name': name,
+                            'success': True,
+                                'no_additions': total_series_no_additions,
+                                'with_additions': total_series,
+                                'today_weights_map': today_weights_map,
+                            'historical_allocations': historical_allocations,
+                                'historical_metrics': historical_metrics
+                            }
                             
-                            if total_series is not None and len(total_series) > 0:
-                                
-                                # Store results in simplified format
-                                all_results[unique_name] = {
-                                    'no_additions': total_series_no_additions,
-                                    'with_additions': total_series,
-                                    'today_weights_map': today_weights_map
-                                }
-                                
-                                # Add current_alloc and current_weights_map for fusion portfolios
-                                if 'fusion_portfolio' in cfg and cfg['fusion_portfolio'].get('enabled', False):
-                                    all_results[unique_name]['current_alloc'] = current_alloc
-                                    all_results[unique_name]['current_weights_map'] = current_weights_map
-                                all_allocations[unique_name] = historical_allocations
-                                all_metrics[unique_name] = historical_metrics
-                                
-                                # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
-                                # Track cash flows as pandas Series indexed by date
-                                cash_flows = pd.Series(0.0, index=total_series.index)
-                                # Initial investment: negative cash flow on first date
-                                if len(total_series.index) > 0:
-                                    cash_flows.iloc[0] = -cfg.get('initial_value', 0)
-                                # Periodic additions: negative cash flow on their respective dates
-                                dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
-                                for d in dates_added:
-                                    if d in cash_flows.index and d != cash_flows.index[0]:
-                                        cash_flows.loc[d] -= cfg.get('added_amount', 0)
-                                # Final value: positive cash flow on last date for MWRR
-                                if len(total_series.index) > 0:
-                                    cash_flows.iloc[-1] += total_series.iloc[-1]
-                                
-                                # Store cash flows and portfolio values for MWRR calculation after all portfolios are processed
-                                all_results[unique_name]['cash_flows'] = cash_flows
-                                all_results[unique_name]['portfolio_values'] = total_series
-                                
-                                # Remember mapping from portfolio index (0-based) to unique key
-                                portfolio_key_map[i-1] = unique_name
-                                
-                                successful_portfolios += 1
-                                
-                                # Memory cleanup every 20 portfolios
-                                if successful_portfolios % 20 == 0:
-                                    import gc
-                                    gc.collect()
-                                    
-                            else:
-                                failed_portfolios.append((name, "Empty results from backtest"))
-                                st.warning(f"⚠️ Portfolio {name} failed: Empty results from backtest")
-                                
-                        except Exception as e:
-                            failed_portfolios.append((cfg.get('name', f'Portfolio {i}'), str(e)))
-                            st.warning(f"⚠️ Portfolio {cfg.get('name', f'Portfolio {i}')} failed: {str(e)}")
-                            continue
+                            # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
+                            # Track cash flows as pandas Series indexed by date
+                            cash_flows = pd.Series(0.0, index=total_series.index)
+                            # Initial investment: negative cash flow on first date
+                            if len(total_series.index) > 0:
+                                cash_flows.iloc[0] = -cfg.get('initial_value', 0)
+                            # Periodic additions: negative cash flow on their respective dates
+                            dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
+                            for d in dates_added:
+                                if d in cash_flows.index and d != cash_flows.index[0]:
+                                    cash_flows.loc[d] -= cfg.get('added_amount', 0)
+                            # Final value: positive cash flow on last date for MWRR
+                            if len(total_series.index) > 0:
+                                cash_flows.iloc[-1] += total_series.iloc[-1]
+                            
+                            # Store cash flows and portfolio values for MWRR calculation
+                            result['cash_flows'] = cash_flows
+                            result['portfolio_values'] = total_series
+                            
+                            return result
+                        else:
+                            return {
+                                'index': i-1,
+                                'name': name,
+                                'success': False,
+                                'error': "Empty results from backtest"
+                            }
+                            
+                    except Exception as e:
+                        return {
+                            'index': i-1,
+                            'name': cfg.get('name', f'Portfolio {i}'),
+                            'success': False,
+                            'error': str(e)
+                        }
                 
-                # Show Phase 1 performance summary
-                if individual_portfolios:
-                    end_time = time_module.time()
-                    phase1_time = end_time - start_time
-                    avg_time_per_portfolio = phase1_time / len(individual_portfolios) if len(individual_portfolios) > 0 else 0
-                    st.info(f"⏱️ **Phase 1 Performance:** Total time: {phase1_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s")
+                def process_single_fusion_portfolio(args):
+                    """Process a single fusion portfolio - runs after regular portfolios are complete"""
+                    i, cfg, all_configs = args
+                    try:
+                        name = cfg.get('name', f'Portfolio {i}')
+                        
+                        # Debug: Check if all_configs is available
+                        if not all_configs:
+                            return {
+                                'index': i-1,
+                                'name': name,
+                                'success': False,
+                                'error': "No portfolio configs available for fusion portfolio"
+                            }
+                        
+                        # Run fusion portfolio backtest - pass the entire fusion portfolio config
+                        total_series, total_series_no_additions, historical_allocations, historical_metrics, today_weights_map, current_alloc, current_weights_map = fusion_portfolio_backtest(
+                            cfg, all_configs, simulation_index, data_reindexed
+                        )
+                        
+                        if total_series is not None and len(total_series) > 0:
+                            # Prepare results for this portfolio
+                            result = {
+                                'index': i-1,  # 0-based index for mapping
+                                'name': name,
+                            'success': True,
+                                'no_additions': total_series_no_additions,
+                                'with_additions': total_series,
+                                'today_weights_map': today_weights_map,
+                            'historical_allocations': historical_allocations,
+                            'historical_metrics': historical_metrics,
+                                'current_alloc': current_alloc,
+                                'current_weights_map': current_weights_map
+                            }
+                            
+                            # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
+                            # Track cash flows as pandas Series indexed by date
+                            cash_flows = pd.Series(0.0, index=total_series.index)
+                            # Initial investment: negative cash flow on first date
+                            if len(total_series.index) > 0:
+                                cash_flows.iloc[0] = -cfg.get('initial_value', 0)
+                            # Periodic additions: negative cash flow on their respective dates
+                            dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
+                            for d in dates_added:
+                                if d in cash_flows.index and d != cash_flows.index[0]:
+                                    cash_flows.loc[d] -= cfg.get('added_amount', 0)
+                            # Final value: positive cash flow on last date for MWRR
+                            if len(total_series.index) > 0:
+                                cash_flows.iloc[-1] += total_series.iloc[-1]
+                            
+                            # Store cash flows and portfolio values for MWRR calculation
+                            result['cash_flows'] = cash_flows
+                            result['portfolio_values'] = total_series
+                            
+                            return result
+                        else:
+                            return {
+                                'index': i-1,
+                                'name': name,
+                                'success': False,
+                                'error': "Empty results from fusion backtest"
+                            }
+                            
+                    except Exception as e:
+                        return {
+                            'index': i-1,
+                            'name': cfg.get('name', f'Portfolio {i}'),
+                            'success': False,
+                            'error': str(e)
+                        }
                 
-                # Step 3: Process fusion portfolios LAST (after all individual portfolios are done)
-                if fusion_portfolios:
-                    status_container.info(f"🚀 **Phase 2: Processing {len(fusion_portfolios)} fusion portfolios...**")
-                    
-                    # Check for kill request before processing fusion portfolios
+                # Determine number of workers (optimized for threading)
+                import os
+                # Use fewer workers to minimize Streamlit threading overhead
+                max_workers = min(2, os.cpu_count() or 2)  # Max 2 workers for stability
+                
+                # Enable parallel processing for 3+ portfolios (threading can help with I/O bound tasks)
+                total_portfolios = len(regular_portfolios) + len(fusion_portfolios)
+                if total_portfolios < 3:
+                    # Sequential for small datasets - threading overhead not worth it
+                    st.session_state.use_parallel_processing = False
+                elif total_portfolios > 15:
+                    # Limit workers for very large datasets
+                    max_workers = 1
+                
+                # PHASE 1: Process regular portfolios first
+                if regular_portfolios:
+                    # Check for kill request before Phase 1
                     check_kill_request()
                     
-                    # Step 3a: Resolve fusion dependencies (fusion-of-fusion support)
-                    def resolve_fusion_dependencies(fusion_list):
-                        """Resolve dependencies between fusion portfolios"""
-                        resolved = []
-                        remaining = fusion_list.copy()
-                        
-                        while remaining:
-                            # Find fusion portfolios that can be processed (all dependencies are resolved)
-                            ready_to_process = []
-                            for i, (original_index, cfg) in enumerate(remaining):
-                                fusion_config = cfg.get('fusion_portfolio', {})
-                                selected_portfolios = fusion_config.get('selected_portfolios', [])
+                    processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and len(regular_portfolios) > 1 else "sequential"
+                    worker_info = f" using {max_workers} workers" if processing_mode == "parallel" else ""
+                    st.info(f"🚀 **Phase 1: Processing {len(regular_portfolios)} regular portfolios in {processing_mode} mode{worker_info}...**")
+                    
+                    if st.session_state.get('use_parallel_processing', True) and len(regular_portfolios) > 1:
+                        # Process regular portfolios in parallel using optimized threading
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            # Submit all regular portfolio tasks
+                            future_to_index = {executor.submit(process_single_regular_portfolio, args): args[0] for args in regular_portfolios}
+                            
+                            # Collect results as they complete
+                            completed_count = 0
+                            for future in concurrent.futures.as_completed(future_to_index):
+                                completed_count += 1
+                                progress_percent = completed_count / len(regular_portfolios)
+                                progress_bar.progress(progress_percent, text=f"Phase 1: Completed {completed_count}/{len(regular_portfolios)} regular portfolios...")
                                 
-                                # Check if all selected portfolios are already processed
-                                all_dependencies_ready = True
-                                for dep_name in selected_portfolios:
-                                    # Check if dependency is in resolved individual portfolios
-                                    dep_found = False
-                                    for _, resolved_cfg in resolved:
-                                        if resolved_cfg.get('name') == dep_name:
-                                            dep_found = True
-                                            break
-                                    # Check if dependency is in already processed fusion portfolios
-                                    if not dep_found:
-                                        for _, resolved_cfg in resolved:
-                                            if resolved_cfg.get('name') == dep_name:
-                                                dep_found = True
-                                                break
-                                    # Check if dependency is in individual portfolios
-                                    if not dep_found:
-                                        for _, ind_cfg in individual_portfolios:
-                                            if ind_cfg.get('name') == dep_name:
-                                                dep_found = True
-                                                break
+                                result = future.result()
+                                
+                                if result['success']:
+                                    # Ensure unique key for storage
+                                    base_name = result['name']
+                                    unique_name = base_name
+                                    suffix = 1
+                                    while unique_name in all_results or unique_name in all_allocations:
+                                        unique_name = f"{base_name} ({suffix})"
+                                        suffix += 1
                                     
-                                    if not dep_found:
-                                        all_dependencies_ready = False
-                                        break
+                                    # Store results
+                                    all_results[unique_name] = {
+                                        'no_additions': result['no_additions'],
+                                        'with_additions': result['with_additions'],
+                                        'today_weights_map': result['today_weights_map'],
+                                        'cash_flows': result['cash_flows'],
+                                        'portfolio_values': result['portfolio_values']
+                                    }
+                                    
+                                    all_allocations[unique_name] = result['historical_allocations']
+                                    all_metrics[unique_name] = result['historical_metrics']
+                                    portfolio_key_map[result['index']] = unique_name
+                                    successful_portfolios += 1
+                                else:
+                                    failed_portfolios.append((result['name'], result['error']))
+                                    st.warning(f"⚠️ Regular Portfolio {result['name']} failed: {result['error']}")
+                    else:
+                        # Process regular portfolios sequentially
+                        for i, args in enumerate(regular_portfolios, start=1):
+                            # Check for kill request during sequential processing
+                            check_kill_request()
+                            
+                            progress_percent = i / len(regular_portfolios)
+                            progress_bar.progress(progress_percent, text=f"Phase 1: Processing regular portfolio {i}/{len(regular_portfolios)}: {args[1].get('name', f'Portfolio {i}')}")
+                            
+                            result = process_single_regular_portfolio(args)
+                            
+                            if result['success']:
+                                # Ensure unique key for storage
+                                base_name = result['name']
+                                unique_name = base_name
+                                suffix = 1
+                                while unique_name in all_results or unique_name in all_allocations:
+                                    unique_name = f"{base_name} ({suffix})"
+                                    suffix += 1
                                 
-                                if all_dependencies_ready:
-                                    ready_to_process.append((original_index, cfg))
-                            
-                            if not ready_to_process:
-                                # If no fusion portfolios can be processed, there's a circular dependency
-                                st.error("❌ **Circular dependency detected in fusion portfolios!** Cannot resolve dependencies.")
-                                break
-                            
-                            # Process ready fusion portfolios and remove them from remaining
-                            for original_index, cfg in ready_to_process:
-                                resolved.append((original_index, cfg))
-                                # Remove from remaining list by finding the matching item
-                                remaining = [(orig_idx, cfg_item) for orig_idx, cfg_item in remaining 
-                                          if not (orig_idx == original_index and cfg_item == cfg)]
-                        
-                        return resolved
-                    
-                    # Resolve fusion dependencies
-                    resolved_fusion_portfolios = resolve_fusion_dependencies(fusion_portfolios)
-                    
-                    for i, (original_index, cfg) in enumerate(resolved_fusion_portfolios, start=1):
-                        # Check for kill request during fusion portfolio processing
-                        check_kill_request()
-                        
-                        try:
-                            # Update progress for fusion portfolios
-                            progress_percent = i / len(resolved_fusion_portfolios)
-                            progress_bar.progress(progress_percent, text=f"Phase 2 - Fusion: {i}/{len(resolved_fusion_portfolios)}: {cfg.get('name', f'Portfolio {i}')}")
-                            
-                            name = cfg.get('name', f'Portfolio {i}')
-                            
-                            # Ensure unique key for storage
-                            base_name = name
-                            unique_name = base_name
-                            suffix = 1
-                            while unique_name in all_results or unique_name in all_allocations:
-                                unique_name = f"{base_name} ({suffix})"
-                                suffix += 1
-                            
-                            # Run fusion portfolio backtest - pass the entire fusion portfolio config
-                            total_series, total_series_no_additions, historical_allocations, historical_metrics, today_weights_map, current_alloc, current_weights_map = fusion_portfolio_backtest(
-                                cfg, st.session_state.multi_backtest_portfolio_configs, simulation_index, data_reindexed
-                            )
-                            
-                            if total_series is not None and len(total_series) > 0:
-                                # Store results in simplified format
+                                # Store results
                                 all_results[unique_name] = {
-                                    'no_additions': total_series_no_additions,
-                                    'with_additions': total_series,
-                                    'today_weights_map': today_weights_map,
-                                    'current_alloc': current_alloc,
-                                    'current_weights_map': current_weights_map
+                                    'no_additions': result['no_additions'],
+                                    'with_additions': result['with_additions'],
+                                    'today_weights_map': result['today_weights_map'],
+                                    'cash_flows': result['cash_flows'],
+                                    'portfolio_values': result['portfolio_values']
                                 }
-                                all_allocations[unique_name] = historical_allocations
-                                all_metrics[unique_name] = historical_metrics
                                 
-                                # --- CASH FLOW LOGIC FOR MWRR (stored for later calculation) ---
-                                # Track cash flows as pandas Series indexed by date
-                                cash_flows = pd.Series(0.0, index=total_series.index)
-                                # Initial investment: negative cash flow on first date
-                                if len(total_series.index) > 0:
-                                    cash_flows.iloc[0] = -cfg.get('initial_value', 0)
-                                # Periodic additions: negative cash flow on their respective dates
-                                dates_added = get_dates_by_freq(cfg.get('added_frequency'), total_series.index[0], total_series.index[-1], total_series.index)
-                                for d in dates_added:
-                                    if d in cash_flows.index and d != cash_flows.index[0]:
-                                        cash_flows.loc[d] -= cfg.get('added_amount', 0)
-                                # Final value: positive cash flow on last date for MWRR
-                                if len(total_series.index) > 0:
-                                    cash_flows.iloc[-1] += total_series.iloc[-1]
-                                
-                                # Store cash flows and portfolio values for MWRR calculation after all portfolios are processed
-                                all_results[unique_name]['cash_flows'] = cash_flows
-                                all_results[unique_name]['portfolio_values'] = total_series
-                                
-                                # Remember mapping from portfolio index (0-based) to unique key
-                                portfolio_key_map[original_index] = unique_name
-                                
+                                all_allocations[unique_name] = result['historical_allocations']
+                                all_metrics[unique_name] = result['historical_metrics']
+                                portfolio_key_map[result['index']] = unique_name
                                 successful_portfolios += 1
-                                
-                                # Memory cleanup every 20 portfolios
-                                if successful_portfolios % 20 == 0:
-                                    import gc
-                                    gc.collect()
-                                    
                             else:
-                                failed_portfolios.append((name, "Empty results from fusion backtest"))
-                                st.warning(f"⚠️ Fusion Portfolio {name} failed: Empty results from fusion backtest")
+                                failed_portfolios.append((result['name'], result['error']))
+                                st.warning(f"⚠️ Regular Portfolio {result['name']} failed: {result['error']}")
+                
+                # PHASE 2: Process fusion portfolios after regular portfolios are complete
+                if fusion_portfolios:
+                    # Check for kill request before Phase 2
+                    check_kill_request()
+                    
+                    processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and len(fusion_portfolios) > 1 else "sequential"
+                    worker_info = f" using {max_workers} workers" if processing_mode == "parallel" else ""
+                    st.info(f"🚀 **Phase 2: Processing {len(fusion_portfolios)} fusion portfolios in {processing_mode} mode{worker_info} (depends on regular portfolios)...**")
+                    
+                    if st.session_state.get('use_parallel_processing', True) and len(fusion_portfolios) > 1:
+                        # Process fusion portfolios in parallel using optimized threading
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            # Submit all fusion portfolio tasks - pass all configs for fusion dependencies
+                            fusion_args = [(i, cfg, st.session_state.multi_backtest_portfolio_configs) for i, cfg in fusion_portfolios]
+                            future_to_index = {executor.submit(process_single_fusion_portfolio, args): args[0] for args in fusion_args}
+                            
+                            # Collect results as they complete
+                            completed_count = 0
+                            for future in concurrent.futures.as_completed(future_to_index):
+                                completed_count += 1
+                                progress_percent = completed_count / len(fusion_portfolios)
+                                progress_bar.progress(progress_percent, text=f"Phase 2: Completed {completed_count}/{len(fusion_portfolios)} fusion portfolios...")
                                 
-                        except Exception as e:
-                            failed_portfolios.append((cfg.get('name', f'Portfolio {i}'), str(e)))
-                            st.warning(f"⚠️ Fusion Portfolio {cfg.get('name', f'Portfolio {i}')} failed: {str(e)}")
-                            continue
+                                result = future.result()
+                                
+                                if result['success']:
+                                    # Ensure unique key for storage
+                                    base_name = result['name']
+                                    unique_name = base_name
+                                    suffix = 1
+                                    while unique_name in all_results or unique_name in all_allocations:
+                                        unique_name = f"{base_name} ({suffix})"
+                                        suffix += 1
+                                    
+                                    # Store results
+                                    all_results[unique_name] = {
+                                        'no_additions': result['no_additions'],
+                                        'with_additions': result['with_additions'],
+                                        'today_weights_map': result['today_weights_map'],
+                                        'cash_flows': result['cash_flows'],
+                                        'portfolio_values': result['portfolio_values'],
+                                        'current_alloc': result['current_alloc'],
+                                        'current_weights_map': result['current_weights_map']
+                                    }
+                                    
+                                    all_allocations[unique_name] = result['historical_allocations']
+                                    all_metrics[unique_name] = result['historical_metrics']
+                                    portfolio_key_map[result['index']] = unique_name
+                                    successful_portfolios += 1
+                                else:
+                                    failed_portfolios.append((result['name'], result['error']))
+                                    st.warning(f"⚠️ Fusion Portfolio {result['name']} failed: {result['error']}")
+                    else:
+                        # Process fusion portfolios sequentially
+                        for i, args in enumerate(fusion_portfolios, start=1):
+                            # Check for kill request during sequential processing
+                            check_kill_request()
+                            
+                            progress_percent = i / len(fusion_portfolios)
+                            progress_bar.progress(progress_percent, text=f"Phase 2: Processing fusion portfolio {i}/{len(fusion_portfolios)}: {args[1].get('name', f'Portfolio {i}')}")
+                            
+                            # Add all configs for fusion dependencies
+                            fusion_args = (args[0], args[1], st.session_state.multi_backtest_portfolio_configs)
+                            result = process_single_fusion_portfolio(fusion_args)
+                            
+                            if result['success']:
+                                # Ensure unique key for storage
+                                base_name = result['name']
+                                unique_name = base_name
+                                suffix = 1
+                                while unique_name in all_results or unique_name in all_allocations:
+                                    unique_name = f"{base_name} ({suffix})"
+                                    suffix += 1
+                                
+                                # Store results
+                                all_results[unique_name] = {
+                                    'no_additions': result['no_additions'],
+                                    'with_additions': result['with_additions'],
+                                    'today_weights_map': result['today_weights_map'],
+                                    'cash_flows': result['cash_flows'],
+                                    'portfolio_values': result['portfolio_values'],
+                                    'current_alloc': result['current_alloc'],
+                                    'current_weights_map': result['current_weights_map']
+                                }
+                                
+                                all_allocations[unique_name] = result['historical_allocations']
+                                all_metrics[unique_name] = result['historical_metrics']
+                                portfolio_key_map[result['index']] = unique_name
+                            successful_portfolios += 1
+                        else:
+                                failed_portfolios.append((result['name'], result['error']))
+                                st.warning(f"⚠️ Fusion Portfolio {result['name']} failed: {result['error']}")
                 
                 # Final progress update
                 progress_bar.progress(1.0, text="Portfolio processing completed!")
                 
-                # Clear temporary status messages
-                status_container.empty()
+                # Calculate and display performance metrics
+                end_time = time_module.time()
+                total_time = end_time - start_time
+                avg_time_per_portfolio = total_time / len(st.session_state.multi_backtest_portfolio_configs) if st.session_state.multi_backtest_portfolio_configs else 0
                 
-                # Show results summary with performance timing
+                # Show results summary with performance info
                 if successful_portfolios > 0:
-                    # Calculate total processing time
-                    total_end_time = time_module.time()
-                    total_time = total_end_time - start_time
-                    avg_time_per_portfolio = total_time / successful_portfolios if successful_portfolios > 0 else 0
-                    
-                    st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios!**")
-                    st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s")
+                    processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and total_portfolios > 1 else "sequential"
+                    phase_info = f" (Phase 1: {len(regular_portfolios)} regular, Phase 2: {len(fusion_portfolios)} fusion)" if fusion_portfolios else f" ({len(regular_portfolios)} regular portfolios only)"
+                    st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios in {processing_mode} mode{phase_info}!**")
+                    st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
                     if failed_portfolios:
                         st.warning(f"⚠️ **{len(failed_portfolios)} portfolios failed** - check warnings above for details")
                 else:
@@ -9343,6 +10557,10 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Memory cleanup
                 import gc
                 gc.collect()
+                
+                # Final kill check before completion
+                check_kill_request()
+                
             progress_bar.empty()
             
             # --- CALCULATE MWRR FOR ALL PORTFOLIOS AFTER LOOP COMPLETES ---
@@ -9559,7 +10777,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     'Ticker': tk,
                                     'Allocation %': round(alloc_pct * 100, 2),
                                     'Price ($)': round(price, 2) if price is not None else float('nan'),
-                                    'Shares': float(round(shares, 2)) if shares is not None else 0.0,
+                                    'Shares': round(shares, 2),
                                     'Total Value ($)': round(total_val, 2),
                                     '% of Portfolio': round(pct_of_port, 2),
                                 })
@@ -9627,19 +10845,19 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     
                     # Map frequency names to what the function expects
                     frequency_mapping = {
-                        'monthly': 'month',
-                        'weekly': 'week',
-                        'bi-weekly': '2weeks',
-                        'biweekly': '2weeks',
-                        'quarterly': '3months',
-                        'semi-annually': '6months',
-                        'semiannually': '6months',
-                        'annually': 'year',
-                        'yearly': 'year',
+                        'monthly': 'Monthly',
+                        'weekly': 'Weekly',
+                        'bi-weekly': 'Biweekly',
+                        'biweekly': 'Biweekly',
+                        'quarterly': 'Quarterly',
+                        'semi-annually': 'Semiannually',
+                        'semiannually': 'Semiannually',
+                        'annually': 'Annually',
+                        'yearly': 'Annually',
                         'market_day': 'market_day',
                         'calendar_day': 'calendar_day',
-                        'never': 'none',
-                        'none': 'none'
+                        'never': 'Never',
+                        'none': 'Never'
                     }
                     rebal_freq = frequency_mapping.get(rebal_freq, rebal_freq)
                     
@@ -9653,10 +10871,55 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                         if last_rebal_date and hasattr(last_rebal_date, 'tzinfo') and last_rebal_date.tzinfo is not None:
                             last_rebal_date = last_rebal_date.replace(tzinfo=None)
                         
-                        # Calculate next rebalance for this portfolio (works even with None last_rebal_date)
-                        next_date_port, time_until_port, next_rebalance_datetime_port = calculate_next_rebalance_date(
-                            rebal_freq, last_rebal_date
-                        )
+                        # Calculate next rebalance for this portfolio using the actual last rebalance date
+                        # This matches the "Last Rebalance Allocation" date shown in the UI
+                        if last_rebal_date:
+                            # Calculate the next rebalance date from the last rebalance date
+                            if rebal_freq == 'market_day':
+                                next_date_port = last_rebal_date.date() + timedelta(days=1)
+                            elif rebal_freq == 'calendar_day':
+                                next_date_port = last_rebal_date.date() + timedelta(days=1)
+                            elif rebal_freq == 'week':
+                                next_date_port = last_rebal_date.date() + timedelta(weeks=1)
+                            elif rebal_freq == '2weeks':
+                                next_date_port = last_rebal_date.date() + timedelta(weeks=2)
+                            elif rebal_freq == 'month':
+                                # Add one month
+                                if last_rebal_date.date().month == 12:
+                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=1)
+                                else:
+                                    next_date_port = last_rebal_date.date().replace(month=last_rebal_date.date().month + 1)
+                            elif rebal_freq == 'quarter':
+                                # Add 3 months
+                                new_month = last_rebal_date.date().month + 3
+                                if new_month > 12:
+                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=new_month - 12)
+                                else:
+                                    next_date_port = last_rebal_date.date().replace(month=new_month)
+                            elif rebal_freq == 'semi':
+                                # Add 6 months
+                                new_month = last_rebal_date.date().month + 6
+                                if new_month > 12:
+                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=new_month - 12)
+                                else:
+                                    next_date_port = last_rebal_date.date().replace(month=new_month)
+                            elif rebal_freq == 'year':
+                                next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1)
+                            else:
+                                next_date_port = None
+                            
+                            if next_date_port:
+                                # Calculate time until next rebalance from the last rebalance date
+                                time_diff = next_date_port - last_rebal_date.date()
+                                time_until_port = time_diff.total_seconds() / (24 * 3600)  # Convert to days
+                                next_rebalance_datetime_port = datetime.combine(next_date_port, datetime.min.time())
+                            else:
+                                time_until_port = None
+                                next_rebalance_datetime_port = None
+                        else:
+                            next_date_port = None
+                            time_until_port = None
+                            next_rebalance_datetime_port = None
                         
                         
                         if next_date_port and time_until_port:
@@ -9666,41 +10929,48 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                 ['Target Rebalance Date', next_date_port.strftime("%B %d, %Y")],
                                 ['Rebalancing Frequency', rebal_freq.replace('_', ' ').title()]
                             ]
-                            
-                            # Create timer table figure for this portfolio
-                            fig_timer_port = go.Figure(data=[go.Table(
-                                header=dict(
-                                    values=['Parameter', 'Value'],
-                                    fill_color='#2E86AB',
-                                    align='center',
-                                    font=dict(color='white', size=16, family='Arial Black')
-                                ),
-                                cells=dict(
-                                    values=[[row[0] for row in timer_data_port], [row[1] for row in timer_data_port]],
-                                    fill_color=[['#F8F9FA', '#FFFFFF'] * 2, ['#F8F9FA', '#FFFFFF'] * 2],
-                                    align='center',
-                                    font=dict(color='black', size=14, family='Arial'),
-                                    height=40
-                                )
-                            )])
-                            
-                            fig_timer_port.update_layout(
-                                title=dict(
-                                    text=f"⏰ Next Rebalance Timer - {portfolio_name}",
-                                    x=0.5,
-                                    font=dict(size=18, color='#2E86AB', family='Arial Black')
-                                ),
-                                width=700,
-                                height=250,
-                                margin=dict(l=20, r=20, t=60, b=20)
-                            )
-                            
-                            # Store in session state for PDF export
-                            st.session_state[f'timer_table_{portfolio_name}'] = fig_timer_port
                         else:
-                            pass
+                            # Fallback timer data when calculation fails
+                            timer_data_port = [
+                                ['Last Rebalance Date', last_rebal_date.strftime("%B %d, %Y") if last_rebal_date else "Unknown"],
+                                ['Rebalancing Frequency', rebal_freq.replace('_', ' ').title()],
+                                ['Status', 'Timer calculation unavailable']
+                            ]
+                        
+                        # Create timer table figure for this portfolio
+                        fig_timer_port = go.Figure(data=[go.Table(
+                            header=dict(
+                                values=['Parameter', 'Value'],
+                                fill_color='#2E86AB',
+                                align='center',
+                                font=dict(color='white', size=16, family='Arial Black')
+                            ),
+                            cells=dict(
+                                values=[[row[0] for row in timer_data_port], [row[1] for row in timer_data_port]],
+                                fill_color=[['#F8F9FA', '#FFFFFF'] * 2, ['#F8F9FA', '#FFFFFF'] * 2],
+                                align='center',
+                                font=dict(color='black', size=14, family='Arial'),
+                                height=40
+                            )
+                        )])
+                        
+                        fig_timer_port.update_layout(
+                            title=dict(
+                                text=f"⏰ Next Rebalance Timer - {portfolio_name}",
+                                x=0.5,
+                                font=dict(size=18, color='#2E86AB', family='Arial Black')
+                            ),
+                            width=700,
+                            height=250,
+                            margin=dict(l=20, r=20, t=60, b=20)
+                        )
+                        
+                        # Store in session state for PDF export
+                        st.session_state[f'timer_table_{portfolio_name}'] = fig_timer_port
                     else:
                         pass
+                else:
+                    pass
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -9713,24 +10983,52 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             st.session_state.multi_all_allocations = all_allocations
             st.session_state.multi_all_metrics = all_metrics
             # Clear any previous sorting when new results are calculated
-            st.session_state.multi_backtest_final_stats_sorted_df = None
+            st.session_state.final_stats_sorted_df = None
             # Save portfolio index -> unique key mapping so UI selectors can reference results reliably
             st.session_state.multi_backtest_portfolio_key_map = portfolio_key_map
             st.session_state.multi_backtest_ran = True
             
-            # Final kill check before completion
-            check_kill_request()
-
-# Cancel Run button underneath with same dimensions
-if st.sidebar.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
-    st.session_state.hard_kill_requested = True
-    st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
-    st.rerun()
-
-# Emergency kill button (always visible)
-if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", use_container_width=True, help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
-    st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
-    emergency_kill()
+            # OPTIMIZATION: Pre-compute and cache allocation evolution charts for all portfolios
+            st.info("🔄 Pre-computing charts for instant portfolio selection...")
+            progress_bar = st.progress(0)
+            
+            # Get all available portfolio names for pre-computation
+            available_portfolio_names = [cfg.get('name', 'Portfolio') for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])]
+            extra_names = [n for n in st.session_state.get('multi_all_results', {}).keys() if n not in available_portfolio_names]
+            all_portfolio_names = available_portfolio_names + extra_names
+            total_portfolios = len(all_portfolio_names)
+            
+            for i, portfolio_name in enumerate(all_portfolio_names):
+                if portfolio_name in all_allocations:
+                    try:
+                        # Get allocation data for this portfolio
+                        allocs_data = all_allocations[portfolio_name]
+                        
+                        # Check if this is a fusion portfolio and filter out fusion portfolio allocation data
+                        portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
+                        portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
+                        is_fusion = portfolio_cfg and portfolio_cfg.get('fusion_portfolio', {}).get('enabled', False)
+                        
+                        if is_fusion:
+                            # Remove fusion portfolio allocation data from individual stock allocations
+                            filtered_allocs_data = {}
+                            for date, alloc_dict in allocs_data.items():
+                                filtered_alloc_dict = {k: v for k, v in alloc_dict.items() if k != '_FUSION_PORTFOLIOS_'}
+                                filtered_allocs_data[date] = filtered_alloc_dict
+                            allocs_data = filtered_allocs_data
+                        
+                        if allocs_data:
+                            # Use cached function to create chart
+                            fig_evolution = create_allocation_evolution_chart(portfolio_name, allocs_data)
+                            if fig_evolution:
+                                st.session_state[f'multi_allocation_evolution_chart_{portfolio_name}'] = fig_evolution
+                    except Exception as e:
+                        st.warning(f"Could not pre-compute chart for {portfolio_name}: {str(e)}")
+                
+                progress_bar.progress((i + 1) / total_portfolios)
+            
+            progress_bar.empty()
+            st.success("✅ Charts pre-computed! Portfolio selection is now instantaneous.")
 
 # Sidebar JSON export/import for ALL portfolios
 def paste_all_json_callback():
@@ -9900,7 +11198,7 @@ def paste_all_json_callback():
                         'Semiannually': 'Semiannually',
                         'Annually': 'Annually',
                         # Legacy format mapping
-                        'none': 'none',
+                        'none': 'Never',
                         'week': 'Weekly',
                         '2weeks': 'Biweekly',
                         'month': 'Monthly',
@@ -10352,6 +11650,28 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 # Fallback to regular Close column
                 vix_close = vix_data['Close'].dropna()
             
+            # Add flat line before VIX data starts (like interest rates do)
+            if len(vix_close) > 0:
+                first_vix_date = vix_close.index[0]
+                first_vix_value = vix_close.iloc[0]
+                
+                # If VIX data starts after our backtest period, add flat line
+                if first_vix_date > pd.Timestamp(first_date):
+                    # Create flat line from start to first VIX date
+                    flat_dates = pd.date_range(start=first_date, end=first_vix_date, freq='D')
+                    fig_vix.add_trace(go.Scatter(
+                        x=flat_dates, 
+                        y=[first_vix_value] * len(flat_dates), 
+                        mode='lines', 
+                        name='VIX Index (Pre-Data)', 
+                        line=dict(color='red', dash='dash'),
+                        hovertemplate='<b>VIX Index (Pre-Data)</b><br>' +
+                                     'Date: %{x}<br>' +
+                                     'VIX: %{y:.2f}<br>' +
+                                     '<extra></extra>'
+                    ))
+            
+            # Add actual VIX data
             fig_vix.add_trace(go.Scatter(
                 x=vix_close.index, 
                 y=vix_close.values, 
@@ -10412,7 +11732,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         # Store in session state for PDF export
         st.session_state.fig_vix = fig_vix
 
-        # Multi-Portfolio PE Ratio Comparison
+        # Third plot: Multi-Portfolio PE Ratio Comparison
         if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
             st.markdown("---")
             st.markdown("**📊 Multi-Portfolio PE Ratio Comparison**")
@@ -10550,13 +11870,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     
                     # Display chart
                     st.plotly_chart(st.session_state.fig_pe_multi, use_container_width=True)
+                    
                 else:
                     st.warning("No PE ratio data available for any portfolios.")
                     
             except Exception as e:
                 st.error(f"Error creating multi-portfolio PE ratio chart: {str(e)}")
 
-        # Third plot: Daily Risk-Free Rate (13-Week Treasury)
+        # Fourth plot: Daily Risk-Free Rate (13-Week Treasury)
         fig3 = go.Figure()
         try:
             # Get risk-free rate data for the same date range
@@ -11120,7 +12441,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 'Beta': 'Portfolio volatility relative to benchmark. <1 less volatile, >1 more volatile than market.',
                 'MWRR': 'Money-Weighted Rate of Return. Accounts for timing and size of cash flows.',
                 'Final Portfolio Value': 'Final value including all contributions and investment returns.',
-                'Final Value (No Contributions)': 'Final value excluding additional contributions (only initial investment).',
+                'Final Value (No Contributions)': 'Final Value (No Contributions) - What $10,000 would grow to over the selected period using CAGR',
                 'Total Money Added': 'Total amount of money contributed (initial + periodic additions).'
             }
             
@@ -11170,7 +12491,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             safe_fmt_map[col] = fmt
             
             # Use sorted dataframe if available, otherwise use original
-            sorted_df = st.session_state.get('multi_backtest_final_stats_sorted_df', None)
+            sorted_df = st.session_state.get('final_stats_sorted_df', None)
             display_df = sorted_df if sorted_df is not None else stats_df_clean
             
             # Add tooltips to the dataframe
@@ -11200,35 +12521,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             with col1:
                 sort_column = st.selectbox(
                     "Sort by:",
-                    options=display_df.columns.tolist(),
+                    options=stats_df_clean.columns.tolist(),
                     index=0,
-                    key="no_cache_final_stats_sort_column",
+                    key="final_stats_sort_column",
                     help="Select a column to sort the table numerically"
                 )
-            # Initialize session state variables
-            if 'multi_backtest_final_stats_sorted_df' not in st.session_state:
-                st.session_state.multi_backtest_final_stats_sorted_df = None
-            if 'multi_backtest_final_stats_sort_ascending' not in st.session_state:
-                st.session_state.multi_backtest_final_stats_sort_ascending = None
-            
-            # Check for button clicks and update session state
-            sort_clicked = False
             with col2:
-                if st.button("⬇️ Sort ↓", key="no_cache_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
-                    st.session_state.multi_backtest_final_stats_sort_ascending = False
-                    sort_clicked = True
+                if st.button("⬇️ Sort ↓", key="final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                    sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=False)
+                    st.session_state.final_stats_sorted_df = sorted_df
+                    st.rerun()
             with col3:
-                if st.button("⬆️ Sort ↑", key="no_cache_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
-                    st.session_state.multi_backtest_final_stats_sort_ascending = True
-                    sort_clicked = True
-            
-            # Sort and store if a button was clicked
-            if sort_clicked:
-                ascending = st.session_state.multi_backtest_final_stats_sort_ascending
-                # Always use the current display_df (which is the most up-to-date data)
-                sorted_df = sort_dataframe_numerically(display_df, sort_column, ascending=ascending)
-                st.session_state.multi_backtest_final_stats_sorted_df = sorted_df
-                st.session_state.multi_backtest_rerun_flag = True
+                if st.button("⬆️ Sort ↑", key="final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                    sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=True)
+                    st.session_state.final_stats_sorted_df = sorted_df
+                    st.rerun()
             
             # Display the dataframe with multiple fallback options
             try:
@@ -11240,7 +12547,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     # Last resort: convert all values to strings
                     stats_df_strings = stats_df_clean.astype(str)
                     st.dataframe(stats_df_strings, use_container_width=True)
-
             
             # Store the statistics table as a Plotly figure for PDF export
             try:
@@ -11314,23 +12620,22 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             except Exception as e:
                 pass
 
-
         # Focused Performance Analysis with Date Range
-        # Initialize session state variables first (using page-specific keys)
-        if 'multi_backtest_focused_analysis_results' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_results = None
-        if 'multi_backtest_focused_analysis_show_essential' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_show_essential = False
-        if 'multi_backtest_focused_analysis_period' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_period = None
-        if 'multi_backtest_focused_analysis_start_date' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_start_date = None
-        if 'multi_backtest_focused_analysis_end_date' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_end_date = None
-        if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
-            st.session_state.multi_backtest_focused_analysis_sorted_df = None
-        if 'multi_backtest_final_stats_sorted_df' not in st.session_state:
-            st.session_state.multi_backtest_final_stats_sorted_df = None
+        # Initialize session state variables first
+        if 'focused_analysis_results' not in st.session_state:
+            st.session_state.focused_analysis_results = None
+        if 'focused_analysis_show_essential' not in st.session_state:
+            st.session_state.focused_analysis_show_essential = False
+        if 'focused_analysis_period' not in st.session_state:
+            st.session_state.focused_analysis_period = None
+        if 'focused_analysis_start_date' not in st.session_state:
+            st.session_state.focused_analysis_start_date = None
+        if 'focused_analysis_end_date' not in st.session_state:
+            st.session_state.focused_analysis_end_date = None
+        if 'focused_analysis_sorted_df' not in st.session_state:
+            st.session_state.focused_analysis_sorted_df = None
+        if 'final_stats_sorted_df' not in st.session_state:
+            st.session_state.final_stats_sorted_df = None
         
         # Date range controls
         col_date1, col_date2, col_metrics = st.columns([1, 1, 1])
@@ -11364,23 +12669,23 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             current_max_date = max_date if max_date else datetime.date.today()
             
             # Update session state if the available date range has changed
-            if 'multi_backtest_focused_analysis_available_min_date' not in st.session_state:
-                st.session_state.multi_backtest_focused_analysis_available_min_date = current_min_date
-                st.session_state.multi_backtest_focused_analysis_available_max_date = current_max_date
-            elif (st.session_state.multi_backtest_focused_analysis_available_min_date != current_min_date or 
-                  st.session_state.multi_backtest_focused_analysis_available_max_date != current_max_date):
+            if 'focused_analysis_available_min_date' not in st.session_state:
+                st.session_state.focused_analysis_available_min_date = current_min_date
+                st.session_state.focused_analysis_available_max_date = current_max_date
+            elif (st.session_state.focused_analysis_available_min_date != current_min_date or 
+                  st.session_state.focused_analysis_available_max_date != current_max_date):
                 # Date range has changed, update session state and reset selected dates
-                st.session_state.multi_backtest_focused_analysis_available_min_date = current_min_date
-                st.session_state.multi_backtest_focused_analysis_available_max_date = current_max_date
-                st.session_state.multi_backtest_focused_analysis_start_date = current_min_date
-                st.session_state.multi_backtest_focused_analysis_end_date = current_max_date
+                st.session_state.focused_analysis_available_min_date = current_min_date
+                st.session_state.focused_analysis_available_max_date = current_max_date
+                st.session_state.focused_analysis_start_date = current_min_date
+                st.session_state.focused_analysis_end_date = current_max_date
             
             # Initialize start date in session state with fallback and validation
-            if st.session_state.multi_backtest_focused_analysis_start_date is None:
-                st.session_state.multi_backtest_focused_analysis_start_date = current_min_date
+            if st.session_state.focused_analysis_start_date is None:
+                st.session_state.focused_analysis_start_date = current_min_date
             
             # Ensure the start date is valid and within bounds
-            start_date_value = st.session_state.multi_backtest_focused_analysis_start_date
+            start_date_value = st.session_state.focused_analysis_start_date
             if start_date_value is None:
                 start_date_value = current_min_date
             else:
@@ -11409,16 +12714,16 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             )
             
             # Store the selected start date in session state
-            if start_date != st.session_state.multi_backtest_focused_analysis_start_date:
-                st.session_state.multi_backtest_focused_analysis_start_date = start_date
+            if start_date != st.session_state.focused_analysis_start_date:
+                st.session_state.focused_analysis_start_date = start_date
         
         with col_date2:
             # Initialize end date in session state with fallback and validation
-            if st.session_state.multi_backtest_focused_analysis_end_date is None:
-                st.session_state.multi_backtest_focused_analysis_end_date = current_max_date
+            if st.session_state.focused_analysis_end_date is None:
+                st.session_state.focused_analysis_end_date = current_max_date
             
             # Ensure the end date is valid and within bounds
-            end_date_value = st.session_state.multi_backtest_focused_analysis_end_date
+            end_date_value = st.session_state.focused_analysis_end_date
             if end_date_value is None:
                 end_date_value = current_max_date
             else:
@@ -11447,8 +12752,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             )
             
             # Store the selected end date in session state
-            if end_date != st.session_state.multi_backtest_focused_analysis_end_date:
-                st.session_state.multi_backtest_focused_analysis_end_date = end_date
+            if end_date != st.session_state.focused_analysis_end_date:
+                st.session_state.focused_analysis_end_date = end_date
         
         with col_metrics:
             show_essential_only = st.checkbox(
@@ -11471,146 +12776,148 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         # Session state variables are already initialized above
         
         # Update session state when essential metrics checkbox changes
-        if show_essential_only != st.session_state.multi_backtest_focused_analysis_show_essential:
-            st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
-            # Clear any previous sorting when essential metrics setting changes
-            st.session_state.multi_backtest_focused_analysis_sorted_df = None
+        if show_essential_only != st.session_state.focused_analysis_show_essential:
+            st.session_state.focused_analysis_show_essential = show_essential_only
             # Recalculate if we have existing results
-            if st.session_state.multi_backtest_focused_analysis_results is not None:
+            if st.session_state.focused_analysis_results is not None:
                 calculate_analysis = True
         
         # Calculate focused performance metrics only when button is clicked
         if calculate_analysis and start_date and end_date and 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
             focused_stats = {}
             
-            # Check if we have the Final Performance Statistics data to use exact same values
-            stats_df_display = st.session_state.get('multi_backtest_stats_df_display')
-            
-            # If the selected date range covers the full period, use exact values from Final Performance Statistics
-            full_period_analysis = False
-            if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
-                try:
-                    # Get the actual data period from the first portfolio
-                    first_portfolio = next(iter(st.session_state.multi_all_results.values()))
-                    if isinstance(first_portfolio, dict) and 'no_additions' in first_portfolio:
-                        series = first_portfolio['no_additions']
-                        if hasattr(series, 'index') and len(series.index) > 0:
-                            data_start = series.index[0].date()
-                            data_end = series.index[-1].date()
-                            # Check if selected range covers the full period (within 7 days tolerance)
-                            start_diff = abs((start_date - data_start).days)
-                            end_diff = abs((end_date - data_end).days)
-                            if start_diff <= 7 and end_diff <= 7:
-                                full_period_analysis = True
-                except:
-                    pass
-            
-            if full_period_analysis and stats_df_display is not None and not stats_df_display.empty:
-                # Use exact values from Final Performance Statistics for full period analysis
-                for portfolio_name in st.session_state.multi_all_results.keys():
-                    if portfolio_name in stats_df_display.index:
-                        row = stats_df_display.loc[portfolio_name]
+            for portfolio_name, results in st.session_state.multi_all_results.items():
+                if isinstance(results, dict) and 'no_additions' in results:
+                    series = results['no_additions']
+                    if hasattr(series, 'index') and len(series.index) > 0:
+                        # Filter series by date range
+                        # Convert dates to datetime for proper comparison
+                        start_datetime = pd.to_datetime(start_date)
+                        end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Include the end date
+                        mask = (series.index >= start_datetime) & (series.index < end_datetime)
+                        filtered_series = series[mask]
                         
-                        # Extract numeric values from formatted strings
-                        def extract_numeric(val_str, default=0):
-                            try:
-                                if pd.isna(val_str) or val_str == 'N/A' or val_str == '':
-                                    return default
-                                # Remove % and other formatting
-                                clean_val = str(val_str).replace('%', '').replace('$', '').replace(',', '').strip()
-                                return float(clean_val)
-                            except:
-                                return default
-                        
-                        # Get values from Final Performance Statistics (already formatted)
-                        cagr_val = extract_numeric(row.get('CAGR', 'N/A'))
-                        max_dd_val = extract_numeric(row.get('Max Drawdown', 'N/A'))
-                        vol_val = extract_numeric(row.get('Volatility', 'N/A'))
-                        sharpe_val = extract_numeric(row.get('Sharpe', 'N/A'))
-                        sortino_val = extract_numeric(row.get('Sortino', 'N/A'))
-                        ulcer_val = extract_numeric(row.get('Ulcer Index', 'N/A'))
-                        upi_val = extract_numeric(row.get('UPI', 'N/A'))
-                        total_ret_val = extract_numeric(row.get('Total Return', 'N/A'))
-                        
-                        if show_essential_only:
-                            focused_stats[portfolio_name] = {
-                                'Total Return': total_ret_val,
-                                'CAGR': cagr_val,
-                                'Max Drawdown': max_dd_val,
-                                'Volatility': vol_val
-                            }
-                        else:
-                            # For full analysis, we still need to calculate additional metrics not in Final Performance Statistics
-                            # Get the series for additional calculations
-                            results = st.session_state.multi_all_results[portfolio_name]
-                            if isinstance(results, dict) and 'no_additions' in results:
-                                series = results['no_additions']
-                                if hasattr(series, 'index') and len(series.index) > 0:
-                                    # Filter series by date range for accurate final value calculation
-                                    start_datetime = pd.to_datetime(start_date)
-                                    end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
-                                    mask = (series.index >= start_datetime) & (series.index < end_datetime)
-                                    filtered_series = series[mask]
-                                    
-                                    if len(filtered_series) > 0:
-                                        # Calculate CAGR for the filtered period
-                                        filtered_cagr = calculate_cagr(filtered_series, filtered_series.index)
-                                    
-                                    # Calculate returns for additional metrics
-                                    returns = series.pct_change().fillna(0)
-                                    
-                                    # Smart weekend filter for win/loss rates
-                                    zero_rate = (abs(returns) < 1e-5).mean()
-                                    if zero_rate > 0.25:
-                                        weekday_mask = returns.index.weekday < 5
-                                        non_zero_mask = abs(returns) > 1e-5
-                                        smart_mask = weekday_mask | non_zero_mask
-                                        returns = returns[smart_mask]
-                                    
-                                    # Calculate additional metrics not in Final Performance Statistics
-                                    cumulative = (1 + returns).cumprod()
-                                    running_max = cumulative.expanding().max()
-                                    drawdown = (cumulative - running_max) / running_max
-                                    median_drawdown = drawdown.median()
-                                    
-                                    # Win/loss rates
-                                    positive_returns = returns[returns > 1e-5]
-                                    negative_returns = returns[returns < -1e-5]
-                                    win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
-                                    loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
-                                    median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
-                                    median_loss = negative_returns.median() * 100 if len(negative_returns) > 0 else 0
-                                    
-                                    # Profit factor
-                                    gross_profit = positive_returns.sum() if len(positive_returns) > 0 else 0
-                                    gross_loss = abs(negative_returns.sum()) if len(negative_returns) > 0 else 0
-                                    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
-                                    
-                                    # Monthly metrics
-                                    monthly_returns = series.resample('M').last().pct_change().fillna(0) * 100
-                                    best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
-                                    worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
-                                    median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
-                                    
-                                    # Risk-adjusted ratios
-                                    calmar_ratio = (cagr_val) / abs(max_dd_val) if max_dd_val != 0 else np.nan
-                                    sterling_ratio = (cagr_val) / abs(median_drawdown * 100) if median_drawdown != 0 else np.nan
-                                    recovery_factor = abs(total_ret_val) / abs(max_dd_val) if max_dd_val != 0 else np.nan
-                                    
-                                    # Tail ratio
-                                    tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
-                                    
+                        if len(filtered_series) > 1:
+                            # Calculate returns with ffill compatibility
+                            returns = filtered_series.pct_change().fillna(0)
+                            
+                            if len(returns) > 0:
+                                # Smart weekend filter for win/loss rates
+                                zero_rate = (abs(returns) < 1e-5).mean()
+                                if zero_rate > 0.25:  # If more than 25% are zero (likely weekends)
+                                    # Filter to include only non-zero returns or returns on weekdays
+                                    weekday_mask = returns.index.weekday < 5  # Monday=0, Friday=4
+                                    non_zero_mask = abs(returns) > 1e-5
+                                    smart_mask = weekday_mask | non_zero_mask
+                                    returns = returns[smart_mask]
+                                
+                                # Calculate metrics for the date range
+                                # Use original returns (before smart filtering) for consistency with Final Performance Statistics
+                                original_returns = filtered_series.pct_change().fillna(0)
+                                cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                volatility = calculate_volatility(original_returns)
+                                sharpe = calculate_sharpe(original_returns, 0.02)  # 2% risk-free rate
+                                sortino = calculate_sortino(original_returns, 0.02)
+                                
+                                # Calculate max drawdown using original returns
+                                cumulative = (1 + original_returns).cumprod()
+                                running_max = cumulative.expanding().max()
+                                drawdown = (cumulative - running_max) / running_max
+                                max_drawdown = drawdown.min()
+                                
+                                # Calculate Ulcer Index using original returns
+                                ulcer_index = np.sqrt((drawdown ** 2).mean()) * 100
+                                
+                                # Calculate UPI
+                                upi = calculate_upi(cagr, ulcer_index) if ulcer_index > 0 else np.nan
+                                
+                                # Calculate Beta (same method as Final Performance Statistics)
+                                beta = np.nan
+                                cfg_for_name = next((c for c in st.session_state.multi_backtest_portfolio_configs if c['name'] == portfolio_name), None)
+                                if cfg_for_name:
+                                    bench_ticker = cfg_for_name.get('benchmark_ticker')
+                                    raw_data = st.session_state.get('multi_backtest_raw_data')
+                                    if bench_ticker and raw_data and bench_ticker in raw_data:
+                                        try:
+                                            bench_df = raw_data[bench_ticker].reindex(filtered_series.index)
+                                            if 'Price_change' in bench_df.columns:
+                                                bench_returns = bench_df['Price_change'].fillna(0)
+                                            else:
+                                                bench_returns = bench_df['Close'].pct_change().fillna(0)
+
+                                            portfolio_returns = original_returns # Use original returns like Final Performance Statistics
+                                            common_idx = portfolio_returns.index.intersection(bench_returns.index)
+                                            if len(common_idx) >= 2:
+                                                pr = portfolio_returns.reindex(common_idx).dropna()
+                                                br = bench_returns.reindex(common_idx).dropna()
+                                                common_idx2 = pr.index.intersection(br.index)
+                                                if len(common_idx2) >= 2 and br.loc[common_idx2].var() != 0:
+                                                    cov = pr.loc[common_idx2].cov(br.loc[common_idx2])
+                                                    var = br.loc[common_idx2].var()
+                                                    beta = cov / var
+                                        except Exception as e:
+                                            pass
+                                
+                                # Calculate additional instantaneous metrics
+                                total_return = (filtered_series.iloc[-1] / filtered_series.iloc[0] - 1)
+                                final_value = filtered_series.iloc[-1]
+                                # For no contributions, start with $10,000 and apply CAGR
+                                years = (filtered_series.index[-1] - filtered_series.index[0]).days / 365.25
+                                cagr = calculate_cagr(filtered_series, filtered_series.index)
+                                final_value_no_contrib = 10000 * ((1 + cagr) ** years)
+                                total_money_added = 0  # Not available in no_additions series
+                                
+                                # Calculate median drawdown
+                                median_drawdown = drawdown.median()
+                                
+                                # Calculate win/loss rates
+                                positive_returns = returns[returns > 1e-5]
+                                negative_returns = returns[returns < -1e-5]
+                                win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                
+                                # Calculate median win/loss
+                                median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
+                                median_loss = negative_returns.median() * 100 if len(negative_returns) > 0 else 0
+                                
+                                # Calculate profit factor
+                                gross_profit = positive_returns.sum() if len(positive_returns) > 0 else 0
+                                gross_loss = abs(negative_returns.sum()) if len(negative_returns) > 0 else 0
+                                profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
+                                
+                                # Calculate monthly returns for monthly metrics
+                                monthly_returns = filtered_series.resample('M').last().pct_change().fillna(0) * 100
+                                best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
+                                worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
+                                median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
+                                
+                                # Calculate risk-adjusted ratios
+                                calmar_ratio = (cagr * 100) / abs(max_drawdown * 100) if max_drawdown != 0 else np.nan
+                                sterling_ratio = (cagr * 100) / abs(median_drawdown * 100) if median_drawdown != 0 else np.nan
+                                recovery_factor = abs(total_return) / abs(max_drawdown) if max_drawdown != 0 else np.nan
+                                
+                                # Calculate tail ratio (95th percentile / 5th percentile)
+                                tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
+                                
+                                if show_essential_only:
                                     focused_stats[portfolio_name] = {
-                                        'Total Return': total_ret_val,  # From Final Performance Statistics
-                                        'CAGR': cagr_val,  # From Final Performance Statistics
-                                        'Max Drawdown': max_dd_val,  # From Final Performance Statistics
-                                        'Volatility': vol_val,  # From Final Performance Statistics
-                                        'Sharpe': sharpe_val,  # From Final Performance Statistics
-                                        'Sortino': sortino_val,  # From Final Performance Statistics
-                                        'Ulcer Index': ulcer_val,  # From Final Performance Statistics
-                                        'UPI': upi_val,  # From Final Performance Statistics
-                                        'Beta': extract_numeric(row.get('Beta', 'N/A')),  # From Final Performance Statistics
-                                        'Final Value (No Contributions)': 10000 * ((1 + filtered_cagr) ** ((filtered_series.index[-1] - filtered_series.index[0]).days / 365.25)),
+                                        'Total Return': total_return * 100,
+                                        'CAGR': cagr * 100,
+                                        'Max Drawdown': max_drawdown * 100,
+                                        'Volatility': volatility * 100
+                                    }
+                                else:
+                                    focused_stats[portfolio_name] = {
+                                        'Total Return': total_return * 100,
+                                        'CAGR': cagr * 100,
+                                        'Max Drawdown': max_drawdown * 100,
+                                        'Volatility': volatility * 100,
+                                        'Sharpe': sharpe,
+                                        'Sortino': sortino,
+                                        'Ulcer Index': ulcer_index,
+                                        'UPI': upi,
+                                        'Beta': beta,
+                                        'Final Value (No Contributions)': final_value_no_contrib,
                                         'Median Drawdown': median_drawdown * 100,
                                         'Win Rate': win_rate,
                                         'Loss Rate': loss_rate,
@@ -11625,168 +12932,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         'Recovery Factor': recovery_factor,
                                         'Tail Ratio': tail_ratio
                                     }
-            else:
-                # For partial period analysis, calculate everything from scratch
-                for portfolio_name, results in st.session_state.multi_all_results.items():
-                    if isinstance(results, dict) and 'no_additions' in results:
-                        series = results['no_additions']
-                        if hasattr(series, 'index') and len(series.index) > 0:
-                            # Filter series by date range
-                            # Convert dates to datetime for proper comparison
-                            start_datetime = pd.to_datetime(start_date)
-                            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Include the end date
-                            mask = (series.index >= start_datetime) & (series.index < end_datetime)
-                            filtered_series = series[mask]
-                            
-                            if len(filtered_series) > 1:
-                                # Calculate returns with ffill compatibility
-                                returns = filtered_series.pct_change().fillna(0)
-                                
-                                if len(returns) > 0:
-                                    # Smart weekend filter for win/loss rates
-                                    zero_rate = (abs(returns) < 1e-5).mean()
-                                    if zero_rate > 0.25:  # If more than 25% are zero (likely weekends)
-                                        # Filter to include only non-zero returns or returns on weekdays
-                                        weekday_mask = returns.index.weekday < 5  # Monday=0, Friday=4
-                                        non_zero_mask = abs(returns) > 1e-5
-                                        smart_mask = weekday_mask | non_zero_mask
-                                        returns = returns[smart_mask]
-                                    
-                                    # Calculate metrics for the date range
-                                    cagr = calculate_cagr(filtered_series, filtered_series.index)
-                                    
-                                    # Calculate volatility using the SAME method as Final Performance Statistics
-                                    # Use the original returns (before smart filtering) like Final Performance Statistics does
-                                    original_returns = filtered_series.pct_change().fillna(0)
-                                    volatility = calculate_volatility(original_returns)
-                                    
-                                    # Use original returns for Sharpe and Sortino (same as Final Performance Statistics)
-                                    sharpe = calculate_sharpe(original_returns, 0.02)  # 2% risk-free rate
-                                    sortino = calculate_sortino(original_returns, 0.02)
-                                    
-                                    # Calculate max drawdown using original returns (like Final Performance Statistics)
-                                    cumulative = (1 + original_returns).cumprod()
-                                    running_max = cumulative.expanding().max()
-                                    drawdown = (cumulative - running_max) / running_max
-                                    max_drawdown = drawdown.min()
-                                    
-                                    # Calculate Ulcer Index using original returns (like Final Performance Statistics)
-                                    ulcer_index = np.sqrt((drawdown ** 2).mean()) * 100
-                                    
-                                    # Calculate UPI
-                                    upi = calculate_upi(cagr, ulcer_index) if ulcer_index > 0 else np.nan
-                                    
-                                    # Calculate Beta (same as Final Performance Statistics)
-                                    beta = np.nan
-                                    # Find the portfolio config to get benchmark ticker
-                                    cfg_for_name = next((c for c in st.session_state.multi_backtest_portfolio_configs if c['name'] == portfolio_name), None)
-                                    if cfg_for_name:
-                                        bench_ticker = cfg_for_name.get('benchmark_ticker')
-                                        raw_data = st.session_state.get('multi_backtest_raw_data')
-                                        if bench_ticker and raw_data and bench_ticker in raw_data:
-                                            # get benchmark price_change series aligned to filtered_series index
-                                            try:
-                                                bench_df = raw_data[bench_ticker].reindex(filtered_series.index)
-                                                if 'Price_change' in bench_df.columns:
-                                                    bench_returns = bench_df['Price_change'].fillna(0)
-                                                else:
-                                                    bench_returns = bench_df['Close'].pct_change().fillna(0)
-
-                                                portfolio_returns = original_returns  # Use original returns like Final Performance Statistics
-                                                common_idx = portfolio_returns.index.intersection(bench_returns.index)
-                                                if len(common_idx) >= 2:
-                                                    pr = portfolio_returns.reindex(common_idx).dropna()
-                                                    br = bench_returns.reindex(common_idx).dropna()
-                                                    common_idx2 = pr.index.intersection(br.index)
-                                                    if len(common_idx2) >= 2 and br.loc[common_idx2].var() != 0:
-                                                        cov = pr.loc[common_idx2].cov(br.loc[common_idx2])
-                                                        var = br.loc[common_idx2].var()
-                                                        beta = cov / var
-                                            except Exception as e:
-                                                pass
-                                    
-                                    # Calculate additional instantaneous metrics
-                                    total_return = (filtered_series.iloc[-1] / filtered_series.iloc[0] - 1)
-                                    final_value = filtered_series.iloc[-1]
-                                    # For no contributions, start with $10,000 and apply CAGR
-                                    years = (filtered_series.index[-1] - filtered_series.index[0]).days / 365.25
-                                    cagr = calculate_cagr(filtered_series, filtered_series.index)
-                                    final_value_no_contrib = 10000 * ((1 + cagr) ** years)
-                                    total_money_added = 0  # Not available in no_additions series
-                                    
-                                    # Calculate median drawdown
-                                    median_drawdown = drawdown.median()
-                                    
-                                    # Calculate win/loss rates
-                                    positive_returns = returns[returns > 1e-5]
-                                    negative_returns = returns[returns < -1e-5]
-                                    win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
-                                    loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
-                                    
-                                    # Calculate median win/loss
-                                    median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
-                                    median_loss = negative_returns.median() * 100 if len(negative_returns) > 0 else 0
-                                    
-                                    # Calculate profit factor
-                                    gross_profit = positive_returns.sum() if len(positive_returns) > 0 else 0
-                                    gross_loss = abs(negative_returns.sum()) if len(negative_returns) > 0 else 0
-                                    profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
-                                    
-                                    # Calculate monthly returns for monthly metrics
-                                    monthly_returns = filtered_series.resample('M').last().pct_change().fillna(0) * 100
-                                    best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
-                                    worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
-                                    median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
-                                    
-                                    # Calculate risk-adjusted ratios
-                                    calmar_ratio = (cagr * 100) / abs(max_drawdown * 100) if max_drawdown != 0 else np.nan
-                                    sterling_ratio = (cagr * 100) / abs(median_drawdown * 100) if median_drawdown != 0 else np.nan
-                                    recovery_factor = abs(total_return) / abs(max_drawdown) if max_drawdown != 0 else np.nan
-                                    
-                                    # Calculate tail ratio (95th percentile / 5th percentile)
-                                    tail_ratio = returns.quantile(0.95) / abs(returns.quantile(0.05)) if returns.quantile(0.05) != 0 else np.nan
-                                    
-                                    if show_essential_only:
-                                        focused_stats[portfolio_name] = {
-                                            'Total Return': total_return * 100,
-                                            'CAGR': cagr * 100,
-                                            'Max Drawdown': max_drawdown * 100,
-                                            'Volatility': volatility * 100
-                                        }
-                                    else:
-                                        focused_stats[portfolio_name] = {
-                                            'Total Return': total_return * 100,
-                                            'CAGR': cagr * 100,
-                                            'Max Drawdown': max_drawdown * 100,
-                                            'Volatility': volatility * 100,
-                                            'Sharpe': sharpe,
-                                            'Sortino': sortino,
-                                            'Ulcer Index': ulcer_index,
-                                            'UPI': upi,
-                                            'Beta': beta,
-                                            'Final Value (No Contributions)': final_value_no_contrib,
-                                            'Median Drawdown': median_drawdown * 100,
-                                            'Win Rate': win_rate,
-                                            'Loss Rate': loss_rate,
-                                            'Median Win': median_win,
-                                            'Median Loss': median_loss,
-                                            'Profit Factor': profit_factor,
-                                            'Best Month': best_month,
-                                            'Worst Month': worst_month,
-                                            'Median Monthly': median_monthly,
-                                            'Calmar Ratio': calmar_ratio,
-                                            'Sterling Ratio': sterling_ratio,
-                                            'Recovery Factor': recovery_factor,
-                                            'Tail Ratio': tail_ratio
-                                        }
             
             if focused_stats:
                 # Store results in session state
-                st.session_state.multi_backtest_focused_analysis_results = focused_stats
-                st.session_state.multi_backtest_focused_analysis_show_essential = show_essential_only
-                st.session_state.multi_backtest_focused_analysis_period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+                st.session_state.focused_analysis_results = focused_stats
+                st.session_state.focused_analysis_show_essential = show_essential_only
+                st.session_state.focused_analysis_period = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
                 # Clear any previous sorting when new results are calculated
-                st.session_state.multi_backtest_focused_analysis_sorted_df = None
+                st.session_state.focused_analysis_sorted_df = None
                 
                 # Create focused stats DataFrame
                 focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
@@ -11866,49 +13019,33 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         "Sort by:",
                         options=focused_df.columns.tolist(),
                         index=0,
-                        key="no_cache_focused_analysis_sort_column",
+                        key="focused_analysis_sort_column",
                         help="Select a column to sort the table numerically"
                     )
-                # Initialize session state variables
-                if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
-                    st.session_state.multi_backtest_focused_analysis_sorted_df = None
-                if 'multi_backtest_focused_analysis_sort_ascending' not in st.session_state:
-                    st.session_state.multi_backtest_focused_analysis_sort_ascending = None
-                
-                # Check for button clicks and update session state
-                sort_clicked = False
                 with col2:
-                    if st.button("⬇️ Sort ↓", key="no_cache_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
-                        st.session_state.multi_backtest_focused_analysis_sort_ascending = False
-                        sort_clicked = True
+                    if st.button("⬇️ Sort ↓", key="focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                        sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
+                        st.session_state.focused_analysis_sorted_df = sorted_df
+                        st.rerun()
                 with col3:
-                    if st.button("⬆️ Sort ↑", key="no_cache_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
-                        st.session_state.multi_backtest_focused_analysis_sort_ascending = True
-                        sort_clicked = True
+                    if st.button("⬆️ Sort ↑", key="focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                        sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
+                        st.session_state.focused_analysis_sorted_df = sorted_df
+                        st.rerun()
                 
                 # Display the focused table (use sorted version if available)
-                sorted_df = st.session_state.multi_backtest_focused_analysis_sorted_df
+                sorted_df = st.session_state.get('focused_analysis_sorted_df', None)
                 display_df = sorted_df if sorted_df is not None else focused_df
-                
-                # Sort and store if a button was clicked
-                if sort_clicked:
-                    ascending = st.session_state.multi_backtest_focused_analysis_sort_ascending
-                    # Always use the current display_df (which is the most up-to-date data)
-                    sorted_df = sort_dataframe_numerically(display_df, focused_sort_column, ascending=ascending)
-                    st.session_state.multi_backtest_focused_analysis_sorted_df = sorted_df
-                    st.session_state.multi_backtest_rerun_flag = True
-                
-                # Display the table
                 st.dataframe(display_df, use_container_width=True)
                 
                 # Show date range info
                 st.info(f"📅 **Analysis Period:** {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             else:
                 st.warning("⚠️ No data available for the selected date range. Please check your date selection.")
-        elif st.session_state.multi_backtest_focused_analysis_results is not None:
+        elif st.session_state.focused_analysis_results is not None:
             # Display stored results even when not recalculating
-            focused_stats = st.session_state.multi_backtest_focused_analysis_results
-            show_essential = st.session_state.multi_backtest_focused_analysis_show_essential
+            focused_stats = st.session_state.focused_analysis_results
+            show_essential = st.session_state.focused_analysis_show_essential
             
             # Create focused stats DataFrame
             focused_df = pd.DataFrame.from_dict(focused_stats, orient='index')
@@ -11937,8 +13074,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     focused_df['Ulcer Index'] = focused_df['Ulcer Index'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
                 if 'UPI' in focused_df.columns:
                     focused_df['UPI'] = focused_df['UPI'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
-                if 'Beta' in focused_df.columns:
-                    focused_df['Beta'] = focused_df['Beta'].apply(lambda x: f"{x:.2f}" if not pd.isna(x) else "N/A")
                 if 'Total Return' in focused_df.columns:
                     focused_df['Total Return'] = focused_df['Total Return'].apply(lambda x: f"{x:.2f}%")
                 if 'Final Value (No Contributions)' in focused_df.columns:
@@ -12012,48 +13147,33 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     "Sort by:",
                     options=focused_df.columns.tolist(),
                     index=0,
-                    key="no_cache_focused_analysis_sort_column_2",
+                    key="focused_analysis_sort_column_2",
                     help="Select a column to sort the table numerically"
                 )
-            # Initialize session state variables
-            if 'multi_backtest_focused_analysis_sorted_df' not in st.session_state:
-                st.session_state.multi_backtest_focused_analysis_sorted_df = None
-            if 'multi_backtest_focused_analysis_sort_ascending' not in st.session_state:
-                st.session_state.multi_backtest_focused_analysis_sort_ascending = None
-            
-            # Check for button clicks and update session state
-            sort_clicked = False
             with col2:
-                if st.button("⬇️ Sort ↓", key="no_cache_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
-                    st.session_state.multi_backtest_focused_analysis_sort_ascending = False
-                    sort_clicked = True
+                if st.button("⬇️ Sort ↓", key="focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
+                    sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
+                    st.session_state.focused_analysis_sorted_df = sorted_df
+                    st.rerun()
             with col3:
-                if st.button("⬆️ Sort ↑", key="no_cache_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
-                    st.session_state.multi_backtest_focused_analysis_sort_ascending = True
-                    sort_clicked = True
+                if st.button("⬆️ Sort ↑", key="focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
+                    sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
+                    st.session_state.focused_analysis_sorted_df = sorted_df
+                    st.rerun()
             
-            # Display the focused analysis table (use sorted version if available)
-            sorted_df = st.session_state.multi_backtest_focused_analysis_sorted_df
+            # Display the focused table (use sorted version if available)
+            sorted_df = st.session_state.get('focused_analysis_sorted_df', None)
             display_df = sorted_df if sorted_df is not None else focused_df
-            
-            # Sort and store if a button was clicked
-            if sort_clicked:
-                ascending = st.session_state.multi_backtest_focused_analysis_sort_ascending
-                # Always use the current display_df (which is the most up-to-date data)
-                sorted_df = sort_dataframe_numerically(display_df, focused_sort_column, ascending=ascending)
-                st.session_state.multi_backtest_focused_analysis_sorted_df = sorted_df
-                st.session_state.multi_backtest_rerun_flag = True
-            
-            # Display the table
             st.dataframe(display_df, use_container_width=True)
             
-            # Show date range info - THIS IS THE KEY FOR PERSISTENCE
-            if st.session_state.multi_backtest_focused_analysis_period is not None:
-                st.info(f"📅 **Analysis Period:** {st.session_state.multi_backtest_focused_analysis_period}")
+            # Show date range info
+            if st.session_state.focused_analysis_period is not None:
+                st.info(f"📅 **Analysis Period:** {st.session_state.focused_analysis_period}")
         elif not calculate_analysis:
             st.info("👆 **Select your date range above and click 'Calculate Analysis' to generate the focused performance metrics.**")
         else:
             st.warning("⚠️ Please ensure you have portfolio data loaded and valid date range selected.")
+
 
         # Portfolio Configuration Comparison Table
         st.subheader("Portfolio Configuration Comparison")
@@ -12484,45 +13604,33 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             if view_clicked:
                 # No-op here; the detail panels below will render based on selected_portfolio_detail. Keep a small indicator
                 st.success(f"Loaded details for {selected_portfolio_detail}")
-            # Table 1: Historical Allocations
+            # Table 1: Historical Allocations - OPTIMIZED with session state caching
             if selected_portfolio_detail in st.session_state.multi_all_allocations:
                 st.markdown("---")
                 st.markdown(f"**Historical Allocations for {selected_portfolio_detail}**")
-                # Ensure proper DataFrame structure with explicit column names
-                # Filter out fusion portfolio allocation data for fusion portfolios
-                allocation_data = st.session_state.multi_all_allocations[selected_portfolio_detail]
                 
-                # Check if this is a fusion portfolio
-                portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
-                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                is_fusion = portfolio_cfg and portfolio_cfg.get('fusion_portfolio', {}).get('enabled', False)
+                # Check if processed DataFrame is already cached in session state
+                df_cache_key = f'processed_allocations_df_{selected_portfolio_detail}'
+                tickers_cache_key = f'processed_allocations_tickers_{selected_portfolio_detail}'
                 
-                # NUCLEAR OPTION: Portfolio names are never stored, only individual stocks
-                
-                # Show all allocation data (like page 3) - no filtering to rebalancing dates only
-                
-                # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
-                all_tickers = set()
-                for date, alloc_dict in allocation_data.items():
-                    all_tickers.update(alloc_dict.keys())
-                
-                # Create a complete allocation data structure with all tickers for all dates
-                complete_allocation_data = {}
-                for date, alloc_dict in allocation_data.items():
-                    complete_allocation_data[date] = {}
-                    for ticker in all_tickers:
-                        if ticker in alloc_dict:
-                            complete_allocation_data[date][ticker] = alloc_dict[ticker]
-                        else:
-                            # Fill missing tickers with 0
-                            complete_allocation_data[date][ticker] = 0.0
-                
-                allocations_df_raw = pd.DataFrame(complete_allocation_data).T
-                
-                allocations_df_raw.index.name = "Date"
-                
-                # Sort by date (chronological order - oldest first)
-                allocations_df_raw = allocations_df_raw.sort_index(ascending=True)
+                if df_cache_key not in st.session_state or tickers_cache_key not in st.session_state:
+                    # Process allocation data and cache it
+                    allocation_data = st.session_state.multi_all_allocations[selected_portfolio_detail]
+                    allocations_df_raw, all_tickers = process_allocation_dataframe(selected_portfolio_detail, allocation_data)
+                    
+                    if allocations_df_raw is not None:
+                        allocations_df_raw.index.name = "Date"
+                        allocations_df_raw = allocations_df_raw.sort_index(ascending=True)
+                        # Cache the processed data
+                        st.session_state[df_cache_key] = allocations_df_raw
+                        st.session_state[tickers_cache_key] = all_tickers
+                    else:
+                        st.warning("Could not process allocation data")
+                        st.stop()
+                else:
+                    # Use cached data
+                    allocations_df_raw = st.session_state[df_cache_key]
+                    all_tickers = st.session_state[tickers_cache_key]
                 
                 # Corrected styling logic for alternating row colors (no green background for Historical Allocations)
                 def highlight_rows_by_index(s):
@@ -12537,12 +13645,12 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         st.warning(f"Allocations table is very large ({total_cells:,} cells). Showing simplified view.")
                         # Show only recent data (last 100 rows)
                         recent_data = allocations_df_raw.tail(100)
-                        st.dataframe(recent_data.mul(100).round(1), use_container_width=True)
+                        st.dataframe(recent_data.round(0), use_container_width=True)
                         st.caption("Showing last 100 rows. Use filters to narrow down the data.")
                     else:
                         # Increase pandas styler limit for smaller datasets
                         pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
-                        styler = allocations_df_raw.mul(100).style.apply(highlight_rows_by_index, axis=1)
+                        styler = allocations_df_raw.style.apply(highlight_rows_by_index, axis=1)
                         styler.format('{:,.0f}%', na_rep='N/A')
                         st.dataframe(styler, use_container_width=True)
                 except Exception as e:
@@ -13240,21 +14348,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                             # Map frequency names to what the function expects (capitalized as in page 1)
                             frequency_mapping = {
-                                'monthly': 'month',
-                                'weekly': 'week',
-                                'bi-weekly': '2weeks',
-                                'biweekly': '2weeks',
-                                'quarterly': '3months',
-                                'semi-annually': '6months',
-                                'semiannually': '6months',
-                                'annually': 'year',
-                                'yearly': 'year',
-                                'never': 'none',
-                                'none': 'none'
+                                'monthly': 'Monthly',
+                                'weekly': 'Weekly',
+                                'bi-weekly': 'Biweekly',
+                                'biweekly': 'Biweekly',
+                                'quarterly': 'Quarterly',
+                                'semi-annually': 'Semiannually',
+                                'semiannually': 'Semiannually',
+                                'annually': 'Annually',
+                                'yearly': 'Annually',
+                                'never': 'Never',
+                                'none': 'Never'
                             }
                             rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                             
-                            if rebalancing_frequency != 'none':
+                            if rebalancing_frequency != 'Never':
                                 # Get sim_index from the portfolio results
                                 sim_index = None
                                 if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -13380,21 +14488,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                             # Map frequency names to what the function expects (capitalized as in page 1)
                             frequency_mapping = {
-                                'monthly': 'month',
-                                'weekly': 'week',
-                                'bi-weekly': '2weeks',
-                                'biweekly': '2weeks',
-                                'quarterly': '3months',
-                                'semi-annually': '6months',
-                                'semiannually': '6months',
-                                'annually': 'year',
-                                'yearly': 'year',
-                                'never': 'none',
-                                'none': 'none'
+                                'monthly': 'Monthly',
+                                'weekly': 'Weekly',
+                                'bi-weekly': 'Biweekly',
+                                'biweekly': 'Biweekly',
+                                'quarterly': 'Quarterly',
+                                'semi-annually': 'Semiannually',
+                                'semiannually': 'Semiannually',
+                                'annually': 'Annually',
+                                'yearly': 'Annually',
+                                'never': 'Never',
+                                'none': 'Never'
                             }
                             rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                             
-                            if rebalancing_frequency != 'none':
+                            if rebalancing_frequency != 'Never':
                                 # Get sim_index from the portfolio results
                                 sim_index = None
                                 if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -14074,19 +15182,19 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     
                                     # Map frequency names to what the function expects
                                     frequency_mapping = {
-                                        'monthly': 'month',
-                                        'weekly': 'week',
-                                        'bi-weekly': '2weeks',
-                                        'biweekly': '2weeks',
-                                        'quarterly': '3months',
-                                        'semi-annually': '6months',
-                                        'semiannually': '6months',
-                                        'annually': 'year',
-                                        'yearly': 'year',
+                                        'monthly': 'Monthly',
+                                        'weekly': 'Weekly',
+                                        'bi-weekly': 'Biweekly',
+                                        'biweekly': 'Biweekly',
+                                        'quarterly': 'Quarterly',
+                                        'semi-annually': 'Semiannually',
+                                        'semiannually': 'Semiannually',
+                                        'annually': 'Annually',
+                                        'yearly': 'Annually',
                                         'market_day': 'market_day',
                                         'calendar_day': 'calendar_day',
-                                        'never': 'none',
-                                        'none': 'none'
+                                        'never': 'Never',
+                                        'none': 'Never'
                                     }
                                     fusion_freq = frequency_mapping.get(fusion_freq.lower(), fusion_freq)
                                     
@@ -14179,18 +15287,18 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         # Map frequency names to what the function expects
                                         frequency_mapping = {
                                             'daily': 'market_day',
-                                            'weekly': 'week',
-                                            'monthly': 'month',
-                                            'quarterly': '3months',
-                                            'annually': 'year',
-                                            'never': 'none',
-                                            'none': 'none'
+                                            'weekly': 'Weekly',
+                                            'monthly': 'Monthly',
+                                            'quarterly': 'Quarterly',
+                                            'annually': 'Annually',
+                                            'never': 'Never',
+                                            'none': 'Never'
                                         }
                                         rebalancing_frequency = frequency_mapping.get(rebalancing_frequency.lower(), rebalancing_frequency)
                                         
                                         # Find the actual last rebalancing date
                                         last_rebal_date = None
-                                        if rebalancing_frequency != 'none':
+                                        if rebalancing_frequency != 'Never':
                                             # Get sim_index from the portfolio results
                                             sim_index = None
                                             if 'multi_all_results' in st.session_state and st.session_state.multi_all_results:
@@ -14245,7 +15353,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 
 
                                 # Add timer for next rebalance date (EXACT copy from page 1)
-                                st.write("🔍 DEBUG: Timer section reached - checking conditions...")
                                 
                                 # FALLBACK TIMER - Always show this to test display
                                 st.markdown("---")
@@ -14268,7 +15375,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     else:
                                         last_rebal_date_for_timer = alloc_dates[-1] if alloc_dates else None
                                     
-                                    st.write(f"🔍 DEBUG: last_rebal_date_for_timer = {last_rebal_date_for_timer}")
                                     
                                     # Get rebalancing frequency from portfolio config
                                     portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
@@ -14278,27 +15384,24 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     rebalancing_frequency = rebalancing_frequency.lower()
                                     # Map frequency names to what the function expects
                                     frequency_mapping = {
-                                        'monthly': 'month',
-                                        'weekly': 'week',
-                                        'bi-weekly': '2weeks',
-                                        'biweekly': '2weeks',
-                                        'quarterly': '3months',
-                                        'semi-annually': '6months',
-                                        'semiannually': '6months',
-                                        'annually': 'year',
-                                        'yearly': 'year',
+                                        'monthly': 'Monthly',
+                                        'weekly': 'Weekly',
+                                        'bi-weekly': 'Biweekly',
+                                        'biweekly': 'Biweekly',
+                                        'quarterly': 'Quarterly',
+                                        'semi-annually': 'Semiannually',
+                                        'semiannually': 'Semiannually',
+                                        'annually': 'Annually',
+                                        'yearly': 'Annually',
                                         'market_day': 'market_day',
                                         'calendar_day': 'calendar_day',
-                                        'never': 'none',
-                                        'none': 'none'
+                                        'never': 'Never',
+                                        'none': 'Never'
                                     }
                                     rebalancing_frequency = frequency_mapping.get(rebalancing_frequency, rebalancing_frequency)
                                     
-                                    st.write(f"🔍 DEBUG: rebalancing_frequency = {rebalancing_frequency}")
-                                    st.write(f"🔍 DEBUG: portfolio_cfg found = {portfolio_cfg is not None}")
                                     
                                     if last_rebal_date_for_timer and rebalancing_frequency != 'none':
-                                        st.write("🔍 DEBUG: Timer conditions met - proceeding with timer creation")
                                         # Ensure last_rebal_date_for_timer is a naive datetime object
                                         if isinstance(last_rebal_date_for_timer, str):
                                             last_rebal_date_for_timer = pd.to_datetime(last_rebal_date_for_timer)
@@ -14479,10 +15582,51 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                         if hasattr(last_rebal_date, 'tzinfo') and last_rebal_date.tzinfo is not None:
                                                             last_rebal_date = last_rebal_date.replace(tzinfo=None)
                                                         
-                                                        # Calculate next rebalance for this portfolio
-                                                        next_date_port, time_until_port, next_rebalance_datetime_port = calculate_next_rebalance_date(
-                                                            rebal_freq, last_rebal_date
-                                                        )
+                                                        # Calculate next rebalance for this portfolio using the actual last rebalance date
+                                                        # This matches the "Last Rebalance Allocation" date shown in the UI
+                                                        if last_rebal_date:
+                                                            # Calculate the next rebalance date from the last rebalance date
+                                                            if rebal_freq == 'market_day':
+                                                                next_date_port = last_rebal_date.date() + timedelta(days=1)
+                                                            elif rebal_freq == 'calendar_day':
+                                                                next_date_port = last_rebal_date.date() + timedelta(days=1)
+                                                            elif rebal_freq == 'week':
+                                                                next_date_port = last_rebal_date.date() + timedelta(weeks=1)
+                                                            elif rebal_freq == '2weeks':
+                                                                next_date_port = last_rebal_date.date() + timedelta(weeks=2)
+                                                            elif rebal_freq == 'month':
+                                                                if last_rebal_date.date().month == 12:
+                                                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=1)
+                                                                else:
+                                                                    next_date_port = last_rebal_date.date().replace(month=last_rebal_date.date().month + 1)
+                                                            elif rebal_freq == 'quarter':
+                                                                new_month = last_rebal_date.date().month + 3
+                                                                if new_month > 12:
+                                                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=new_month - 12)
+                                                                else:
+                                                                    next_date_port = last_rebal_date.date().replace(month=new_month)
+                                                            elif rebal_freq == 'semi':
+                                                                new_month = last_rebal_date.date().month + 6
+                                                                if new_month > 12:
+                                                                    next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1, month=new_month - 12)
+                                                                else:
+                                                                    next_date_port = last_rebal_date.date().replace(month=new_month)
+                                                            elif rebal_freq == 'year':
+                                                                next_date_port = last_rebal_date.date().replace(year=last_rebal_date.date().year + 1)
+                                                            else:
+                                                                next_date_port = None
+                                                            
+                                                            if next_date_port:
+                                                                time_diff = next_date_port - last_rebal_date.date()
+                                                                time_until_port = time_diff.total_seconds() / (24 * 3600)
+                                                                next_rebalance_datetime_port = datetime.combine(next_date_port, datetime.min.time())
+                                                            else:
+                                                                time_until_port = None
+                                                                next_rebalance_datetime_port = None
+                                                        else:
+                                                            next_date_port = None
+                                                            time_until_port = None
+                                                            next_rebalance_datetime_port = None
                                                         
                                                         if next_date_port and time_until_port:
                                                             # Create timer data for this portfolio
@@ -14490,6 +15634,13 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                                                 ['Time Until Next Rebalance', format_time_until(time_until_port)],
                                                                 ['Target Rebalance Date', next_date_port.strftime("%B %d, %Y")],
                                                                 ['Rebalancing Frequency', rebal_freq.replace('_', ' ').title()]
+                                                            ]
+                                                        else:
+                                                            # Fallback timer data when calculation fails
+                                                            timer_data_port = [
+                                                                ['Last Rebalance Date', last_rebal_date.strftime("%B %d, %Y") if last_rebal_date else "Unknown"],
+                                                                ['Rebalancing Frequency', rebal_freq.replace('_', ' ').title()],
+                                                                ['Status', 'Timer calculation unavailable']
                                                             ]
                                                             
                                                             # Create timer table figure for this portfolio
@@ -14525,13 +15676,11 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             except Exception as e:
                                                 pass  # Silently ignore timer table creation errors
                                     else:
-                                        st.write("🔍 DEBUG: Timer conditions NOT met:")
                                         st.write(f"  - last_rebal_date_for_timer: {last_rebal_date_for_timer}")
                                         st.write(f"  - rebalancing_frequency: {rebalancing_frequency}")
                                         st.write("  - Timer will not show")
                                         
                                 except Exception as e:
-                                    st.write(f"🔍 DEBUG: Timer calculation error: {e}")
                                     pass  # Silently ignore timer calculation errors
 
                                 
@@ -14878,7 +16027,26 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
     
     # Console log UI removed
     
-
+    # Performance Debug Section
+    if st.session_state.get('multi_backtest_ran', False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔄 Clear Cache", help="Clear all cached charts and data"):
+                # Clear all cached data
+                keys_to_clear = [key for key in st.session_state.keys() if key.startswith(('multi_allocation_evolution_chart_', 'processed_allocations_df_', 'processed_allocations_tickers_', 'pie_chart_'))]
+                for key in keys_to_clear:
+                    del st.session_state[key]
+                st.success("Cache cleared! Charts will be recreated on next selection.")
+                st.rerun()
+        
+        with col2:
+            cached_charts = len([key for key in st.session_state.keys() if key.startswith('multi_allocation_evolution_chart_')])
+            st.metric("Cached Charts", cached_charts)
+        
+        with col3:
+            cached_dfs = len([key for key in st.session_state.keys() if key.startswith('processed_allocations_df_')])
+            st.metric("Cached DataFrames", cached_dfs)
+    
     # Allocation Evolution Chart Section
     if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
         st.markdown("---")
@@ -14889,29 +16057,43 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         extra_names = [n for n in st.session_state.get('multi_all_results', {}).keys() if n not in available_portfolio_names]
         all_portfolio_names = available_portfolio_names + extra_names
         
-        # Generate allocation evolution charts for ALL portfolios (not just selected one)
+        # OPTIMIZED: Lazy loading - only create charts when selected
         if all_portfolio_names:
-            # Generate charts for all portfolios and store in session state
-            for portfolio_name in all_portfolio_names:
-                if portfolio_name in st.session_state.multi_all_allocations:
-                    try:
-                        # Get allocation data for this portfolio
-                        allocs_data = st.session_state.multi_all_allocations[portfolio_name]
-                        
-                        # Check if this is a fusion portfolio and filter out fusion portfolio allocation data
-                        portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
-                        portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
-                        is_fusion = portfolio_cfg and portfolio_cfg.get('fusion_portfolio', {}).get('enabled', False)
-                        
-                        if is_fusion:
-                            # Remove fusion portfolio allocation data from individual stock allocations
-                            filtered_allocs_data = {}
-                            for date, alloc_dict in allocs_data.items():
-                                filtered_alloc_dict = {k: v for k, v in alloc_dict.items() if k != '_FUSION_PORTFOLIOS_'}
-                                filtered_allocs_data[date] = filtered_alloc_dict
-                            allocs_data = filtered_allocs_data
-                        
-                        if allocs_data:
+            # Show the selector first
+            selected_portfolio_evolution = st.selectbox(
+                "Select portfolio for allocation evolution chart",
+                all_portfolio_names,
+                key="allocation_evolution_portfolio_selector",
+                help="Choose which portfolio to show allocation evolution over time"
+            )
+            
+            # LAZY LOADING: Only create chart for selected portfolio
+            if selected_portfolio_evolution and selected_portfolio_evolution in st.session_state.multi_all_allocations:
+                chart_key = f'multi_allocation_evolution_chart_{selected_portfolio_evolution}'
+                
+                # Check if chart already exists in session state
+                if chart_key not in st.session_state:
+                    # Create chart only when needed
+                    st.info("🔄 Creating allocation evolution chart... (this will be cached for instant future access)")
+                    start_time = time.time()
+                    allocs_data = st.session_state.multi_all_allocations[selected_portfolio_evolution]
+                    
+                    # Check if this is a fusion portfolio and filter out fusion portfolio allocation data
+                    portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
+                    portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_evolution), None)
+                    is_fusion = portfolio_cfg and portfolio_cfg.get('fusion_portfolio', {}).get('enabled', False)
+                    
+                    if is_fusion:
+                        # Remove fusion portfolio allocation data from individual stock allocations
+                        filtered_allocs_data = {}
+                        for date, alloc_dict in allocs_data.items():
+                            filtered_alloc_dict = {k: v for k, v in alloc_dict.items() if k != '_FUSION_PORTFOLIOS_'}
+                            filtered_allocs_data[date] = filtered_alloc_dict
+                        allocs_data = filtered_allocs_data
+                    
+                    if allocs_data:
+                        # Create chart directly (no caching needed since it's stored in session state)
+                        try:
                             # Convert to DataFrame for easier processing
                             alloc_df = pd.DataFrame(allocs_data).T
                             alloc_df.index = pd.to_datetime(alloc_df.index)
@@ -14925,7 +16107,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         all_tickers.add(ticker)
                             all_tickers = sorted(list(all_tickers))
                             
-                            # Fill missing values with 0 for unavailable assets (instead of forward fill)
+                            # Fill missing values with 0 for unavailable assets
                             alloc_df = alloc_df.fillna(0)
                             
                             # Convert to percentages
@@ -14962,7 +16144,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             
                             # Update layout
                             fig_evolution.update_layout(
-                                title=f"Portfolio Allocation Evolution - {portfolio_name}",
+                                title=f"Portfolio Allocation Evolution - {selected_portfolio_evolution}",
                                 xaxis_title="Date",
                                 yaxis_title="Allocation (%)",
                                 template='plotly_dark',
@@ -14977,27 +16159,24 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 )
                             )
                             
-                            # Store the chart in session state for PDF export
-                            st.session_state[f'multi_allocation_evolution_chart_{portfolio_name}'] = fig_evolution
+                            # Store the chart in session state
+                            st.session_state[chart_key] = fig_evolution
                             
-                    except Exception as e:
-                        st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
-            
-            # Now show the selector and display the selected portfolio's chart
-            selected_portfolio_evolution = st.selectbox(
-                "Select portfolio for allocation evolution chart",
-                all_portfolio_names,
-                key="allocation_evolution_portfolio_selector",
-                help="Choose which portfolio to show allocation evolution over time"
-            )
-            
-            # Display the selected portfolio's chart
-            chart_key = f'multi_allocation_evolution_chart_{selected_portfolio_evolution}'
-            if chart_key in st.session_state:
-                st.plotly_chart(st.session_state[chart_key], use_container_width=True)
+                            # Show timing info
+                            end_time = time.time()
+                            st.success(f"✅ Chart created in {end_time - start_time:.2f} seconds and cached for instant future access!")
+                            
+                        except Exception as e:
+                            st.error(f"Error creating allocation evolution chart for {selected_portfolio_evolution}: {str(e)}")
+                else:
+                    # Chart exists in cache - show instant loading message
+                    st.success("⚡ Chart loaded instantly from cache!")
                 
-                # Show proper visual legend with colors and dotted lines
-                if selected_portfolio_evolution in st.session_state.multi_all_allocations:
+                # Display the chart if it exists
+                if chart_key in st.session_state:
+                    st.plotly_chart(st.session_state[chart_key], use_container_width=True)
+                    
+                    # Show proper visual legend with colors and dotted lines
                     allocs_data = st.session_state.multi_all_allocations[selected_portfolio_evolution]
                     if allocs_data:
                         # Get all unique tickers (excluding None)
@@ -15023,8 +16202,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 with cols[i % 4]:
                                     color = colors[i % len(colors)]
                                     st.markdown(f"<span style='color: {color}; font-weight: bold;'>━━━</span> {ticker}", unsafe_allow_html=True)
+                else:
+                    st.warning(f"Could not create allocation evolution chart for {selected_portfolio_evolution}")
             else:
-                st.info("No allocation evolution data available for the selected portfolio.")
+                st.warning(f"No allocation data available for {selected_portfolio_evolution}")
         else:
             st.info("No portfolios available for allocation evolution chart.")
     
@@ -15065,15 +16246,24 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         if all_tickers:
                             # Fetch PE data for all tickers sequentially to avoid threading issues
                             pe_data = {}
+                            historical_pe_data = {}
                             with st.spinner("Fetching PE ratio data..."):
                                 for ticker in all_tickers:
                                     try:
-                                        # Get stock info for PE ratio
+                                        # Get stock info for current PE ratio
                                         stock = yf.Ticker(ticker)
                                         info = stock.info
                                         pe_ratio = info.get('trailingPE', None)
                                         if pe_ratio is not None and pe_ratio > 0:
                                             pe_data[ticker] = pe_ratio
+                                        
+                                        # Try to get historical earnings data (placeholder for future implementation)
+                                        try:
+                                            # For now, we'll use current PE ratios only
+                                            # Historical PE calculation can be added later with better data sources
+                                            pass
+                                        except:
+                                            pass
                                     except:
                                         continue
                             
@@ -15109,9 +16299,26 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     else:
                                         # Calculate weighted PE only for stock allocations (daily precision)
                                         for ticker, weight in allocs.items():
-                                            if ticker != 'CASH' and ticker in pe_data and weight > 0:
-                                                weighted_pe += pe_data[ticker] * weight
-                                                total_weight += weight
+                                            if ticker != 'CASH' and weight > 0:
+                                                # Try to use historical PE data first, fallback to current PE
+                                                ticker_pe = None
+                                                if ticker in historical_pe_data:
+                                                    # Find the closest historical PE date to current date
+                                                    hist_dates = list(historical_pe_data[ticker].keys())
+                                                    if hist_dates:
+                                                        # Find the closest date before or on the current date
+                                                        valid_dates = [d for d in hist_dates if d <= date]
+                                                        if valid_dates:
+                                                            closest_date = max(valid_dates)
+                                                            ticker_pe = historical_pe_data[ticker][closest_date]
+                                                
+                                                # Fallback to current PE if no historical data
+                                                if ticker_pe is None and ticker in pe_data:
+                                                    ticker_pe = pe_data[ticker]
+                                                
+                                                if ticker_pe is not None and ticker_pe > 0:
+                                                    weighted_pe += ticker_pe * weight
+                                                    total_weight += weight
                                         
                                         if total_weight > 0:
                                             portfolio_pe_ratios.append(weighted_pe / total_weight)
@@ -15126,7 +16333,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         y=portfolio_pe_ratios,  # Include None values to show gaps
                                         mode='lines',  # Smooth line only, no markers
                                         name=f'Portfolio PE Ratio',
-                                        line=dict(color='#00ff88', width=3),  # Bright green
+                                        line=dict(color='#00ff88', width=3),  # Changed to bright green
                                         hovertemplate=(
                                             '<b>%{fullData.name}</b><br>' +
                                             'Date: %{x|%Y-%m-%d}<br>' +
@@ -15135,6 +16342,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                         ),
                                         connectgaps=False  # Show gaps when in cash
                                     ))
+                                    
                                     
                                     # Calculate statistical metrics (filter out None values for calculations)
                                     clean_pe_ratios = [pe for pe in portfolio_pe_ratios if pe is not None]
