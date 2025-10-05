@@ -11195,9 +11195,9 @@ def paste_all_json_callback():
                 is_fusion_portfolio = 'fusion_portfolio' in cfg and isinstance(cfg.get('fusion_portfolio'), dict)
                 if is_fusion_portfolio:
                     fusion_config = cfg.get('fusion_portfolio', {})
-                    st.info(f"🔗 Detected fusion portfolio: {cfg.get('name', 'Unknown')}")
-                    st.info(f"   Selected portfolios: {fusion_config.get('selected_portfolios', [])}")
-                    st.info(f"   Allocations: {fusion_config.get('allocations', {})}")
+                    # st.info(f"🔗 Detected fusion portfolio: {cfg.get('name', 'Unknown')}")
+                    # st.info(f"   Selected portfolios: {fusion_config.get('selected_portfolios', [])}")
+                    # st.info(f"   Allocations: {fusion_config.get('allocations', {})}")
                 
                 # Handle momentum strategy value mapping from other pages
                 momentum_strategy = cfg.get('momentum_strategy', 'Classic')
@@ -11265,9 +11265,11 @@ def paste_all_json_callback():
                 
                 # Debug: Show what we received for this portfolio
                 if 'momentum_windows' in cfg:
-                    st.info(f"Momentum windows for {cfg.get('name', 'Unknown')}: {cfg['momentum_windows']}")
+                    # st.info(f"Momentum windows for {cfg.get('name', 'Unknown')}: {cfg['momentum_windows']}")
+                    pass
                 if 'use_momentum' in cfg:
-                    st.info(f"Use momentum for {cfg.get('name', 'Unknown')}: {cfg['use_momentum']}")
+                    # st.info(f"Use momentum for {cfg.get('name', 'Unknown')}: {cfg['use_momentum']}")
+                    pass
                 
                 # Map frequency values from app.py format to Multi-Backtest format
                 def map_frequency(freq):
@@ -11393,18 +11395,15 @@ def paste_all_json_callback():
             st.success('All portfolio configurations updated from JSON (Multi-Backtest page).')
             # Debug: Show final momentum windows for first portfolio
             if processed_configs:
-                st.info(f"Final momentum windows for first portfolio: {processed_configs[0]['momentum_windows']}")
-                st.info(f"Final use_momentum for first portfolio: {processed_configs[0]['use_momentum']}")
-                st.info(f"Sync exclusions for first portfolio - Cash Flow: {processed_configs[0].get('exclude_from_cashflow_sync', False)}, Rebalancing: {processed_configs[0].get('exclude_from_rebalancing_sync', False)}")
+                # st.info(f"Final momentum windows for first portfolio: {processed_configs[0]['momentum_windows']}")
+                # st.info(f"Final use_momentum for first portfolio: {processed_configs[0]['use_momentum']}")
+                # st.info(f"Sync exclusions for first portfolio - Cash Flow: {processed_configs[0].get('exclude_from_cashflow_sync', False)}, Rebalancing: {processed_configs[0].get('exclude_from_rebalancing_sync', False)}")
+                pass
             # Sync date widgets with the updated portfolio
             sync_date_widgets_with_portfolio()
             
             # Force a rerun so widgets rebuild with the new configs
-            try:
-                st.experimental_rerun()
-            except Exception:
-                # In some environments experimental rerun may raise; setting a rerun flag is a fallback
-                st.session_state.strategy_comparison_rerun_flag = True
+            st.session_state.multi_backtest_rerun_flag = True
         else:
             st.error('JSON must be a list of portfolio configurations.')
     except Exception as e:
