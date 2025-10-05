@@ -8339,15 +8339,9 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         st.markdown("---")
         st.markdown("**Minimal Threshold Filter:**")
         
-        # NEW APPROACH: Use a single persistent state object
-        if f"threshold_state_{portfolio_index}" not in st.session_state:
-            st.session_state[f"threshold_state_{portfolio_index}"] = {
-                "disabled": True,
-                "enabled": False,
-                "values": [2.0]
-            }
-        
-        state = st.session_state[f"threshold_state_{portfolio_index}"]
+        # Initialize threshold values list if not exists
+        if f"threshold_values_{portfolio_index}" not in st.session_state:
+            st.session_state[f"threshold_values_{portfolio_index}"] = [2.0]
         
         # Checkboxes for both options (can be both selected)
         col1, col2 = st.columns(2)
@@ -8355,20 +8349,15 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         with col1:
             disabled = st.checkbox(
                 "Disable Threshold",
-                value=state["disabled"],
+                value=True,
                 key=f"thresh_disabled_{portfolio_index}"
             )
         
         with col2:
             enabled = st.checkbox(
                 "Enable Threshold",
-                value=state["enabled"],
                 key=f"thresh_enabled_{portfolio_index}"
             )
-        
-        # Update state
-        state["disabled"] = disabled
-        state["enabled"] = enabled
         
         # Build threshold options
         threshold_options = []
@@ -8381,34 +8370,34 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             
             # Add button
             if st.button("➕ Add", key=f"add_thresh_{portfolio_index}"):
-                state["values"].append(2.0)
+                st.session_state[f"threshold_values_{portfolio_index}"].append(2.0)
                 st.rerun()
             
             # Display values with truly unique keys for each value
-            for i in range(len(state["values"])):
+            values = st.session_state[f"threshold_values_{portfolio_index}"]
+            for i in range(len(values)):
                 col1, col2 = st.columns([4, 1])
                 
                 # Create truly unique key using timestamp and index
-                unique_id = f"{portfolio_index}_{i}_{id(state['values'])}"
+                unique_id = f"{portfolio_index}_{i}_{id(values)}"
                 
                 with col1:
                     val = st.number_input(
                         f"Value {i+1}",
                         min_value=0.0,
                         max_value=100.0,
-                        value=state["values"][i],
+                        value=values[i],
                         step=0.1,
                         key=f"thresh_input_{unique_id}"
                     )
-                    # Update the value in state
-                    state["values"][i] = val
+                    # Update the value in the list
+                    values[i] = val
                     threshold_options.append(val)
                 
                 with col2:
-                    if st.button("🗑️", key=f"del_thresh_{unique_id}"):
-                        # Create a copy of the list and remove the specific index
-                        new_values = state["values"][:i] + state["values"][i+1:]
-                        state["values"] = new_values
+                    if len(values) > 1 and st.button("🗑️", key=f"del_thresh_{unique_id}"):
+                        # Remove the specific index
+                        st.session_state[f"threshold_values_{portfolio_index}"] = values[:i] + values[i+1:]
                         st.rerun()
         
         # Add to variant params
@@ -8430,15 +8419,9 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         st.markdown("---")
         st.markdown("**Maximum Allocation Filter:**")
         
-        # NEW APPROACH: Use a single persistent state object
-        if f"max_allocation_state_{portfolio_index}" not in st.session_state:
-            st.session_state[f"max_allocation_state_{portfolio_index}"] = {
-                "disabled": True,
-                "enabled": False,
-                "values": [10.0]
-            }
-        
-        state = st.session_state[f"max_allocation_state_{portfolio_index}"]
+        # Initialize max allocation values list if not exists
+        if f"max_allocation_values_{portfolio_index}" not in st.session_state:
+            st.session_state[f"max_allocation_values_{portfolio_index}"] = [10.0]
         
         # Checkboxes for both options (can be both selected)
         col1, col2 = st.columns(2)
@@ -8446,20 +8429,15 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         with col1:
             disabled = st.checkbox(
                 "Disable Max Allocation",
-                value=state["disabled"],
+                value=True,
                 key=f"max_disabled_{portfolio_index}"
             )
         
         with col2:
             enabled = st.checkbox(
                 "Enable Max Allocation",
-                value=state["enabled"],
                 key=f"max_enabled_{portfolio_index}"
             )
-        
-        # Update state
-        state["disabled"] = disabled
-        state["enabled"] = enabled
         
         # Build max allocation options
         max_allocation_options = []
@@ -8472,34 +8450,34 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             
             # Add button
             if st.button("➕ Add", key=f"add_max_{portfolio_index}"):
-                state["values"].append(10.0)
+                st.session_state[f"max_allocation_values_{portfolio_index}"].append(10.0)
                 st.rerun()
             
             # Display values with truly unique keys for each value
-            for i in range(len(state["values"])):
+            values = st.session_state[f"max_allocation_values_{portfolio_index}"]
+            for i in range(len(values)):
                 col1, col2 = st.columns([4, 1])
                 
                 # Create truly unique key using timestamp and index
-                unique_id = f"{portfolio_index}_{i}_{id(state['values'])}"
+                unique_id = f"{portfolio_index}_{i}_{id(values)}"
                 
                 with col1:
                     val = st.number_input(
                         f"Value {i+1}",
                         min_value=0.1,
                         max_value=100.0,
-                        value=state["values"][i],
+                        value=values[i],
                         step=0.1,
                         key=f"max_input_{unique_id}"
                     )
-                    # Update the value in state
-                    state["values"][i] = val
+                    # Update the value in the list
+                    values[i] = val
                     max_allocation_options.append(val)
                 
                 with col2:
-                    if st.button("🗑️", key=f"del_max_{unique_id}"):
-                        # Create a copy of the list and remove the specific index
-                        new_values = state["values"][:i] + state["values"][i+1:]
-                        state["values"] = new_values
+                    if len(values) > 1 and st.button("🗑️", key=f"del_max_{unique_id}"):
+                        # Remove the specific index
+                        st.session_state[f"max_allocation_values_{portfolio_index}"] = values[:i] + values[i+1:]
                         st.rerun()
         
         # Add to variant params
