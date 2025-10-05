@@ -9350,14 +9350,9 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             key=f"multi_backtest_negative_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
         )
         
-        # Show warning for SP500TOP20 if Cash is selected and auto-change to Relative
+        # Show warning for SP500TOP20 if Cash is selected
         if is_sp500top20 and negative_momentum_strategy == 'Cash':
-            st.warning("⚠️ **SP500TOP20 detected!** Cash strategy is not recommended for dynamic portfolios. Automatically changed to 'Relative momentum' to stay invested in the top 20 stocks.")
-            negative_momentum_strategy = 'Relative momentum'  # Auto-change to Relative
-            # Force update the portfolio config immediately
-            active_portfolio['negative_momentum_strategy'] = 'Relative momentum'
-            # Force Streamlit to refresh the UI
-            st.rerun()
+            st.warning("⚠️ **SP500TOP20 detected!** Cash strategy does not work yet and needs fixing. Please select 'Relative momentum' or 'Equal weight' instead.")
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
         st.markdown("💡 **Note:** These options control how weights are assigned based on momentum scores.")
