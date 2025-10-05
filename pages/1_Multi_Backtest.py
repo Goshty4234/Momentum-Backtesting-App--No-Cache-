@@ -5495,12 +5495,24 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
             should_rebalance = True
         elif rebalancing_frequency == "Weekly":
             should_rebalance = date.weekday() == 0
+        elif rebalancing_frequency == "Biweekly":
+            # Biweekly: every 2 weeks on Monday
+            # Simple implementation: every 14 days from start date
+            days_since_start = (date - sim_index[0]).days
+            should_rebalance = days_since_start % 14 == 0 and date.weekday() == 0
         elif rebalancing_frequency == "Monthly":
             should_rebalance = date.day == 1
         elif rebalancing_frequency == "Quarterly":
             should_rebalance = date.month in [1, 4, 7, 10] and date.day == 1
+        elif rebalancing_frequency == "Semiannually":
+            should_rebalance = date.month in [1, 7] and date.day == 1
         elif rebalancing_frequency == "Annually":
             should_rebalance = date.month == 1 and date.day == 1
+        elif rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
+            # Buy & Hold: only rebalance on first day
+            should_rebalance = date == sim_index[0]
+        elif rebalancing_frequency in ["Never", "none"]:
+            should_rebalance = False
         
         if should_rebalance and available_tickers:
             # CALCULATE CURRENT TOTAL VALUE
