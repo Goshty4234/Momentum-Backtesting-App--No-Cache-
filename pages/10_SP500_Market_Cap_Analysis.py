@@ -728,6 +728,7 @@ elif companies_df is not None and not companies_df.empty:
     # Fix known ticker symbol issues before fetching data
     companies_df = companies_df.copy()
     companies_df.loc[companies_df['Symbol'] == 'BRK.B', 'Symbol'] = 'BRK-B'
+    companies_df.loc[companies_df['Symbol'] == 'BF.B', 'Symbol'] = 'BF-B'
     
     # Only fetch market data if user clicked the button
     if st.session_state.get('fetch_data', False):
