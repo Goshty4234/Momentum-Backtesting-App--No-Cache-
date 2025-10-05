@@ -9129,6 +9129,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
         synthetic_tickers = {
             # Ordered by asset class: Stocks → Bonds → Gold → Managed Futures → Bitcoin
             'Complete S&P 500 Simulation (1885+)': 'SPYSIM_COMPLETE',
+            'Dynamic S&P 500 Top 20 (Historical)': 'SP500TOP20',
             'Complete TBILL Dataset (1948+)': 'TBILL_COMPLETE',
             'Complete IEF Dataset (1962+)': 'IEF_COMPLETE',
             'Complete TLT Dataset (1962+)': 'TLT_COMPLETE',
@@ -9141,7 +9142,12 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
         }
         
         for name, ticker in synthetic_tickers.items():
-            if st.button(f"➕ {name}", key=f"add_synthetic_{ticker}", help=f"Add {ticker}"):
+            # Custom help text for SP500TOP20
+            help_text = f"Add {ticker}"
+            if ticker == 'SP500TOP20':
+                help_text = "Add SP500TOP20 - BETA ticker: Dynamic portfolio of top 20 S&P 500 companies rebalanced annually based on historical market cap data"
+            
+            if st.button(f"➕ {name}", key=f"add_synthetic_{ticker}", help=help_text):
                 portfolio_index = st.session_state.multi_backtest_active_portfolio_index
                 st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].append({
                     'ticker': ticker, 
@@ -9161,7 +9167,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `ZROZX` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `GOVZTR` → `GOVZ` (25+ Year Treasury STRIPS, 2020+)")
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
-    st.markdown("- `ZEROX` → `ZERO` (Cash doing nothing), `SPYSIM` → `SPYSIM_COMPLETE` (Complete S&P 500 Simulation, 1885+), `TBILL` → `TBILL_COMPLETE` (Complete TBILL Dataset, 1948+), `IEFTR` → `IEF_COMPLETE` (Complete IEF Dataset, 1962+), `TLTTR` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `ZROZX` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `GOLDSIM` → `GOLDSIM_COMPLETE` (Complete Gold Simulation, 1968+), `GOLDX` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `KMLMX` → `KMLM_COMPLETE` (Complete KMLM Dataset, 1992+), `DBMFX` → `DBMF_COMPLETE` (Complete DBMF Dataset, 2000+), `BITCOINX` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+)")
+    st.markdown("- `ZEROX` → `ZERO` (Cash doing nothing), `SPYSIM` → `SPYSIM_COMPLETE` (Complete S&P 500 Simulation, 1885+), `SP500TOP20` → `SP500TOP20` (Dynamic S&P 500 Top 20, Historical), `TBILL` → `TBILL_COMPLETE` (Complete TBILL Dataset, 1948+), `IEFTR` → `IEF_COMPLETE` (Complete IEF Dataset, 1962+), `TLTTR` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `ZROZX` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `GOLDSIM` → `GOLDSIM_COMPLETE` (Complete Gold Simulation, 1968+), `GOLDX` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `KMLMX` → `KMLM_COMPLETE` (Complete KMLM Dataset, 1992+), `DBMFX` → `DBMF_COMPLETE` (Complete DBMF Dataset, 2000+), `BITCOINX` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+)")
 
 with st.expander("⚡ Leverage Guide", expanded=False):
     st.markdown("""
