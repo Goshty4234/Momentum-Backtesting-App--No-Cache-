@@ -466,7 +466,7 @@ def resolve_ticker_alias(ticker):
     return aliases.get(ticker.upper(), ticker)
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Cache ticker data to improve performance across multiple tabs
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -517,7 +517,7 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         return pd.DataFrame()
 
 def get_ticker_info(ticker_symbol):
-    """Cache ticker info to improve performance across multiple tabs"""
+    """Get ticker info (NO_CACHE version)"""
     try:
         stock = yf.Ticker(ticker_symbol)
         info = stock.info
@@ -730,8 +730,8 @@ def get_tbill_complete_data(period="max"):
             return pd.DataFrame()
 
 def calculate_portfolio_metrics(portfolio_config, allocation_data):
-    """Cache heavy portfolio calculations to improve performance"""
-    # This will cache the results of expensive portfolio calculations
+    """Calculate portfolio metrics (NO_CACHE version)"""
+    # This will process the results of expensive portfolio calculations (NO_CACHE)
     # Note: The actual calculation logic remains unchanged
     return portfolio_config, allocation_data  # Placeholder - will be filled in by calling functions
 
@@ -768,7 +768,7 @@ def create_safe_cache_key(data):
         return hashlib.md5(str(data).encode()).hexdigest()
 
 def run_cached_backtest(portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id="allocations"):
-    """Cache expensive backtest calculations with proper invalidation
+    """Run backtest calculations (NO_CACHE version)
     
     Args:
         portfolios_config_hash: Hash of portfolio configurations to detect changes
