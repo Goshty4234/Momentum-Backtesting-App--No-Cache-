@@ -618,81 +618,6 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
     
     return leveraged_data
 
-def get_ticker_aliases():
-    """Define ticker aliases for easier entry"""
-    return {
-        # Stock Market Indices
-        'SPX': '^GSPC',           # S&P 500 (price only, no dividends) - 1927+
-        'SPXTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
-        'SP500': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
-        'SP500TR': '^SP500TR',    # S&P 500 Total Return (with dividends) - 1988+
-        'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
-        'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
-        'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
-        'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
-        
-        # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
-        'TNX': '^TNX',           # 10-Year Treasury Yield (1962+) - Price only, no coupons
-        'TYX': '^TYX',           # 30-Year Treasury Yield (1977+) - Price only, no coupons
-        'FVX': '^FVX',           # 5-Year Treasury Yield (1962+) - Price only, no coupons
-        'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
-        
-        # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
-        'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
-        'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
-        'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
-        'SPTL': 'SPTL',          # Long Term Treasury ETF (2007+) - With coupons
-        'SPTS': 'SPTS',          # Short Term Treasury ETF (2011+) - With coupons
-        'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
-        
-        # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        
-        # Gold & Commodities
-        'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
-        'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - With dividends
-        'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - With dividends
-        'GOLDF': 'GC=F',         # Gold Futures (2000+) - No dividends
-        'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
-        'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
-        'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
-        'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
-        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
-        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
-        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
-        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
-        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
-        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
-        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
-        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
-        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
-        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
-        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
-        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
-        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
-        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
-        'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
-        'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
-        'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
-        'CORN': 'ZC=F',          # Corn Futures (2000+) - No dividends
-        'SOYBEAN': 'ZS=F',       # Soybean Futures (2000+) - No dividends
-        'COFFEE': 'KC=F',        # Coffee Futures (2000+) - No dividends
-        'SUGAR': 'SB=F',         # Sugar Futures (2000+) - No dividends
-        'COTTON': 'CT=F',        # Cotton Futures (2000+) - No dividends
-        'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
-        'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
-        'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
-    }
-
-def resolve_ticker_alias(ticker):
-    """Resolve ticker alias to actual ticker symbol"""
-    aliases = get_ticker_aliases()
-    return aliases.get(ticker.upper(), ticker)
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_gold_complete_data(period="max"):
     """Get complete gold data from our custom gold ticker"""
     try:
@@ -828,17 +753,31 @@ def get_bitcoin_complete_data(period="max"):
 def get_spysim_complete_data(period="max"):
     """Get complete SPYSIM data from our custom SPYSIM ticker"""
     try:
+        # Import our SPYSIM ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
         from Complete_Tickers.SPYSIM_COMPLETE_TICKER import create_spysim_complete_ticker
+        
+        # Get the complete SPYSIM data
         spysim_data = create_spysim_complete_ticker()
-        if spysim_data is not None and not spysim_data.empty:
-            result = pd.DataFrame({
-                'Close': spysim_data,
-                'Dividends': [0.0] * len(spysim_data)
-            }, index=spysim_data.index)
-            return result
-        else:
-            return None
+        
+        if spysim_data is None:
+            # Fallback to SPYTR if our custom ticker fails
+            ticker = yf.Ticker("^SP500TR")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': spysim_data,
+            'Dividends': [0.0] * len(spysim_data)
+        }, index=spysim_data.index)
+        
+        return result
+        
     except Exception as e:
+        # Fallback to SPYTR if anything fails
         try:
             ticker = yf.Ticker("^SP500TR")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
@@ -848,29 +787,114 @@ def get_spysim_complete_data(period="max"):
 def get_goldsim_complete_data(period="max"):
     """Get complete GOLDSIM data from our custom GOLDSIM ticker"""
     try:
+        # Import our GOLDSIM ticker
+        import sys
+        import os
+        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+        
         from Complete_Tickers.GOLDSIM_COMPLETE_TICKER import create_goldsim_complete_ticker
+        
+        # Get the complete GOLDSIM data
         goldsim_data = create_goldsim_complete_ticker()
-        if goldsim_data is not None and not goldsim_data.empty:
-            result = pd.DataFrame({
-                'Close': goldsim_data,
-                'Dividends': [0.0] * len(goldsim_data)
-            }, index=goldsim_data.index)
-            return result
-        else:
-            print("⚠️ WARNING: GOLDSIM ticker returned empty data, falling back to GLD")
+        
+        if goldsim_data is None:
+            # Fallback to GLD if our custom ticker fails
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
+        
+        # Convert to the expected format
+        result = pd.DataFrame({
+            'Close': goldsim_data,
+            'Dividends': [0.0] * len(goldsim_data)
+        }, index=goldsim_data.index)
+        
+        return result
+        
     except Exception as e:
-        print(f"⚠️ WARNING: GOLDSIM error: {e}, falling back to GLD")
+        # Fallback to GLD if anything fails
         try:
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_ticker_aliases():
+    """Define ticker aliases for easier entry"""
+    return {
+        # Stock Market Indices
+        'SPX': '^GSPC',           # S&P 500 (price only, no dividends) - 1927+
+        'SPXTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
+        'SP500': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
+        'SP500TR': '^SP500TR',    # S&P 500 Total Return (with dividends) - 1988+
+        'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
+        'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
+        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
+        'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
+        
+        # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
+        'TNX': '^TNX',           # 10-Year Treasury Yield (1962+) - Price only, no coupons
+        'TYX': '^TYX',           # 30-Year Treasury Yield (1977+) - Price only, no coupons
+        'FVX': '^FVX',           # 5-Year Treasury Yield (1962+) - Price only, no coupons
+        'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
+        
+        # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
+        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
+        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
+        'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
+        'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
+        'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
+        'SPTL': 'SPTL',          # Long Term Treasury ETF (2007+) - With coupons
+        'SPTS': 'SPTS',          # Short Term Treasury ETF (2011+) - With coupons
+        'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
+        
+        # Cash/Zero Return
+        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
+        
+        # Gold & Commodities
+        'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
+        'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - With dividends
+        'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - With dividends
+        'GOLDF': 'GC=F',         # Gold Futures (2000+) - No dividends
+        'GOLD50': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'ZROZ50': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'TLT50': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'BTC50': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
+        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
+        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
+        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
+        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
+        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
+        'IEF50': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
+        'KMLM50': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
+        'DBMF50': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
+        'TBILL50': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
+        'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
+        'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
+        'CORN': 'ZC=F',          # Corn Futures (2000+) - No dividends
+        'SOYBEAN': 'ZS=F',       # Soybean Futures (2000+) - No dividends
+        'COFFEE': 'KC=F',        # Coffee Futures (2000+) - No dividends
+        'SUGAR': 'SB=F',         # Sugar Futures (2000+) - No dividends
+        'COTTON': 'CT=F',        # Cotton Futures (2000+) - No dividends
+        'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
+        'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
+        'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+    }
+
+def resolve_ticker_alias(ticker):
+    """Resolve ticker alias to actual ticker symbol"""
+    aliases = get_ticker_aliases()
+    return aliases.get(ticker.upper(), ticker)
+
+
 def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
-    """Cache ticker data with proper cache keys including all parameters"""
+    """Get ticker data with proper cache keys including all parameters (NO_CACHE version)"""
     # Resolve ticker alias if it exists
     resolved_ticker = resolve_ticker_alias(base_ticker)
     
@@ -913,7 +937,7 @@ def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", a
     return hist
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Cache ticker data to improve performance across multiple tabs
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage and expense ratio format like SPY?L=3?E=0.84)
@@ -6603,6 +6627,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         st.session_state.strategy_comparison_run_backtest = True
         # Show standalone popup notification that code is really running
         st.toast("**Code is running!** Starting backtest...", icon="🚀")
+        
+        # Check for kill request
+        check_kill_request()
 
 # Leverage Summary Section - moved here to appear after ticker input
 leveraged_tickers = []
@@ -7133,54 +7160,8 @@ current_state = active_portfolio.get('variant_expander_expanded', False)
 unique_expander_key = f"variants_exp_p{portfolio_index}_v{hash(str(active_portfolio.get('name', '')))}"
 
 with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
-    # Show current pin status and provide pin/unpin controls
-    col_status, col_pin, col_unpin = st.columns([2, 1, 1])
-    
-    with col_status:
-        if current_state:
-            st.info("📌 **Status: EXPANDED & PINNED** for this portfolio")
-        else:
-            st.info("📌 **Status: COLLAPSED** for this portfolio")
-    
-    with col_pin:
-        if not current_state:
-            if st.button("📌 Pin Expanded", key=f"pin_expanded_{portfolio_index}", type="primary"):
-                active_portfolio['variant_expander_expanded'] = True
-                # Sync back to session state
-                st.session_state['strategy_comparison_active_variant_expanded'] = True
-                st.success("✅ Expander state PINNED for this portfolio!")
-                st.session_state.strategy_comparison_rerun_flag = True
-    
-    with col_unpin:
-        if current_state:
-            if st.button("🔓 Unpin", key=f"unpin_expanded_{portfolio_index}", type="secondary"):
-                active_portfolio['variant_expander_expanded'] = False
-                # Sync back to session state
-                st.session_state['strategy_comparison_active_variant_expanded'] = False
-                st.success("🔓 Expander state UNPINNED for this portfolio!")
-                st.session_state.strategy_comparison_rerun_flag = True
-
     st.markdown("**Select parameters to vary and customize their values:**")
     
-    # Add explanatory text about how it works and naming
-    st.info("""
-    **📚 How Portfolio Variants Work:**
-    
-    This tool generates multiple portfolio variants by combining your selected options. Each variant will be a complete copy of your current portfolio with the specified changes.
-    
-    **🏷️ Portfolio Naming Convention:**
-    - **Format**: `Portfolio Name (Rebalancing Frequency - Momentum Strategy : When momentum not all negative and When momentum all negative - Include Beta in weighting - Include Volatility in weighting - Min Threshold - Max Allocation)`
-    - **Examples**:
-      - `My Portfolio (Quarterly - Momentum : Classic and Cash - Beta - Volatility - Min 2.00% - Max 10.00%)`
-      - `My Portfolio (Monthly - Momentum : Relative and Equal Weight - Beta - Min 3.50% - Max 15.00%)`
-      - `My Portfolio (Quarterly - No Momentum)`
-    
-    **💡 Tips**: 
-    - Select at least one rebalancing frequency
-    - If "Use Momentum" is unchecked, momentum options are hidden
-    - Beta and Volatility only appear when enabled
-    """)
-
     # Add checkbox to keep current portfolio
     keep_current_portfolio = st.checkbox(
         "✅ Keep Current Portfolio", 
@@ -7189,18 +7170,13 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         help="When checked, the current portfolio (including benchmark) will be kept. When unchecked, only the generated variants will be created."
     )
     
-    # Add explanatory note about what happens when unchecked
-    if not keep_current_portfolio:
-        st.info("⚠️ **Note:** When unchecked, the current portfolio will be **removed** after generating variants. Only the variants will remain in your portfolio list.")
+    st.markdown("---")
     
-    st.markdown("---")  # Add separator before variant parameters
-
     variant_params = {}
     
     col1, col2 = st.columns(2)
     
     with col1:
-        # Rebalance Frequency (section title - not a checkbox!)
         st.markdown("**Rebalance Frequency:**")
         rebalance_options = []
         if st.checkbox("Never", key="strategy_rebalance_never"):
@@ -7222,27 +7198,20 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         if st.checkbox("Annually", key="strategy_rebalance_annually"):
             rebalance_options.append("Annually")
         
-        # Validation: At least one rebalance frequency must be selected
         if rebalance_options:
             variant_params["rebalance_frequency"] = rebalance_options
         else:
             st.error("⚠️ **At least one Rebalance Frequency must be selected!**")
     
     with col2:
-        # Use Momentum (simple checkbox - just enables momentum options, doesn't create variants)
-        # Reset checkbox to default if it doesn't exist in session state (fresh portfolio selection)
-        if "strategy_use_momentum_vary" not in st.session_state:
-            st.session_state["strategy_use_momentum_vary"] = False
-        use_momentum_vary = st.checkbox("Use Momentum", key="strategy_use_momentum_vary")
+        use_momentum_vary = st.checkbox("Use Momentum", value=True, key="strategy_use_momentum_vary")
     
-    # Show momentum options ONLY if user checked "Use Momentum" 
-    # (regardless of current portfolio's momentum status)
+    # Show momentum options ONLY if user checked "Use Momentum"
     if use_momentum_vary:
         st.markdown("---")
         col_mom_left, col_mom_right = st.columns(2)
         
         with col_mom_left:
-            # Momentum Strategy Section
             st.markdown("**Momentum strategy when NOT all negative:**")
             momentum_options = []
             if st.checkbox("Classic momentum", value=True, key="strategy_momentum_classic"):
@@ -7250,7 +7219,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             if st.checkbox("Relative momentum", key="strategy_momentum_relative"):
                 momentum_options.append("Relative Momentum")
             
-            # Validation and storage for momentum strategy
             if momentum_options:
                 variant_params["momentum_strategy"] = momentum_options
             else:
@@ -7258,7 +7226,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             
             st.markdown("---")
             
-            # Negative Strategy Section  
             st.markdown("**Strategy when ALL momentum scores are negative:**")
             negative_options = []
             if st.checkbox("Cash", value=True, key="strategy_negative_cash"):
@@ -7268,14 +7235,12 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             if st.checkbox("Relative momentum", key="strategy_negative_relative"):
                 negative_options.append("Relative momentum")
             
-            # Validation and storage for negative strategy
             if negative_options:
                 variant_params["negative_strategy"] = negative_options
             else:
                 st.error("⚠️ **At least one negative strategy must be selected!**")
         
         with col_mom_right:
-            # Beta in momentum weighting (section title - not a checkbox!)
             st.markdown("**Include Beta in momentum weighting:**")
             beta_options = []
             if st.checkbox("With Beta", value=True, key="strategy_beta_yes"):
@@ -7283,7 +7248,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             if st.checkbox("Without Beta", key="strategy_beta_no"):
                 beta_options.append(False)
             
-            # Validation: At least one beta option must be selected
             if beta_options:
                 variant_params["include_beta"] = beta_options
             else:
@@ -7291,7 +7255,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             
             st.markdown("---")
             
-            # Volatility in momentum weighting (section title - not a checkbox!)
             st.markdown("**Include Volatility in momentum weighting:**")
             vol_options = []
             if st.checkbox("With Volatility", value=True, key="strategy_vol_yes"):
@@ -7299,181 +7262,191 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             if st.checkbox("Without Volatility", key="strategy_vol_no"):
                 vol_options.append(False)
             
-            # Validation: At least one volatility option must be selected
             if vol_options:
                 variant_params["include_volatility"] = vol_options
             else:
                 st.error("⚠️ **At least one Volatility option must be selected!**")
-    else:
-        st.info("💡 **Momentum-related options** (Momentum Strategy, Negative Strategy, Beta, Volatility) are only available when momentum is enabled in the current portfolio or when varying 'Use Momentum' to include enabled variants.")
-    
-    # Minimal Threshold Filter Section - Only show when momentum is enabled
-    if use_momentum_vary:
+        
+        # Minimal Threshold Filter Section - COMPLETELY NEW APPROACH
         st.markdown("---")
         st.markdown("**Minimal Threshold Filter:**")
         
-        # Initialize session state for threshold filters if not exists
-        if f"threshold_filters_{portfolio_index}" not in st.session_state:
-            st.session_state[f"threshold_filters_{portfolio_index}"] = []
+        # NEW APPROACH: Use a single persistent state object
+        if f"threshold_state_{portfolio_index}" not in st.session_state:
+            st.session_state[f"threshold_state_{portfolio_index}"] = {
+                "disabled": True,
+                "enabled": False,
+                "values": [2.0]
+            }
         
-        # Checkboxes for enable/disable
-        col_thresh_left, col_thresh_right = st.columns(2)
+        state = st.session_state[f"threshold_state_{portfolio_index}"]
         
-        with col_thresh_left:
-            disable_threshold = st.checkbox(
-                "Disable Minimal Threshold Filter", 
-                value=True, 
-                key=f"disable_threshold_{portfolio_index}",
-                help="Keeps the minimal threshold filter disabled"
+        # Checkboxes for both options (can be both selected)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            disabled = st.checkbox(
+                "Disable Threshold",
+                value=state["disabled"],
+                key=f"thresh_disabled_{portfolio_index}"
             )
         
-        with col_thresh_right:
-            enable_threshold = st.checkbox(
-                "Enable Minimal Threshold Filter", 
-                value=False, 
-                key=f"enable_threshold_{portfolio_index}",
-                help="Enables the minimal threshold filter with customizable values"
+        with col2:
+            enabled = st.checkbox(
+                "Enable Threshold",
+                value=state["enabled"],
+                key=f"thresh_enabled_{portfolio_index}"
             )
         
-        # Validation: At least one must be selected
-        if not disable_threshold and not enable_threshold:
-            st.error("⚠️ **At least one Minimal Threshold Filter option must be selected!**")
+        # Update state
+        state["disabled"] = disabled
+        state["enabled"] = enabled
         
-        # Build threshold options list
+        # Build threshold options
         threshold_options = []
         
-        # If disable is selected, add None to options
-        if disable_threshold:
+        if disabled:
             threshold_options.append(None)
         
-        # If enable is selected, show threshold input options
-        if enable_threshold:
+        if enabled:
             st.markdown("**Threshold Values:**")
             
-            # Add new threshold button
-            if st.button("➕ Add Threshold Value", key=f"add_threshold_{portfolio_index}"):
-                st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
-                st.session_state.strategy_comparison_rerun_flag = True
+            # Add button
+            if st.button("➕ Add", key=f"add_thresh_{portfolio_index}"):
+                state["values"].append(2.0)
+                st.rerun()
             
-            # Display existing threshold inputs
-            for i, threshold in enumerate(st.session_state[f"threshold_filters_{portfolio_index}"]):
-                col_input, col_remove = st.columns([3, 1])
+            # Display values with truly unique keys for each value
+            for i in range(len(state["values"])):
+                col1, col2 = st.columns([4, 1])
                 
-                with col_input:
-                    threshold_value = st.number_input(
-                        f"Threshold {i+1} (%)",
+                # Create truly unique key using timestamp and index
+                unique_id = f"{portfolio_index}_{i}_{id(state['values'])}"
+                
+                with col1:
+                    val = st.number_input(
+                        f"Value {i+1}",
                         min_value=0.0,
                         max_value=100.0,
-                        value=threshold,
+                        value=state["values"][i],
                         step=0.1,
-                        format="%.2f",
-                        key=f"threshold_input_{portfolio_index}_{i}",
-                        help="Minimum threshold percentage for portfolio allocation"
+                        key=f"thresh_input_{unique_id}"
                     )
-                    threshold_options.append(threshold_value)
+                    # Update the value in state
+                    state["values"][i] = val
+                    threshold_options.append(val)
                 
-                with col_remove:
-                    if st.button("🗑️", key=f"remove_threshold_{portfolio_index}_{i}", help="Remove this threshold"):
-                        st.session_state[f"threshold_filters_{portfolio_index}"].pop(i)
-                        st.session_state.strategy_comparison_rerun_flag = True
-            
-            # If no thresholds exist, add a default one
-            if not st.session_state[f"threshold_filters_{portfolio_index}"]:
-                st.session_state[f"threshold_filters_{portfolio_index}"].append(2.0)
-                st.session_state.strategy_comparison_rerun_flag = True
+                with col2:
+                    if st.button("🗑️", key=f"del_thresh_{unique_id}"):
+                        # Create a copy of the list and remove the specific index
+                        new_values = state["values"][:i] + state["values"][i+1:]
+                        state["values"] = new_values
+                        st.rerun()
         
-        # Store threshold options in variant params if any are selected
+        # Add to variant params
         if threshold_options:
             variant_params["minimal_threshold"] = threshold_options
-        elif not disable_threshold and not enable_threshold:
-            st.error("⚠️ **At least one threshold value must be provided when Enable is selected!**")
     else:
-        # When momentum is not enabled, add None as default
         variant_params["minimal_threshold"] = [None]
+        
+        # CLEAN SESSION STATE: When momentum is disabled, clean up threshold session state
+        if f"threshold_filters_{portfolio_index}" in st.session_state:
+            del st.session_state[f"threshold_filters_{portfolio_index}"]
+        if f"disable_threshold_{portfolio_index}" in st.session_state:
+            del st.session_state[f"disable_threshold_{portfolio_index}"]
+        if f"enable_threshold_{portfolio_index}" in st.session_state:
+            del st.session_state[f"enable_threshold_{portfolio_index}"]
     
-    # Max Allocation Filter Section - Only show when momentum is enabled
+    # Maximum Allocation Filter Section - COMPLETELY NEW APPROACH
     if use_momentum_vary:
         st.markdown("---")
-        st.markdown("**Max Allocation Filter:**")
+        st.markdown("**Maximum Allocation Filter:**")
         
-        # Initialize session state for max allocation filters if not exists
-        if f"max_allocation_filters_{portfolio_index}" not in st.session_state:
-            st.session_state[f"max_allocation_filters_{portfolio_index}"] = []
+        # NEW APPROACH: Use a single persistent state object
+        if f"max_allocation_state_{portfolio_index}" not in st.session_state:
+            st.session_state[f"max_allocation_state_{portfolio_index}"] = {
+                "disabled": True,
+                "enabled": False,
+                "values": [10.0]
+            }
         
-        # Checkboxes for enable/disable
-        col_max_left, col_max_right = st.columns(2)
+        state = st.session_state[f"max_allocation_state_{portfolio_index}"]
         
-        with col_max_left:
-            disable_max_allocation = st.checkbox(
-                "Disable Max Allocation Filter", 
-                value=True, 
-                key=f"disable_max_allocation_{portfolio_index}",
-                help="Keeps the max allocation filter disabled"
+        # Checkboxes for both options (can be both selected)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            disabled = st.checkbox(
+                "Disable Max Allocation",
+                value=state["disabled"],
+                key=f"max_disabled_{portfolio_index}"
             )
         
-        with col_max_right:
-            enable_max_allocation = st.checkbox(
-                "Enable Max Allocation Filter", 
-                value=False, 
-                key=f"enable_max_allocation_{portfolio_index}",
-                help="Enables the max allocation filter with customizable values"
+        with col2:
+            enabled = st.checkbox(
+                "Enable Max Allocation",
+                value=state["enabled"],
+                key=f"max_enabled_{portfolio_index}"
             )
         
-        # Validation: At least one must be selected
-        if not disable_max_allocation and not enable_max_allocation:
-            st.error("⚠️ **At least one Max Allocation Filter option must be selected!**")
+        # Update state
+        state["disabled"] = disabled
+        state["enabled"] = enabled
         
-        # Build max allocation options list
+        # Build max allocation options
         max_allocation_options = []
         
-        # If disable is selected, add None to options
-        if disable_max_allocation:
+        if disabled:
             max_allocation_options.append(None)
         
-        # If enable is selected, show max allocation input options
-        if enable_max_allocation:
+        if enabled:
             st.markdown("**Max Allocation Values:**")
             
-            # Add new max allocation button
-            if st.button("➕ Add Max Allocation Value", key=f"add_max_allocation_{portfolio_index}"):
-                st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
-                st.session_state.strategy_comparison_rerun_flag = True
+            # Add button
+            if st.button("➕ Add", key=f"add_max_{portfolio_index}"):
+                state["values"].append(10.0)
+                st.rerun()
             
-            # Display existing max allocation inputs
-            for i, max_allocation in enumerate(st.session_state[f"max_allocation_filters_{portfolio_index}"]):
-                col_input, col_remove = st.columns([3, 1])
+            # Display values with truly unique keys for each value
+            for i in range(len(state["values"])):
+                col1, col2 = st.columns([4, 1])
                 
-                with col_input:
-                    max_allocation_value = st.number_input(
-                        f"Max Allocation {i+1} (%)",
-                        min_value=0.0,
+                # Create truly unique key using timestamp and index
+                unique_id = f"{portfolio_index}_{i}_{id(state['values'])}"
+                
+                with col1:
+                    val = st.number_input(
+                        f"Value {i+1}",
+                        min_value=0.1,
                         max_value=100.0,
-                        value=max_allocation,
+                        value=state["values"][i],
                         step=0.1,
-                        format="%.2f",
-                        key=f"max_allocation_input_{portfolio_index}_{i}",
-                        help="Maximum allocation percentage per stock"
+                        key=f"max_input_{unique_id}"
                     )
-                    max_allocation_options.append(max_allocation_value)
+                    # Update the value in state
+                    state["values"][i] = val
+                    max_allocation_options.append(val)
                 
-                with col_remove:
-                    if st.button("🗑️", key=f"remove_max_allocation_{portfolio_index}_{i}", help="Remove this max allocation"):
-                        st.session_state[f"max_allocation_filters_{portfolio_index}"].pop(i)
-                        st.session_state.strategy_comparison_rerun_flag = True
-            
-            # If no max allocations exist, add a default one
-            if not st.session_state[f"max_allocation_filters_{portfolio_index}"]:
-                st.session_state[f"max_allocation_filters_{portfolio_index}"].append(10.0)
-                st.session_state.strategy_comparison_rerun_flag = True
+                with col2:
+                    if st.button("🗑️", key=f"del_max_{unique_id}"):
+                        # Create a copy of the list and remove the specific index
+                        new_values = state["values"][:i] + state["values"][i+1:]
+                        state["values"] = new_values
+                        st.rerun()
         
-        # Store max allocation options in variant params if any are selected
+        # Add to variant params
         if max_allocation_options:
             variant_params["max_allocation"] = max_allocation_options
-        elif not disable_max_allocation and not enable_max_allocation:
-            st.error("⚠️ **At least one max allocation value must be provided when Enable is selected!**")
     else:
-        # When momentum is not enabled, add None as default
         variant_params["max_allocation"] = [None]
+        
+        # CLEAN SESSION STATE: When momentum is disabled, clean up max allocation session state
+        if f"max_allocation_filters_{portfolio_index}" in st.session_state:
+            del st.session_state[f"max_allocation_filters_{portfolio_index}"]
+        if f"disable_max_allocation_{portfolio_index}" in st.session_state:
+            del st.session_state[f"disable_max_allocation_{portfolio_index}"]
+        if f"enable_max_allocation_{portfolio_index}" in st.session_state:
+            del st.session_state[f"enable_max_allocation_{portfolio_index}"]
     
     # Calculate total combinations
     total_variants = 1
@@ -7483,185 +7456,61 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     if variant_params:
         st.info(f"🎯 **{total_variants} variants** will be generated")
         
-        # Validation: Check for required parameters
-        validation_errors = []
-        
-        # Check if rebalance frequency is missing (always required)
-        if "rebalance_frequency" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **Rebalance Frequency**")
-        
-        # If momentum is enabled (user checked "Use Momentum"), we need ALL momentum parameters
-        if use_momentum_vary:
-            # Check if momentum strategies are missing (they're always required when momentum enabled)
-            if "momentum_strategy" not in variant_params:
-                validation_errors.append("⚠️ Select at least one **Momentum Strategy** when momentum is enabled")
+        if st.button(f"✨ Generate {total_variants} Portfolio Variants", type="primary", key=f"generate_variants_{portfolio_index}"):
             
-            # Check if negative strategies are missing (they're always required when momentum enabled)
-            if "negative_strategy" not in variant_params:
-                validation_errors.append("⚠️ Select at least one **Negative Strategy** when momentum is enabled")
-            
-            # Check if beta options are missing (they're always required when momentum enabled)
-            if "include_beta" not in variant_params:
-                validation_errors.append("⚠️ Select at least one **Beta option** when momentum is enabled")
-            
-            # Check if volatility options are missing (they're always required when momentum enabled)
-            if "include_volatility" not in variant_params:
-                validation_errors.append("⚠️ Select at least one **Volatility option** when momentum is enabled")
-        
-        # Check if minimal threshold filter is missing (only required when momentum is enabled)
-        if use_momentum_vary and "minimal_threshold" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **Minimal Threshold Filter** option when momentum is enabled")
-        
-        # Check if max allocation filter is missing (only required when momentum is enabled)
-        if use_momentum_vary and "max_allocation" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **Max Allocation Filter** option when momentum is enabled")
-        
-        # Show validation errors
-        if validation_errors:
-            for error in validation_errors:
-                st.error(error)
-            st.warning("🚫 **Cannot generate variants** - Fix the errors above first")
-        else:
-            # All validations passed - show generate button
-            if st.button(f"✨ Generate {total_variants} Portfolio Variants", type="primary"):
-                # Define the function locally to avoid import issues
-                def generate_portfolio_variants(base_portfolio, variant_params, base_name):
-                    """
-                    Generate multiple portfolio variants based on the base portfolio and variant parameters.
-                    
-                    Args:
-                        base_portfolio (dict): The base portfolio configuration
-                        variant_params (dict): Dictionary containing variant parameters and their possible values
-                        base_name (str): The base name to use for variant naming
-                        
-                    Returns:
-                        list: List of portfolio variant configurations
-                    """
-                    variants = []
-                    
-                    # Get all possible values for each parameter
-                    param_values = {}
-                    for param, values in variant_params.items():
-                        if isinstance(values, list):
-                            param_values[param] = values
-                        else:
-                            param_values[param] = [values]
-                    
-                    # Generate all combinations
-                    from itertools import product
-                    
-                    # Get the parameter names and their possible values
-                    param_names = list(param_values.keys())
-                    param_value_lists = [param_values[param] for param in param_names]
-                    
-                    # Generate all combinations
-                    combinations = list(product(*param_value_lists))
-                    
-                    # Create a variant for each combination
-                    for i, combination in enumerate(combinations):
-                        # Create a deep copy of the base portfolio
-                        variant = base_portfolio.copy()
-                        
-                        # Update the variant with the new parameter values
-                        for j, param in enumerate(param_names):
-                            value = combination[j]
-                            
-                            # Map UI parameter names to actual portfolio configuration fields
-                            if param == "rebalance_frequency":
-                                variant["rebalancing_frequency"] = value
-                            elif param == "momentum_strategy":
-                                variant["momentum_strategy"] = value
-                            elif param == "negative_strategy":
-                                variant["negative_momentum_strategy"] = value
-                            elif param == "include_beta":
-                                variant["calc_beta"] = value
-                            elif param == "include_volatility":
-                                variant["calc_volatility"] = value
-                            elif param == "minimal_threshold":
-                                if value is not None:
-                                    variant["use_minimal_threshold"] = True
-                                    variant["minimal_threshold_percent"] = value
-                                else:
-                                    variant["use_minimal_threshold"] = False
-                                    variant["minimal_threshold_percent"] = 2.0  # Default value
-                            elif param == "max_allocation":
-                                if value is not None:
-                                    variant["use_max_allocation"] = True
-                                    variant["max_allocation_percent"] = value
-                                else:
-                                    variant["use_max_allocation"] = False
-                                    variant["max_allocation_percent"] = 10.0  # Default value
-                            else:
-                                # For any other parameters, use the original name
-                                variant[param] = value
-                        
-                        # Generate a unique name for the variant
-                        variant_name_parts = []
-                        for param in param_names:
-                            if param in variant:
-                                value = variant[param]
-                                if isinstance(value, bool):
-                                    variant_name_parts.append(f"{param}_{'ON' if value else 'OFF'}")
-                                elif isinstance(value, (int, float)):
-                                    variant_name_parts.append(f"{param}_{value}")
-                                else:
-                                    variant_name_parts.append(f"{param}_{str(value)}")
-                        
-                        # Create variant name
-                        if variant_name_parts:
-                            variant['name'] = f"{base_portfolio.get('name', 'Portfolio')}_Variant_{i+1}_{'_'.join(variant_name_parts)}"
-                        else:
-                            variant['name'] = f"{base_portfolio.get('name', 'Portfolio')}_Variant_{i+1}"
-                        
-                        # Ensure unique name by adding suffix if needed
-                        base_name = variant['name']
-                        counter = 1
-                        while any(v.get('name') == variant['name'] for v in variants):
-                            variant['name'] = f"{base_name}_{counter}"
-                            counter += 1
-                        
-                        variants.append(variant)
-                    
-                    return variants
-                
+            def generate_portfolio_variants(base_portfolio, variant_params, base_name):
+                """
+                Generate multiple portfolio variants based on the base portfolio and variant parameters.
+                """
+                import itertools
                 import copy
                 
-                base_portfolio = copy.deepcopy(active_portfolio)
-                base_name = base_portfolio['name']
+                # Get all parameter names and their possible values
+                param_names = list(variant_params.keys())
+                param_values = list(variant_params.values())
                 
-                # SMART NUCLEAR: Handle momentum based on "Use Momentum" checkbox
-                if use_momentum_vary:
-                    base_portfolio['use_momentum'] = True
-                    # Only add default momentum windows if base portfolio had none
-                    if not base_portfolio.get('momentum_windows'):
-                        base_portfolio['momentum_windows'] = [
-                            {"lookback": 365, "exclude": 30, "weight": 0.5},
-                            {"lookback": 180, "exclude": 30, "weight": 0.3},
-                            {"lookback": 120, "exclude": 30, "weight": 0.2},
-                        ]
-                        base_portfolio['momentum_strategy'] = base_portfolio.get('momentum_strategy', 'Classic')
-                        base_portfolio['negative_momentum_strategy'] = base_portfolio.get('negative_momentum_strategy', 'Cash')
-                        base_portfolio['calc_beta'] = base_portfolio.get('calc_beta', True)
-                        base_portfolio['calc_volatility'] = base_portfolio.get('calc_volatility', True)
-                        print("SMART NUCLEAR: Added default momentum settings to base portfolio (had none)")
-                    else:
-                        print(f"SMART NUCLEAR: Preserved existing momentum windows on base portfolio (had {len(base_portfolio['momentum_windows'])} windows)")
-                else:
-                    # User unchecked "Use Momentum" - disable momentum for variants
-                    base_portfolio['use_momentum'] = False
-                    print("SMART NUCLEAR: Disabled momentum for variants (Use Momentum unchecked)")
+                # Generate all combinations using itertools.product
+                combinations = list(itertools.product(*param_values))
                 
-                variants = generate_portfolio_variants(base_portfolio, variant_params, base_name)
+                variants = []
                 
-                # CUSTOM NAMING: Override the generated names with clearer, more readable names
-                for variant in variants:
-                    # Create a much clearer name format
+                for combination in combinations:
+                    # Create a deep copy of the base portfolio
+                    variant = copy.deepcopy(base_portfolio)
+                    
+                    # Apply each parameter value from the combination
+                    for param, value in zip(param_names, combination):
+                        if param == "rebalance_frequency":
+                            variant["rebalancing_frequency"] = value
+                        elif param == "momentum_strategy":
+                            variant["momentum_strategy"] = value
+                        elif param == "negative_strategy":
+                            variant["negative_momentum_strategy"] = value
+                        elif param == "include_beta":
+                            variant["calc_beta"] = value
+                        elif param == "include_volatility":
+                            variant["calc_volatility"] = value
+                        elif param == "minimal_threshold":
+                            if value is not None:
+                                variant["use_minimal_threshold"] = True
+                                variant["minimal_threshold_percent"] = value
+                            else:
+                                variant["use_minimal_threshold"] = False
+                                variant["minimal_threshold_percent"] = 2.0
+                        elif param == "max_allocation":
+                            if value is not None:
+                                variant["use_max_allocation"] = True
+                                variant["max_allocation_percent"] = value
+                            else:
+                                variant["use_max_allocation"] = False
+                                variant["max_allocation_percent"] = 10.0
+                    
+                    # Generate variant name (exact same format as page 1)
                     clear_name_parts = []
                     
-                    # Rebalancing frequency (compact - just the frequency word)
-                    if 'rebalancing_frequency' in variant:
-                        freq = variant['rebalancing_frequency']
-                        clear_name_parts.append(freq)  # Just "Quarterly", "Monthly", etc.
+                    # Rebalancing frequency
+                    freq = variant.get('rebalancing_frequency', 'Monthly')
+                    clear_name_parts.append(freq)
                     
                     # Add dash separator
                     clear_name_parts.append("-")
@@ -7705,41 +7554,79 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     
                     # Create the new clear name
                     clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
-                    variant['name'] = clear_name
+                    variant["name"] = clear_name
+                    
+                    variants.append(variant)
                 
-                # Handle current portfolio based on user choice - use exact same logic as Remove Selected Portfolio
-                if not keep_current_portfolio:
-                    if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
-                        # Use exact same logic as remove_portfolio_callback
-                        st.session_state.strategy_comparison_portfolio_configs.pop(st.session_state.strategy_comparison_active_portfolio_index)
-                        st.session_state.strategy_comparison_active_portfolio_index = max(0, st.session_state.strategy_comparison_active_portfolio_index - 1)
-                        
-                        # CRITICAL: Force a proper portfolio switch to update all UI widgets
-                        # This ensures the portfolio name text box and other widgets show the new portfolio's data
-                        st.session_state.strategy_comparison_rerun_flag = True
-                        
-                        st.success("🗑️ Removed original portfolio - Active portfolio updated")
-                    else:
-                        # Only one portfolio - can't remove it
-                        st.warning("⚠️ Cannot remove the only portfolio. Keeping original portfolio.")
-                        keep_current_portfolio = True
-                
-                # Add variants to portfolio list with unique names
-                for variant in variants:
-                    # Use central function - automatically ensures unique name
-                    add_portfolio_to_configs(variant)
-                
-                # Show appropriate success message based on user choice
-                if keep_current_portfolio:
-                    st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio kept.")
-                    st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
+                return variants
+            
+            import copy
+            
+            base_portfolio = copy.deepcopy(active_portfolio)
+            base_name = base_portfolio['name']
+            
+            # Handle momentum based on "Use Momentum" checkbox
+            if use_momentum_vary:
+                base_portfolio['use_momentum'] = True
+                if not base_portfolio.get('momentum_windows'):
+                    base_portfolio['momentum_windows'] = [
+                        {"lookback": 365, "exclude": 30, "weight": 0.5},
+                        {"lookback": 180, "exclude": 30, "weight": 0.3},
+                        {"lookback": 120, "exclude": 30, "weight": 0.2},
+                    ]
+            else:
+                base_portfolio['use_momentum'] = False
+                base_portfolio['momentum_windows'] = []
+            
+            # Generate variants
+            variants = generate_portfolio_variants(base_portfolio, variant_params, base_name)
+            
+            # Handle portfolio removal if requested
+            if not keep_current_portfolio:
+                if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
+                    st.session_state.strategy_comparison_portfolio_configs.pop(portfolio_index)
+                    if portfolio_index >= len(st.session_state.strategy_comparison_portfolio_configs):
+                        st.session_state.strategy_comparison_active_portfolio_index = len(st.session_state.strategy_comparison_portfolio_configs) - 1
                 else:
-                    st.success(f"🎉 Generated {len(variants)} variants of '{base_name}'! Original portfolio removed.")
-                    st.info(f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}")
-                
-                st.session_state.strategy_comparison_rerun_flag = True
+                    st.warning("⚠️ Cannot remove the only portfolio. Keeping original portfolio.")
+                    keep_current_portfolio = True
+            
+            # Add variants to portfolio list
+            for variant in variants:
+                # Use central function to ensure unique names
+                add_portfolio_to_configs(variant)
+            
+            # Store success message in session state to persist after rerun
+            success_msg = f"🎉 **Generated {len(variants)} variants** of '{base_name}'! Original portfolio kept." if keep_current_portfolio else f"🎉 **Generated {len(variants)} variants** of '{base_name}'! Original portfolio removed."
+            info_msg = f"📊 Total portfolios: {len(st.session_state.strategy_comparison_portfolio_configs)}"
+            
+            st.session_state[f"success_message_{portfolio_index}"] = success_msg
+            st.session_state[f"info_message_{portfolio_index}"] = info_msg
+            
+            # DEBUG: Show what we're storing
+            st.write(f"DEBUG: Storing success_msg: {success_msg}")
+            st.write(f"DEBUG: Storing info_msg: {info_msg}")
+            
+            st.session_state.strategy_comparison_rerun_flag = True
+            st.rerun()
     else:
-        st.warning("⚠️ Select at least one parameter to vary")
+        st.warning("⚠️ **No variants will be generated** - please select at least one option to vary.")
+    
+    # Display success messages AFTER the generate button (so they appear near the button)
+    success_key = f"success_message_{portfolio_index}"
+    info_key = f"info_message_{portfolio_index}"
+    
+    if success_key in st.session_state:
+        st.success(st.session_state[success_key])
+        del st.session_state[success_key]  # Clear after display
+    
+    if info_key in st.session_state:
+        st.info(st.session_state[info_key])
+        del st.session_state[info_key]  # Clear after display
+
+
+
+
 
 col_left, col_right = st.columns([1, 1])
 with col_left:
@@ -8593,7 +8480,7 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             successful_strategies = 0
             failed_strategies = []
             
-            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability...**")
+            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability (NO_CACHE)...**")
             
             # Process strategies one by one with robust error handling
             for i, cfg in enumerate(st.session_state.strategy_comparison_portfolio_configs, start=1):
@@ -10013,16 +9900,16 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     "Sort by:",
                     options=stats_df_clean.columns.tolist(),
                     index=0,
-                    key="no_cache_strategy_comparison_final_stats_sort_column",
+                    key="strategy_comparison_final_stats_sort_column",
                     help="Select a column to sort the table numerically"
                 )
             with col2:
-                if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                if st.button("⬇️ Sort ↓", key="strategy_comparison_final_stats_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
                     sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=False)
                     st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
                     st.session_state.strategy_comparison_rerun_flag = True
             with col3:
-                if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                if st.button("⬆️ Sort ↑", key="strategy_comparison_final_stats_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
                     sorted_df = sort_dataframe_numerically(stats_df_clean, sort_column, ascending=True)
                     st.session_state.strategy_comparison_final_stats_sorted_df = sorted_df
                     st.session_state.strategy_comparison_rerun_flag = True
@@ -10517,16 +10404,16 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                         "Sort by:",
                         options=focused_df.columns.tolist(),
                         index=0,
-                        key="no_cache_strategy_comparison_focused_analysis_sort_column",
+                        key="strategy_comparison_focused_analysis_sort_column",
                         help="Select a column to sort the table numerically"
                     )
                 with col2:
-                    if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
+                    if st.button("⬇️ Sort ↓", key="strategy_comparison_focused_analysis_sort_desc_button", help="Sort table in descending order (highest to lowest values)"):
                         sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
                         st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                         st.session_state.strategy_comparison_rerun_flag = True
                 with col3:
-                    if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
+                    if st.button("⬆️ Sort ↑", key="strategy_comparison_focused_analysis_sort_asc_button", help="Sort table in ascending order (lowest to highest values)"):
                         sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
                         st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                         st.session_state.strategy_comparison_rerun_flag = True
@@ -10647,16 +10534,16 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     "Sort by:",
                     options=focused_df.columns.tolist(),
                     index=0,
-                    key="no_cache_strategy_comparison_focused_analysis_sort_column_2",
+                    key="strategy_comparison_focused_analysis_sort_column_2",
                     help="Select a column to sort the table numerically"
                 )
             with col2:
-                if st.button("⬇️ Sort ↓", key="no_cache_strategy_comparison_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
+                if st.button("⬇️ Sort ↓", key="strategy_comparison_focused_analysis_sort_desc_button_2", help="Sort table in descending order (highest to lowest values)"):
                     sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=False)
                     st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                     st.session_state.strategy_comparison_rerun_flag = True
             with col3:
-                if st.button("⬆️ Sort ↑", key="no_cache_strategy_comparison_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
+                if st.button("⬆️ Sort ↑", key="strategy_comparison_focused_analysis_sort_asc_button_2", help="Sort table in ascending order (lowest to highest values)"):
                     sorted_df = sort_dataframe_numerically(focused_df, focused_sort_column, ascending=True)
                     st.session_state.strategy_comparison_focused_analysis_sorted_df = sorted_df
                     st.session_state.strategy_comparison_rerun_flag = True
