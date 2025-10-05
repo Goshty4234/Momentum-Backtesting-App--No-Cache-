@@ -8739,6 +8739,9 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     clear_name = f"{base_name} ({' '.join(clear_name_parts)})"
                     variant['name'] = clear_name
                 
+                # Store the original user choice before any modifications
+                original_keep_current = keep_current_portfolio
+                
                 # Handle current portfolio based on user choice - use exact same logic as Remove Selected Portfolio
                 if not keep_current_portfolio:
                     if len(st.session_state.multi_backtest_portfolio_configs) > 1:
@@ -8761,8 +8764,13 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     # Use central function - automatically ensures unique name
                     add_portfolio_to_configs(variant)
                 
-                # Store success message in session state to persist after rerun (EXACTLY like page 3)
-                if keep_current_portfolio:
+                # NUCLEAR OPTION: Force success message display - ALWAYS show the notification
+                st.session_state[f"variant_generation_success_{portfolio_index}"] = True
+                st.session_state[f"variant_generation_message_{portfolio_index}"] = f"🎉 **Generated {len(variants)} variants** of '{base_name}'!"
+                st.session_state[f"variant_generation_info_{portfolio_index}"] = f"📊 Total portfolios: {len(st.session_state.multi_backtest_portfolio_configs)}"
+                
+                # Also store the detailed message based on user choice
+                if original_keep_current:
                     st.session_state[f"success_message_{portfolio_index}"] = f"🎉 **Generated {len(variants)} variants** of '{base_name}'! Original portfolio kept."
                     st.session_state[f"info_message_{portfolio_index}"] = f"📊 Total portfolios: {len(st.session_state.multi_backtest_portfolio_configs)}"
                 else:
@@ -8773,7 +8781,16 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     else:
         st.warning("⚠️ Select at least one parameter to vary")
     
-    # Display success messages AFTER the button (so they appear below when clicked)
+    # NUCLEAR OPTION: Display success messages - FORCE display no matter what
+    if f"variant_generation_success_{portfolio_index}" in st.session_state:
+        st.success(st.session_state[f"variant_generation_message_{portfolio_index}"])
+        st.info(st.session_state[f"variant_generation_info_{portfolio_index}"])
+        # Clear the nuclear flags
+        del st.session_state[f"variant_generation_success_{portfolio_index}"]
+        del st.session_state[f"variant_generation_message_{portfolio_index}"]
+        del st.session_state[f"variant_generation_info_{portfolio_index}"]
+    
+    # Also display the detailed messages if they exist
     if f"success_message_{portfolio_index}" in st.session_state:
         st.success(st.session_state[f"success_message_{portfolio_index}"])
         del st.session_state[f"success_message_{portfolio_index}"]  # Clear after display
