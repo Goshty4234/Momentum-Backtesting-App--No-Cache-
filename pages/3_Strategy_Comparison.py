@@ -9015,7 +9015,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 title="Backtest Comparison — Portfolio Value (with cash additions)",
                 xaxis_title="Date",
                 legend_title="Portfolios",
-                hovermode="x unified",
+                hovermode='closest',
+                hoverdistance=100,
+                spikedistance=1000,
                 template="plotly_dark",
                 yaxis_tickprefix="$",
                 yaxis_tickformat=",.0f",
@@ -9076,7 +9078,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 title="Backtest Comparison (Max Drawdown)",
                 xaxis_title="Date",
                 legend_title="Portfolios",
-                hovermode="x unified",
+                hovermode='closest',
+                hoverdistance=100,
+                spikedistance=1000,
                 template="plotly_dark",
                 # No width/height restrictions - let them be responsive like other plots
                 xaxis=dict(
@@ -9175,7 +9179,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             title="VIX Index (Fear Gauge)",
             xaxis_title="Date",
             legend_title="Index",
-            hovermode="x unified",
+            hovermode='closest',
+            hoverdistance=100,
+            spikedistance=1000,
             template="plotly_dark",
             # EXACT same formatting as the other plots
             xaxis=dict(
@@ -9326,7 +9332,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                         yaxis_title="PE Ratio",
                         template='plotly_dark',
                         height=500,
-                        hovermode='x unified',
+                        hovermode='closest',
+                        hoverdistance=100,
+                        spikedistance=1000,
                         showlegend=True,
                         xaxis=dict(
                             type='date',
@@ -9395,7 +9403,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             title="Daily Risk-Free Rate (13-Week Treasury)",
             xaxis_title="Date",
             legend_title="Rate",
-            hovermode="x unified",
+            hovermode='closest',
+            hoverdistance=100,
+            spikedistance=1000,
             template="plotly_dark",
             # EXACT same formatting as the other two plots
             xaxis=dict(
@@ -9471,7 +9481,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
             title="Annualized Risk-Free Rate (13-Week Treasury)",
             xaxis_title="Date",
             legend_title="Rate",
-            hovermode="x unified",
+            hovermode='closest',
+            hoverdistance=100,
+            spikedistance=1000,
             template="plotly_dark",
             # EXACT same formatting as the other plots
             xaxis=dict(
@@ -13403,7 +13415,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                             yaxis_title="Allocation (%)",
                             template='plotly_dark',
                             height=600,
-                            hovermode='x unified',
+                            hovermode='closest',
+                        hoverdistance=100,
+                        spikedistance=1000,
                             legend=dict(
                                 orientation="v",
                                 yanchor="top",
@@ -13592,7 +13606,9 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                                         yaxis_title="PE Ratio",
                                         template='plotly_dark',
                                         height=500,
-                                        hovermode='x unified',
+                                        hovermode='closest',
+                        hoverdistance=100,
+                        spikedistance=1000,
                                         showlegend=True,
                                         # Let Plotly handle margins automatically to prevent clipping
                                         xaxis=dict(
