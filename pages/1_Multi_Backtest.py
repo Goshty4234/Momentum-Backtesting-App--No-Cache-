@@ -6698,7 +6698,7 @@ def sync_cashflow_from_first_portfolio_callback():
                 st.session_state['multi_backtest_cashflow_sync_message_type'] = 'success'
                 
                 # Force immediate rerun to show changes
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
             else:
                 # Store info message in session state
                 st.session_state['multi_backtest_cashflow_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
@@ -6740,7 +6740,7 @@ def sync_rebalancing_from_first_portfolio_callback():
                 st.session_state['multi_backtest_rebalancing_sync_message_type'] = 'success'
                 
                 # Force immediate rerun to show changes
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
             else:
                 # Store info message in session state
                 st.session_state['multi_backtest_rebalancing_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
@@ -8736,7 +8736,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         
                         # CRITICAL: Force a proper portfolio switch to update all UI widgets
                         # This ensures the portfolio name text box and other widgets show the new portfolio's data
-                        st.session_state.strategy_comparison_rerun_flag = True
+                        st.session_state.multi_backtest_rerun_flag = True
                         
                         st.success("🗑️ Removed original portfolio - Active portfolio updated")
                     else:
@@ -8961,7 +8961,7 @@ def update_stock_ticker(index):
         # Update the text box's state to show the converted value (with dots and uppercase)
         st.session_state[key] = upper_val
         # Force UI refresh to show the converted value
-        st.rerun()
+        st.session_state.multi_backtest_rerun_flag = True
     except Exception:
         # Defensive: if portfolio index or structure changed, skip silently
         return
@@ -9075,7 +9075,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
     
     with col2:
         st.markdown("**🏛️ Treasury Bonds & T-Bills**")
@@ -9103,7 +9103,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
     
     with col3:
         st.markdown("**🥇 Gold & Commodities**")
@@ -9122,7 +9122,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
     
     with col4:
         st.markdown("**🔬 Synthetic Tickers**")
@@ -9148,7 +9148,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.session_state.multi_backtest_rerun_flag = True
     
     st.markdown("---")
     
@@ -9297,7 +9297,7 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
                 # Force immediate rerun
-                st.rerun()
+                st.session_state.multi_backtest_rerun_flag = True
             else:
                 st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
         else:
