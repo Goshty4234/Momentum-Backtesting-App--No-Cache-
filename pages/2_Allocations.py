@@ -4673,12 +4673,13 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
     if 'alloc_bulk_tickers' not in st.session_state:
         st.session_state.alloc_bulk_tickers = ""
     
-    # Auto-populate bulk ticker input with current tickers
+    # Auto-populate bulk ticker input with current tickers (only if user hasn't entered anything)
     portfolio_index = st.session_state.alloc_active_portfolio_index
     current_tickers = [stock['ticker'] for stock in st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] if stock['ticker']]
     if current_tickers:
         current_ticker_string = ' '.join(current_tickers)
-        if st.session_state.alloc_bulk_tickers != current_ticker_string:
+        # Only auto-populate if the bulk ticker field is empty or matches the current portfolio
+        if not st.session_state.alloc_bulk_tickers or st.session_state.alloc_bulk_tickers == current_ticker_string:
             st.session_state.alloc_bulk_tickers = current_ticker_string
     
     # Text area for bulk ticker input
@@ -4736,8 +4737,8 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                 st.success(f"✅ Replaced tickers with: {', '.join(ticker_list)}")
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
-                # Force immediate rerun
-                st.session_state.alloc_rerun_flag = True
+                # Force immediate rerun to refresh the UI
+                st.rerun()
             else:
                 st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
         else:
