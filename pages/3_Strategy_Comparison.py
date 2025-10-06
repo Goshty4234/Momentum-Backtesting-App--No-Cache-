@@ -199,7 +199,15 @@ def get_ticker_aliases():
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
-    return aliases.get(ticker.upper(), ticker)
+    upper_ticker = ticker.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if upper_ticker == 'BRK.B':
+        upper_ticker = 'BRK-B'
+    elif upper_ticker == 'BRK.A':
+        upper_ticker = 'BRK-A'
+    
+    return aliases.get(upper_ticker, upper_ticker)
 
 # =============================================================================
 # RISK-FREE RATE FUNCTIONS
@@ -890,7 +898,15 @@ def get_ticker_aliases():
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
-    return aliases.get(ticker.upper(), ticker)
+    upper_ticker = ticker.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if upper_ticker == 'BRK.B':
+        upper_ticker = 'BRK-B'
+    elif upper_ticker == 'BRK.A':
+        upper_ticker = 'BRK-A'
+    
+    return aliases.get(upper_ticker, upper_ticker)
 
 
 def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
@@ -4902,6 +4918,13 @@ def update_stock_ticker(index):
             if val is not None:
                 # Convert the input value to uppercase
                 upper_val = val.upper()
+                
+                # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                if upper_val == 'BRK.B':
+                    upper_val = 'BRK-B'
+                elif upper_val == 'BRK.A':
+                    upper_val = 'BRK-A'
+                
                 portfolio_configs[active_index]['stocks'][index]['ticker'] = upper_val
                 # Update the text box's state to show the uppercase value
                 st.session_state[key] = upper_val
@@ -6504,6 +6527,11 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
             for ticker in bulk_tickers.replace(',', ' ').split():
                 ticker = ticker.strip().upper()
                 if ticker:
+                    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                    if ticker == 'BRK.B':
+                        ticker = 'BRK-B'
+                    elif ticker == 'BRK.A':
+                        ticker = 'BRK-A'
                     ticker_list.append(ticker)
             
             if ticker_list:
