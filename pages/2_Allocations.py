@@ -129,12 +129,29 @@ def get_ticker_aliases():
         'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        
+        # Canadian Ticker Mappings (USD OTC -> Canadian Exchange)
+        'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX
+        'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture
+        'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX
+        'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture
+        'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture
+        'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX
+        'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX
     }
 
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
-    return aliases.get(ticker.upper(), ticker)
+    upper_ticker = ticker.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if upper_ticker == 'BRK.B':
+        upper_ticker = 'BRK-B'
+    elif upper_ticker == 'BRK.A':
+        upper_ticker = 'BRK-A'
+    
+    return aliases.get(upper_ticker, upper_ticker)
 
 # =============================================================================
 # PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
@@ -458,12 +475,29 @@ def get_ticker_aliases():
         'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
+        
+        # Canadian Ticker Mappings (USD OTC -> Canadian Exchange)
+        'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX
+        'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture
+        'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX
+        'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture
+        'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture
+        'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX
+        'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX
     }
 
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
-    return aliases.get(ticker.upper(), ticker)
+    upper_ticker = ticker.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if upper_ticker == 'BRK.B':
+        upper_ticker = 'BRK-B'
+    elif upper_ticker == 'BRK.A':
+        upper_ticker = 'BRK-A'
+    
+    return aliases.get(upper_ticker, upper_ticker)
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
     """Get ticker data (NO_CACHE version)
@@ -477,8 +511,8 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         # Parse leverage from ticker symbol
         base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
         
-        # Resolve ticker alias if it exists
-        resolved_ticker = resolve_ticker_alias(base_ticker)
+        # Use original ticker for backtests and calculations (NO conversion)
+        resolved_ticker = base_ticker
         
         # Special handling for synthetic complete tickers
         if resolved_ticker == "SPYSIM_COMPLETE":
@@ -519,7 +553,9 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
 def get_ticker_info(ticker_symbol):
     """Get ticker info (NO_CACHE version)"""
     try:
-        stock = yf.Ticker(ticker_symbol)
+        # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange)
+        resolved_ticker = resolve_ticker_alias(ticker_symbol)
+        stock = yf.Ticker(resolved_ticker)
         info = stock.info
         return info
     except Exception:
@@ -4257,9 +4293,10 @@ def update_benchmark():
     # Convert commas to dots for decimal separators (like case conversion)
     converted_benchmark = benchmark_val.replace(",", ".")
     upper_benchmark = converted_benchmark.upper()
-    resolved_benchmark = resolve_ticker_alias(upper_benchmark)
+    # Keep original benchmark ticker in UI (NO conversion here)
+    resolved_benchmark = upper_benchmark
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['benchmark_ticker'] = resolved_benchmark
-    # Update the widget to show resolved ticker
+    # Update the widget to show original ticker
     st.session_state['alloc_active_benchmark'] = resolved_benchmark
 
 def update_use_momentum():
@@ -4395,10 +4432,16 @@ def update_stock_ticker(index):
         # Convert the input value to uppercase
         upper_val = converted_val.upper()
         
-        # Resolve alias if it exists
-        resolved_ticker = resolve_ticker_alias(upper_val)
+        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+        if upper_val == 'BRK.B':
+            upper_val = 'BRK-B'
+        elif upper_val == 'BRK.A':
+            upper_val = 'BRK-A'
+        
+        # Keep original ticker in UI (NO conversion here)
+        resolved_ticker = upper_val
 
-        # Update the portfolio configuration with the resolved ticker
+        # Update the portfolio configuration with the original ticker
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][index]['ticker'] = resolved_ticker
         
         # Update the text box's state to show the resolved ticker
@@ -4698,6 +4741,11 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
             for ticker in bulk_tickers.replace(',', ' ').split():
                 ticker = ticker.strip().upper()
                 if ticker:
+                    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                    if ticker == 'BRK.B':
+                        ticker = 'BRK-B'
+                    elif ticker == 'BRK.A':
+                        ticker = 'BRK-A'
                     ticker_list.append(ticker)
             
             if ticker_list:
