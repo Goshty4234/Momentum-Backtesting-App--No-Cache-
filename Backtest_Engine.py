@@ -321,7 +321,15 @@ def resolve_ticker_alias(ticker_symbol: str) -> str:
         str: Resolved ticker symbol
     """
     aliases = get_ticker_aliases()
-    return aliases.get(ticker_symbol.upper(), ticker_symbol)
+    upper_ticker = ticker_symbol.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if upper_ticker == 'BRK.B':
+        upper_ticker = 'BRK-B'
+    elif upper_ticker == 'BRK.A':
+        upper_ticker = 'BRK-A'
+    
+    return aliases.get(upper_ticker, upper_ticker)
 
 def get_synthetic_ticker_data(ticker_symbol: str, start_date=None, end_date=None, period=None):
     """
@@ -3450,7 +3458,13 @@ def update_ticker_callback(index: int):
             # Convert the input value to uppercase
             upper_val = converted_val.upper()
             
-            # Update the portfolio configuration with the uppercase value
+            # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+            if upper_val == 'BRK.B':
+                upper_val = 'BRK-B'
+            elif upper_val == 'BRK.A':
+                upper_val = 'BRK-A'
+            
+            # Update the portfolio configuration with the converted value
             st.session_state.tickers[index] = upper_val
             
             # Update the text box's state to show the converted value (with dots and uppercase)
@@ -4186,6 +4200,11 @@ with st.sidebar:
                 for ticker in bulk_tickers.replace(',', ' ').split():
                     ticker = ticker.strip().upper()
                     if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
                         ticker_list.append(ticker)
                 
                 if ticker_list:
