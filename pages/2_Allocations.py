@@ -4268,12 +4268,8 @@ def update_use_momentum():
     if current_val != new_val:
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['use_momentum'] = new_val
         if new_val:
-            # When momentum is enabled for the first time, turn off beta and volatility
-            st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['calc_beta'] = False
-            st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['calc_volatility'] = False
-            # Update the UI checkboxes to reflect the change
-            st.session_state['alloc_active_calc_beta'] = False
-            st.session_state['alloc_active_calc_vol'] = False
+            # When momentum is enabled, keep existing beta and volatility settings
+            pass
             st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['momentum_windows'] = [
                 {"lookback": 365, "exclude": 30, "weight": 0.5},
                 {"lookback": 180, "exclude": 30, "weight": 0.3},
