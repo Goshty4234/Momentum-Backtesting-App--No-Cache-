@@ -6649,7 +6649,7 @@ def reset_beta_callback():
     st.session_state.multi_backtest_portfolio_configs[idx]['beta_window_days'] = 365
     st.session_state.multi_backtest_portfolio_configs[idx]['exclude_days_beta'] = 30
     # Ensure checkbox state reflects enabled
-    st.session_state.multi_backtest_portfolio_configs[idx]['calc_beta'] = False
+    st.session_state.multi_backtest_portfolio_configs[idx]['calc_beta'] = True
     st.session_state['multi_backtest_active_calc_beta'] = True
     # Update UI widget values to reflect reset
     st.session_state['multi_backtest_active_beta_window'] = 365
@@ -7053,7 +7053,33 @@ def paste_json_callback():
         st.error(f"An error occurred: {e}")
     st.session_state.multi_backtest_rerun_flag = True
 
+def save_current_portfolio_beta_vol_settings():
+    """Save current beta and volatility settings to the active portfolio before switching"""
+    if (st.session_state.multi_backtest_active_portfolio_index is not None and 
+        st.session_state.multi_backtest_active_portfolio_index < len(st.session_state.multi_backtest_portfolio_configs)):
+        
+        active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+        
+        # Save beta settings
+        if 'multi_backtest_active_calc_beta' in st.session_state:
+            active_portfolio['calc_beta'] = st.session_state['multi_backtest_active_calc_beta']
+        if 'multi_backtest_active_beta_window' in st.session_state:
+            active_portfolio['beta_window_days'] = st.session_state['multi_backtest_active_beta_window']
+        if 'multi_backtest_active_beta_exclude' in st.session_state:
+            active_portfolio['exclude_days_beta'] = st.session_state['multi_backtest_active_beta_exclude']
+        
+        # Save volatility settings
+        if 'multi_backtest_active_calc_vol' in st.session_state:
+            active_portfolio['calc_volatility'] = st.session_state['multi_backtest_active_calc_vol']
+        if 'multi_backtest_active_vol_window' in st.session_state:
+            active_portfolio['vol_window_days'] = st.session_state['multi_backtest_active_vol_window']
+        if 'multi_backtest_active_vol_exclude' in st.session_state:
+            active_portfolio['exclude_days_vol'] = st.session_state['multi_backtest_active_vol_exclude']
+
 def update_active_portfolio_index():
+    # CRITICAL: Save current portfolio's beta and volatility settings before switching
+    save_current_portfolio_beta_vol_settings()
+    
     # Use safe accessors to avoid AttributeError when keys are not yet set
     selected_name = st.session_state.get('multi_backtest_portfolio_selector', None)
     portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
@@ -7105,13 +7131,6 @@ def update_active_portfolio_index():
             ]
             print(f"NUCLEAR: FORCED momentum windows for portfolio {active_portfolio.get('name', 'Unknown')}")
         
-        # NUCLEAR: When momentum is enabled, ensure beta and volatility are disabled
-        if active_portfolio.get('use_momentum', False):
-            active_portfolio['calc_beta'] = False
-            active_portfolio['calc_volatility'] = False
-            # Update the UI checkboxes to reflect the change
-            st.session_state['multi_backtest_active_calc_beta'] = False
-            st.session_state['multi_backtest_active_calc_vol'] = False
         
         # NUCLEAR: Ensure threshold settings exist
         if 'use_minimal_threshold' not in active_portfolio:
@@ -7258,49 +7277,7 @@ def update_use_targeted_rebalancing():
 
 
 def update_calc_beta():
-    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-    active_portfolio = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
-    current_val = active_portfolio.get('calc_beta', False)
-    new_val = st.session_state.multi_backtest_active_calc_beta
-    
-    if current_val != new_val:
-        if new_val:
-            # Enabling beta - restore saved settings or use defaults
-            if 'saved_beta_settings' in active_portfolio:
-                # Restore previously saved beta settings
-                saved_settings = active_portfolio['saved_beta_settings']
-                active_portfolio['beta_window_days'] = saved_settings.get('beta_window_days', 365)
-                active_portfolio['exclude_days_beta'] = saved_settings.get('exclude_days_beta', 30)
-                
-                # Update UI widgets to reflect restored values
-                st.session_state['multi_backtest_active_beta_window'] = active_portfolio['beta_window_days']
-                st.session_state['multi_backtest_active_beta_exclude'] = active_portfolio['exclude_days_beta']
-            else:
-                # No saved settings, use current portfolio values or defaults
-                beta_window = active_portfolio.get('beta_window_days', 365)
-                beta_exclude = active_portfolio.get('exclude_days_beta', 30)
-                active_portfolio['beta_window_days'] = beta_window
-                active_portfolio['exclude_days_beta'] = beta_exclude
-                st.session_state['multi_backtest_active_beta_window'] = beta_window
-                st.session_state['multi_backtest_active_beta_exclude'] = beta_exclude
-        else:
-            # Disabling beta - save current values to BOTH saved settings AND main portfolio
-            beta_window = st.session_state.get('multi_backtest_active_beta_window', active_portfolio.get('beta_window_days', 365))
-            beta_exclude = st.session_state.get('multi_backtest_active_beta_exclude', active_portfolio.get('exclude_days_beta', 30))
-            
-            # Save to main portfolio keys (so variants inherit them)
-            active_portfolio['beta_window_days'] = beta_window
-            active_portfolio['exclude_days_beta'] = beta_exclude
-            
-            # Also save to saved_settings (for restore later)
-            saved_settings = {
-                'beta_window_days': beta_window,
-                'exclude_days_beta': beta_exclude,
-            }
-            active_portfolio['saved_beta_settings'] = saved_settings
-        
-        active_portfolio['calc_beta'] = new_val
-        st.session_state.multi_backtest_rerun_flag = True
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['calc_beta'] = st.session_state.multi_backtest_active_calc_beta
 
 def update_beta_window():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['beta_window_days'] = st.session_state.multi_backtest_active_beta_window
@@ -7309,49 +7286,7 @@ def update_beta_exclude():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['exclude_days_beta'] = st.session_state.multi_backtest_active_beta_exclude
 
 def update_calc_vol():
-    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-    active_portfolio = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
-    current_val = active_portfolio.get('calc_volatility', False)
-    new_val = st.session_state.multi_backtest_active_calc_vol
-    
-    if current_val != new_val:
-        if new_val:
-            # Enabling volatility - restore saved settings or use defaults
-            if 'saved_vol_settings' in active_portfolio:
-                # Restore previously saved volatility settings
-                saved_settings = active_portfolio['saved_vol_settings']
-                active_portfolio['vol_window_days'] = saved_settings.get('vol_window_days', 365)
-                active_portfolio['exclude_days_vol'] = saved_settings.get('exclude_days_vol', 30)
-                
-                # Update UI widgets to reflect restored values
-                st.session_state['multi_backtest_active_vol_window'] = active_portfolio['vol_window_days']
-                st.session_state['multi_backtest_active_vol_exclude'] = active_portfolio['exclude_days_vol']
-            else:
-                # No saved settings, use current portfolio values or defaults
-                vol_window = active_portfolio.get('vol_window_days', 365)
-                vol_exclude = active_portfolio.get('exclude_days_vol', 30)
-                active_portfolio['vol_window_days'] = vol_window
-                active_portfolio['exclude_days_vol'] = vol_exclude
-                st.session_state['multi_backtest_active_vol_window'] = vol_window
-                st.session_state['multi_backtest_active_vol_exclude'] = vol_exclude
-        else:
-            # Disabling volatility - save current values to BOTH saved settings AND main portfolio
-            vol_window = st.session_state.get('multi_backtest_active_vol_window', active_portfolio.get('vol_window_days', 365))
-            vol_exclude = st.session_state.get('multi_backtest_active_vol_exclude', active_portfolio.get('exclude_days_vol', 30))
-            
-            # Save to main portfolio keys (so variants inherit them)
-            active_portfolio['vol_window_days'] = vol_window
-            active_portfolio['exclude_days_vol'] = vol_exclude
-            
-            # Also save to saved_settings (for restore later)
-            saved_settings = {
-                'vol_window_days': vol_window,
-                'exclude_days_vol': vol_exclude,
-            }
-            active_portfolio['saved_vol_settings'] = saved_settings
-        
-        active_portfolio['calc_volatility'] = new_val
-        st.session_state.multi_backtest_rerun_flag = True
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['calc_volatility'] = st.session_state.multi_backtest_active_calc_vol
 
 def update_vol_window():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['vol_window_days'] = st.session_state.multi_backtest_active_vol_window
@@ -8092,6 +8027,7 @@ else:
     for i, portfolio in enumerate(st.session_state.multi_backtest_portfolio_configs):
         st.session_state.multi_backtest_portfolio_configs[i]['start_date_user'] = None
         st.session_state.multi_backtest_portfolio_configs[i]['end_date_user'] = None
+
 
 st.header(f"Editing Portfolio: {active_portfolio['name']}")
 
@@ -9385,7 +9321,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
 
     with col_beta_vol:
         if "multi_backtest_active_calc_beta" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_beta"] = active_portfolio.get('calc_beta', False)
+            st.session_state["multi_backtest_active_calc_beta"] = active_portfolio['calc_beta']
         st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score.")
         # Reset Beta button
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
@@ -9403,7 +9339,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.number_input("Beta Lookback (days)", min_value=1, key="multi_backtest_active_beta_window", on_change=update_beta_window)
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_vol"] = active_portfolio.get('calc_volatility', False)
+            st.session_state["multi_backtest_active_calc_vol"] = active_portfolio['calc_volatility']
         st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score.")
         # Reset Volatility button
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
