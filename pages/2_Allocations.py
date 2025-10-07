@@ -4553,64 +4553,156 @@ if st.button("Add Ticker", on_click=add_stock_callback):
 # Bulk Leverage Controls
 with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     def apply_bulk_leverage_callback():
-        """Apply leverage and expense ratio to all tickers in the current portfolio"""
+        """Apply leverage and expense ratio to selected tickers in the current portfolio"""
         try:
             portfolio_index = st.session_state.alloc_active_portfolio_index
             portfolio = st.session_state.alloc_portfolio_configs[portfolio_index]
             
             leverage_value = st.session_state.get('bulk_leverage_value', 1.0)
             expense_ratio_value = st.session_state.get('bulk_expense_ratio_value', 1.0)
+            selected_tickers = st.session_state.get('bulk_selected_tickers', [])
             
+            # Check if any tickers are selected
+            if not selected_tickers:
+                st.toast("⚠️ Please select at least one ticker to apply leverage to.")
+                return
+            
+            applied_count = 0
             for i, stock in enumerate(portfolio['stocks']):
                 current_ticker = stock['ticker']
                 
-                # Parse current ticker to get base ticker
+                # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
-                
-                # Create new ticker with leverage and expense ratio
-                new_ticker = base_ticker
-                if leverage_value != 1.0:
-                    new_ticker += f"?L={leverage_value}"
-                if expense_ratio_value > 0.0:
-                    new_ticker += f"?E={expense_ratio_value}"
-                
-                # Update the ticker in the portfolio
-                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'][i]['ticker'] = new_ticker
-                
-                # Update the session state for the text input
-                ticker_key = f"alloc_ticker_{portfolio_index}_{i}"
-                st.session_state[ticker_key] = new_ticker
+                if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Parse current ticker to get base ticker
+                    base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                    
+                    # Create new ticker with leverage and expense ratio
+                    new_ticker = base_ticker
+                    if leverage_value != 1.0:
+                        new_ticker += f"?L={leverage_value}"
+                    if expense_ratio_value > 0.0:
+                        new_ticker += f"?E={expense_ratio_value}"
+                    
+                    # Update the ticker in the portfolio
+                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'][i]['ticker'] = new_ticker
+                    
+                    # Update the session state for the text input
+                    ticker_key = f"alloc_ticker_{portfolio_index}_{i}"
+                    st.session_state[ticker_key] = new_ticker
+                    
+                    applied_count += 1
             
-            st.toast(f"✅ Applied {leverage_value}x leverage and {expense_ratio_value}% expense ratio to all tickers!")
+            if applied_count > 0:
+                st.toast(f"✅ Applied {leverage_value}x leverage and {expense_ratio_value}% expense ratio to {applied_count} ticker(s)!")
+            else:
+                st.warning("⚠️ No tickers were selected for modification.")
             
         except Exception as e:
             st.error(f"Error applying bulk leverage: {str(e)}")
 
     def remove_bulk_leverage_callback():
-        """Remove all leverage and expense ratio from all tickers"""
+        """Remove all leverage and expense ratio from selected tickers"""
         try:
             portfolio_index = st.session_state.alloc_active_portfolio_index
             portfolio = st.session_state.alloc_portfolio_configs[portfolio_index]
+            selected_tickers = st.session_state.get('bulk_selected_tickers', [])
             
+            # Check if any tickers are selected
+            if not selected_tickers:
+                st.toast("⚠️ Please select at least one ticker to remove leverage from.")
+                return
+            
+            removed_count = 0
             for i, stock in enumerate(portfolio['stocks']):
                 current_ticker = stock['ticker']
                 
-                # Parse current ticker to get base ticker
+                # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
-                
-                # Update the ticker to base ticker (no leverage, no expense ratio)
-                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'][i]['ticker'] = base_ticker
-                
-                # Update the session state for the text input
-                ticker_key = f"alloc_ticker_{portfolio_index}_{i}"
-                st.session_state[ticker_key] = base_ticker
+                if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Parse current ticker to get base ticker
+                    base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                    
+                    # Update the ticker to base ticker (no leverage, no expense ratio)
+                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'][i]['ticker'] = base_ticker
+                    
+                    # Update the session state for the text input
+                    ticker_key = f"alloc_ticker_{portfolio_index}_{i}"
+                    st.session_state[ticker_key] = base_ticker
+                    
+                    removed_count += 1
             
-            st.toast("✅ Removed all leverage and expense ratio from all tickers!")
+            if removed_count > 0:
+                st.toast(f"✅ Removed leverage and expense ratio from {removed_count} ticker(s)!")
+            else:
+                st.warning("⚠️ No tickers were selected for modification.")
             
         except Exception as e:
             st.error(f"Error removing leverage: {str(e)}")
 
+    # Get current portfolio tickers for selection
+    portfolio_index = st.session_state.alloc_active_portfolio_index
+    portfolio = st.session_state.alloc_portfolio_configs[portfolio_index]
+    available_tickers = [stock['ticker'] for stock in portfolio['stocks']]
+    
+    # Initialize selected tickers if not exists
+    if 'bulk_selected_tickers' not in st.session_state:
+        st.session_state.bulk_selected_tickers = []
+    
+    # Ticker selection interface
+    st.markdown("**Select Tickers to Modify:**")
+    
+    # Quick selection buttons
+    col_quick1, col_quick2 = st.columns([1, 1])
+    
+    with col_quick1:
+        if st.button("Select All", key="page5_select_all_tickers"):
+            st.session_state.bulk_selected_tickers = available_tickers.copy()
+            st.rerun()
+    
+    with col_quick2:
+        if st.button("Clear Selection", key="page5_clear_all_tickers"):
+            st.session_state.bulk_selected_tickers = []
+            st.rerun()
+    
+    # Individual ticker selection
+    if available_tickers:
+        st.markdown("**Individual Ticker Selection:**")
+        
+        # Create checkboxes for each ticker
+        for i, ticker in enumerate(available_tickers):
+            base_ticker, leverage, expense = parse_ticker_parameters(ticker)
+            display_text = f"{base_ticker}"
+            if leverage != 1.0 or expense > 0.0:
+                display_text += f" (L:{leverage}x, E:{expense}%)"
+            
+            # Use checkbox state directly
+            checkbox_key = f"page5_bulk_ticker_select_{i}"
+            is_checked = st.checkbox(
+                display_text, 
+                value=ticker in st.session_state.bulk_selected_tickers,
+                key=checkbox_key
+            )
+            
+            # Update selection based on checkbox state
+            if is_checked and ticker not in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.append(ticker)
+            elif not is_checked and ticker in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.remove(ticker)
+    else:
+        st.info("No tickers available in the current portfolio.")
+    
+    # Show selected tickers count
+    selected_count = len(st.session_state.bulk_selected_tickers)
+    if selected_count > 0:
+        st.success(f"📊 {selected_count} ticker(s) selected for bulk operations")
+    else:
+        st.warning("⚠️ No tickers selected - please select tickers before applying bulk operations")
+
     # Bulk leverage controls
+    st.markdown("---")
+    st.markdown("**Leverage & Expense Ratio Settings:**")
+    
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
     with col1:
@@ -4638,11 +4730,11 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
         )
 
     with col3:
-        if st.button("Apply to All", on_click=apply_bulk_leverage_callback, type="secondary"):
+        if st.button("Apply to Selected", on_click=apply_bulk_leverage_callback, type="primary"):
             pass
 
     with col4:
-        if st.button("Remove to All", on_click=remove_bulk_leverage_callback, type="secondary"):
+        if st.button("Remove from Selected", on_click=remove_bulk_leverage_callback, type="secondary"):
             pass
 
 
@@ -4843,66 +4935,176 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
         value=st.session_state.alloc_bulk_tickers,
         key="alloc_bulk_ticker_input",
         height=100,
-        help="Enter ticker symbols separated by spaces or commas. Click 'Fill Tickers' to replace tickers (keeps existing allocations)."
+        help="Enter ticker symbols separated by spaces or commas. Choose 'Replace All' to replace all tickers or 'Add to Existing' to add new tickers."
     )
     
-    if st.button("Fill Tickers", key="alloc_fill_tickers_btn"):
-        if bulk_tickers.strip():
-            # Parse tickers (split by comma or space)
-            ticker_list = []
-            for ticker in bulk_tickers.replace(',', ' ').split():
-                ticker = ticker.strip().upper()
-                if ticker:
-                    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-                    if ticker == 'BRK.B':
-                        ticker = 'BRK-B'
-                    elif ticker == 'BRK.A':
-                        ticker = 'BRK-A'
-                    ticker_list.append(ticker)
+    # Action buttons
+    col_replace, col_add, col_fetch, col_copy = st.columns([1, 1, 1, 1])
+    
+    with col_replace:
+        if st.button("🔄 Replace All", key="alloc_fill_tickers_btn", type="secondary"):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
+                
+                if ticker_list:
+                    portfolio_index = st.session_state.alloc_active_portfolio_index
+                    current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
+                    
+                    # Replace tickers - new ones get 0% allocation
+                    new_stocks = []
+                    
+                    for i, ticker in enumerate(ticker_list):
+                        if i < len(current_stocks):
+                            # Use existing allocation if available
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': current_stocks[i]['allocation'],
+                                'include_dividends': current_stocks[i]['include_dividends']
+                            })
+                        else:
+                            # New tickers get 0% allocation
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the portfolio with new stocks
+                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
+                    
+                    # Update the active_portfolio reference to match session state
+                    active_portfolio['stocks'] = new_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
+            else:
+                st.warning("⚠️ No valid tickers found in input.")
+    
+    with col_add:
+        if st.button("➕ Add to Existing", key="alloc_add_tickers_btn", type="primary"):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
+                
+                if ticker_list:
+                    portfolio_index = st.session_state.alloc_active_portfolio_index
+                    current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
+                    
+                    # Add new tickers to existing ones
+                    for ticker in ticker_list:
+                        # Check if ticker already exists
+                        ticker_exists = any(stock['ticker'] == ticker for stock in current_stocks)
+                        if not ticker_exists:
+                            current_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the portfolio with new stocks
+                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = current_stocks
+                    
+                    # Update the active_portfolio reference to match session state
+                    active_portfolio['stocks'] = current_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Added new tickers: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** New tickers added with 0% allocation. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
+            else:
+                st.warning("⚠️ No valid tickers found in input.")
+    
+    with col_fetch:
+        if st.button("🔍 Fetch Tickers", key="alloc_fetch_tickers_btn", type="secondary"):
+            # Get current tickers from the active portfolio
+            portfolio_index = st.session_state.alloc_active_portfolio_index
+            current_tickers = [stock['ticker'] for stock in st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] if stock['ticker']]
             
-            if ticker_list:
-                portfolio_index = st.session_state.alloc_active_portfolio_index
-                current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
-                
-                # Replace tickers - new ones get 0% allocation
-                new_stocks = []
-                
-                for i, ticker in enumerate(ticker_list):
-                    if i < len(current_stocks):
-                        # Use existing allocation if available
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': current_stocks[i]['allocation'],
-                            'include_dividends': current_stocks[i]['include_dividends']
-                        })
-                    else:
-                        # New tickers get 0% allocation
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': 0.0,
-                            'include_dividends': True
-                        })
-                
-                # Update the portfolio with new stocks
-                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
-                
-                # Update the active_portfolio reference to match session state
-                active_portfolio['stocks'] = new_stocks
-                
-                # Clear any existing session state keys for individual ticker inputs to force refresh
-                for key in list(st.session_state.keys()):
-                    if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
-                        del st.session_state[key]
-                
-                st.success(f"✅ Replaced tickers with: {', '.join(ticker_list)}")
-                st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
-                
-                # Force immediate rerun to refresh the UI
+            if current_tickers:
+                # Update the bulk ticker input with current tickers
+                current_ticker_string = ' '.join(current_tickers)
+                st.session_state.alloc_bulk_tickers = current_ticker_string
+                st.success(f"✅ Fetched {len(current_tickers)} tickers: {current_ticker_string}")
                 st.rerun()
             else:
-                st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
+                st.warning("⚠️ No tickers found in the current portfolio.")
+    
+    with col_copy:
+        if bulk_tickers.strip():
+            # Create a custom button with direct copy functionality
+            import streamlit.components.v1 as components
+            
+            # JavaScript function to copy and show feedback
+            copy_js = f"""
+            <script>
+            function copyTickers() {{
+                navigator.clipboard.writeText({json.dumps(bulk_tickers.strip())}).then(function() {{
+                    // Show success feedback
+                    const button = document.querySelector('#copy-tickers-btn');
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '✅ Copied!';
+                    button.style.backgroundColor = '#28a745';
+                    setTimeout(function() {{
+                        button.innerHTML = originalText;
+                        button.style.backgroundColor = '';
+                    }}, 2000);
+                }}).catch(function(err) {{
+                    alert('Failed to copy: ' + err);
+                }});
+            }}
+            </script>
+            <button id="copy-tickers-btn" onclick="copyTickers()" style="
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                width: 100%;
+                font-size: 14px;
+            ">📋 Copy</button>
+            """
+            components.html(copy_js, height=50)
         else:
-            st.error("❌ Please enter ticker symbols.")
+            st.button("📋 Copy", key="alloc_copy_tickers_btn", type="secondary", disabled=True)
+            st.warning("⚠️ No tickers to copy. Please enter some tickers first.")
 
 # Leverage Summary Section
 leveraged_tickers = []
