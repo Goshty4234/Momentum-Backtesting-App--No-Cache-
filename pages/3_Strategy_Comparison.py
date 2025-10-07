@@ -6522,6 +6522,97 @@ for i in range(len(st.session_state.strategy_comparison_global_tickers)):
         if st.button("x", key=f"remove_global_stock_{i}_{stock['ticker']}_{id(stock)}", help="Remove this ticker", on_click=remove_global_stock_callback, args=(stock['ticker'],)):
             pass
 
+# Bulk Leverage Controls
+with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
+    def apply_bulk_leverage_callback():
+        """Apply leverage and expense ratio to all tickers in the current portfolio"""
+        try:
+            leverage_value = st.session_state.get('bulk_leverage_value', 1.0)
+            expense_ratio_value = st.session_state.get('bulk_expense_ratio_value', 1.0)
+            
+            for i, stock in enumerate(st.session_state.strategy_comparison_global_tickers):
+                current_ticker = stock['ticker']
+                
+                # Parse current ticker to get base ticker
+                base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                
+                # Create new ticker with leverage and expense ratio
+                new_ticker = base_ticker
+                if leverage_value != 1.0:
+                    new_ticker += f"?L={leverage_value}"
+                if expense_ratio_value > 0.0:
+                    new_ticker += f"?E={expense_ratio_value}"
+                
+                # Update the ticker in the global tickers
+                st.session_state.strategy_comparison_global_tickers[i]['ticker'] = new_ticker
+                
+                # Update the session state for the text input
+                ticker_key = f"strategy_comparison_global_ticker_{i}"
+                st.session_state[ticker_key] = new_ticker
+            
+            st.toast(f"✅ Applied {leverage_value}x leverage and {expense_ratio_value}% expense ratio to all tickers!")
+            
+        except Exception as e:
+            st.error(f"Error applying bulk leverage: {str(e)}")
+
+    def remove_bulk_leverage_callback():
+        """Remove all leverage and expense ratio from all tickers"""
+        try:
+            for i, stock in enumerate(st.session_state.strategy_comparison_global_tickers):
+                current_ticker = stock['ticker']
+                
+                # Parse current ticker to get base ticker
+                base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                
+                # Update the ticker to base ticker (no leverage, no expense ratio)
+                st.session_state.strategy_comparison_global_tickers[i]['ticker'] = base_ticker
+                
+                # Update the session state for the text input
+                ticker_key = f"strategy_comparison_global_ticker_{i}"
+                st.session_state[ticker_key] = base_ticker
+            
+            st.toast("✅ Removed all leverage and expense ratio from all tickers!")
+            
+        except Exception as e:
+            st.error(f"Error removing leverage: {str(e)}")
+
+    # Bulk leverage controls - Compact layout
+    st.markdown("**Leverage & Expense Ratio:**")
+    
+    # First row: Input fields
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.number_input(
+            "Leverage",
+            min_value=0.1,
+            max_value=10.0,
+            value=2.0,
+            step=0.1,
+            format="%.1f",
+            key="bulk_leverage_value",
+            help="Leverage multiplier (e.g., 2.0 for 2x leverage)"
+        )
+    with col2:
+        st.number_input(
+            "Expense Ratio (%)",
+            min_value=0.0,
+            max_value=10.0,
+            value=1.0,
+            step=0.01,
+            format="%.2f",
+            key="bulk_expense_ratio_value",
+            help="Annual expense ratio in percentage (e.g., 0.84 for 0.84%)"
+        )
+    
+    # Second row: Buttons
+    col3, col4 = st.columns([1, 1])
+    with col3:
+        if st.button("Apply to All", on_click=apply_bulk_leverage_callback, type="secondary", use_container_width=True):
+            pass
+    with col4:
+        if st.button("Remove to All", on_click=remove_bulk_leverage_callback, type="secondary", use_container_width=True):
+            pass
+
 # Bulk ticker input section
 with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
     st.markdown("**Enter multiple tickers separated by spaces or commas:**")
