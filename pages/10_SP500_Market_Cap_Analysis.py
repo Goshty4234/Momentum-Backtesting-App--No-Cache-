@@ -19,6 +19,28 @@ st.set_page_config(
 )
 
 st.title("📊 S&P 500 Market Cap Analysis")
+
+# NUCLEAR OPTION: Detect and clean up overloaded session state
+session_state_size = len(st.session_state)
+if session_state_size > 100:  # More than 100 keys in session state = potential overload
+    st.warning(f"⚠️ **Session state overload detected** ({session_state_size} keys) - Auto-cleaning...")
+    
+    # Clean up all heavy data keys
+    heavy_keys = [key for key in st.session_state.keys() if any(heavy_word in key.lower() for heavy_word in [
+        'results', 'stats', 'returns', 'values', 'allocations', 'metrics', 'data', 'cache'
+    ])]
+    
+    for key in heavy_keys:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    # Reset all flags
+    if 'hard_kill_requested' in st.session_state:
+        st.session_state.hard_kill_requested = False
+    
+    st.success(f"✅ **Auto-cleanup complete!** Removed {len(heavy_keys)} heavy keys. Session state cleaned.")
+    st.rerun()
+
 st.markdown("**Current S&P 500 companies ranked by market cap with key performance metrics**")
 
 # Function to get S&P 500 companies from Wikipedia
@@ -752,6 +774,10 @@ elif companies_df is not None and not companies_df.empty:
         df['Market Cap'] = pd.to_numeric(df['Market Cap'], errors='coerce').fillna(0)
         df['Market Cap (B)'] = df['Market Cap'] / 1e9
         
+        # Calculate percentage of S&P 500 total market cap
+        total_sp500_market_cap = df['Market Cap'].sum()
+        df['% of S&P 500'] = (df['Market Cap'] / total_sp500_market_cap * 100).round(3)
+        
         # Filter out stocks with zero or invalid market cap data
         valid_data = df[df['Market Cap'] > 0].copy()
         invalid_data = df[df['Market Cap'] == 0].copy()
@@ -771,6 +797,7 @@ elif companies_df is not None and not companies_df.empty:
         df = companies_df.copy()
         df['Market Cap'] = 0
         df['Market Cap (B)'] = 0
+        df['% of S&P 500'] = 0
         df['Price'] = 0
         df['Beta'] = 0
         df['YTD Return %'] = 0
@@ -789,8 +816,9 @@ elif companies_df is not None and not companies_df.empty:
         # Debug: Show the top 10 market cap values to verify sorting (only in debug mode)
         if st.session_state.get('debug_mode', False):
             st.write("🔍 Debug - Top 10 Market Caps after sorting:")
-            debug_sort = df.head(10)[['Symbol', 'Name', 'Market Cap', 'Market Cap (B)', 'Price']].copy()
+            debug_sort = df.head(10)[['Symbol', 'Name', 'Market Cap', '% of S&P 500', 'Market Cap (B)', 'Price']].copy()
             debug_sort['Market Cap (B)'] = debug_sort['Market Cap (B)'].round(1)
+            debug_sort['% of S&P 500'] = debug_sort['% of S&P 500'].round(3)
             debug_sort['Price'] = debug_sort['Price'].round(2)
             st.dataframe(debug_sort, use_container_width=True, hide_index=True)
         
@@ -861,7 +889,7 @@ elif companies_df is not None and not companies_df.empty:
     available_columns = df.columns.tolist()
     
     # Define all possible columns
-    desired_columns = ['Rank', 'Symbol', 'Name', 'Sector', 'Market Cap (B)', 'Price', 'Beta', 
+    desired_columns = ['Rank', 'Symbol', 'Name', 'Sector', '% of S&P 500', 'Market Cap (B)', 'Price', 'Beta', 
                       'YTD Return %', '1D Return %', '5D Return %', '1M Return %', 
                       '6M Return %', '1Y Return %', '5Y Return %', 'Max Return %', 'Volatility %']
     
@@ -871,7 +899,7 @@ elif companies_df is not None and not companies_df.empty:
     # If we don't have the new columns, use the old ones and show warning
     if '1D Return %' not in available_columns:
         st.warning("⚠️ **Using cached data with limited columns.** Click '🔄 Refresh Data' to get ALL return periods (1D, 5D, 1M, 6M, 5Y, Max)!")
-        columns_to_use = ['Rank', 'Symbol', 'Name', 'Sector', 'Market Cap (B)', 'Price', 'Beta', 
+        columns_to_use = ['Rank', 'Symbol', 'Name', 'Sector', '% of S&P 500', 'Market Cap (B)', 'Price', 'Beta', 
                          'YTD Return %', '1Y Return %', 'Volatility %']
     else:
         st.success("✅ **Complete data loaded!** All return periods available.")
@@ -879,6 +907,8 @@ elif companies_df is not None and not companies_df.empty:
     display_df = df[columns_to_use].copy()
     
     # Format numeric columns dynamically
+    if '% of S&P 500' in display_df.columns:
+        display_df['% of S&P 500'] = display_df['% of S&P 500'].round(3)
     if 'Market Cap (B)' in display_df.columns:
         display_df['Market Cap (B)'] = display_df['Market Cap (B)'].round(1)
     if 'Price' in display_df.columns:
@@ -999,13 +1029,14 @@ elif companies_df is not None and not companies_df.empty:
     
     sector_stats = df.groupby('Sector').agg({
         'Market Cap (B)': ['sum', 'mean', 'count'],
+        '% of S&P 500': 'sum',
         'YTD Return %': 'mean',
         '1Y Return %': 'mean',
         'Beta': 'mean',
         'Volatility %': 'mean'
     }).round(2)
     
-    sector_stats.columns = ['Total Market Cap (B)', 'Avg Market Cap (B)', 'Count', 'Avg YTD Return %', 'Avg 1Y Return %', 'Avg Beta', 'Avg Volatility %']
+    sector_stats.columns = ['Total Market Cap (B)', 'Avg Market Cap (B)', 'Count', '% of S&P 500', 'Avg YTD Return %', 'Avg 1Y Return %', 'Avg Beta', 'Avg Volatility %']
     sector_stats = sector_stats.sort_values('Total Market Cap (B)', ascending=False)
     
     # Color code the sector analysis performance columns
@@ -1021,6 +1052,92 @@ elif companies_df is not None and not companies_df.empty:
     styled_sector_stats = sector_stats.style.applymap(color_sector_performance, subset=['Avg YTD Return %', 'Avg 1Y Return %', 'Avg Volatility %'])
     
     st.dataframe(styled_sector_stats, use_container_width=True)
+    
+    # Visualization Section - Pie Charts
+    st.subheader("🥧 Market Cap Distribution Visualization")
+    
+    col_pie1, col_pie2 = st.columns(2)
+    
+    with col_pie1:
+        # All companies pie chart with donut style
+        st.markdown("**🏆 All Companies by Market Cap (Donut Chart)**")
+        
+        # Create beautiful donut chart for all companies
+        fig_pie_companies = px.pie(
+            df,
+            values='Market Cap (B)',
+            names='Symbol',
+            title="Complete S&P 500 Market Cap Distribution",
+            color_discrete_sequence=px.colors.qualitative.Dark24,
+            hole=0.6  # Creates donut style
+        )
+        
+        # Only show labels for top 13 companies with percentage; others show on hover only
+        top_13_set = set(df.head(13)['Symbol'].tolist())
+        per_slice_text = []
+        for symbol in df['Symbol']:
+            if symbol in top_13_set:
+                # Get percentage for this symbol
+                symbol_percentage = df[df['Symbol'] == symbol]['% of S&P 500'].iloc[0]
+                per_slice_text.append(f'{symbol}<br>{symbol_percentage:.2f}%')
+            else:
+                per_slice_text.append('')
+        
+        fig_pie_companies.update_traces(
+            hovertemplate='<b>%{label}</b><br>Market Cap: $%{value:.1f}B<br>Percentage: %{percent}<br>% of S&P 500: %{customdata[0]:.3f}%<extra></extra>',
+            customdata=df['% of S&P 500'],
+            text=per_slice_text,
+            textinfo='text',  # show only provided text values
+            textposition='outside'
+        )
+        
+        fig_pie_companies.update_layout(
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        st.plotly_chart(fig_pie_companies, use_container_width=True)
+    
+    with col_pie2:
+        # Sectors donut chart
+        st.markdown("**🏢 Sectors by Market Cap (Donut Chart)**")
+        
+        # Create donut chart for sectors
+        fig_pie_sectors = px.pie(
+            sector_stats.reset_index(),
+            values='Total Market Cap (B)',
+            names='Sector',
+            title="Sectors Market Cap Distribution",
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+            hole=0.6  # Creates donut style
+        )
+        
+        fig_pie_sectors.update_traces(
+            hovertemplate='<b>%{label}</b><br>Total Market Cap: $%{value:.1f}B<br>Percentage: %{percent}<extra></extra>',
+            textinfo='label+percent',
+            textposition='outside'
+        )
+        
+        fig_pie_sectors.update_layout(
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        st.plotly_chart(fig_pie_sectors, use_container_width=True)
     
     # Ticker Copy Section
     st.subheader("📋 Copy Top Companies by Market Cap")
