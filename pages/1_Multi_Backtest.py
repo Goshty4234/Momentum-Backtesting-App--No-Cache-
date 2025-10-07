@@ -23,7 +23,9 @@ import multiprocessing as mp
 # Suppress specific Streamlit threading warnings
 warnings.filterwarnings('ignore')
 warnings.filterwarnings('ignore', message='.*ScriptRunContext.*')
+warnings.filterwarnings('ignore', message='.*missing ScriptRunContext.*')
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
+logging.getLogger("streamlit.runtime.scriptrunner").setLevel(logging.ERROR)
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").propagate = False
 
 # Set pandas options for handling large dataframes
@@ -1087,8 +1089,9 @@ def get_goldsim_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
-    """Get ticker data (NO_CACHE version)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -3309,6 +3312,10 @@ if st.session_state.get('multi_backtest_rerun_flag', False):
     st.session_state.multi_backtest_rerun_flag = False
     st.rerun()
 
+# Reset running state on page load to prevent persistent running state
+if 'hard_kill_requested' in st.session_state:
+    st.session_state.hard_kill_requested = False
+
 # Place rerun logic after first portfolio input widget
 active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index] if 'multi_backtest_portfolio_configs' in st.session_state and 'multi_backtest_active_portfolio_index' in st.session_state else None
 
@@ -3563,8 +3570,9 @@ def get_portfolio_value(portfolio_name):
                     portfolio_value = float(latest_value)
     return portfolio_value
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
+    """Create allocation evolution chart for a portfolio - cached for performance"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3639,8 +3647,9 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
         st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
         return None
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
+    """Process allocation data into a clean DataFrame - cached for performance"""
     try:
         # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
         all_tickers = set()
@@ -3678,8 +3687,9 @@ def process_allocation_dataframe(portfolio_name, allocation_data):
         st.error(f"Error processing allocation data for {portfolio_name}: {str(e)}")
         return None, []
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
-    """Create pie chart for portfolio allocation (NO_CACHE version)"""
+    """Create pie chart for portfolio allocation - cached for performance"""
     try:
         if not allocation_data:
             return None
@@ -4494,7 +4504,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         if use_max_allocation and weights:
             max_allocation_decimal = max_allocation_percent / 100.0
             
-            # FIRST PASS: Apply maximum allocation filter
+            # FIRST PASS: Apply maximum allocation filter (EXCLUDE CASH from max_allocation limit)
             capped_weights = {}
             excess_weight = 0.0
             
@@ -4512,9 +4522,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             
             # Redistribute excess weight proportionally among stocks that are below the cap
             if excess_weight > 0:
-                # Find stocks that can receive more weight (below the cap)
+                # Find stocks that can receive more weight (below the cap) - include CASH as eligible
                 eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
-                                 if weight < max_allocation_decimal}
+                                 if ticker == 'CASH' or weight < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total weight of eligible stocks
@@ -4527,8 +4537,12 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             additional_weight = excess_weight * proportion
                             new_weight = capped_weights[ticker] + additional_weight
                             
-                            # Make sure we don't exceed the cap
-                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the cap
+                                capped_weights[ticker] = min(new_weight, max_allocation_decimal)
             
             weights = capped_weights
             
@@ -4581,9 +4595,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             
             # Redistribute excess weight proportionally among stocks that are below the cap
             if excess_weight > 0:
-                # Find stocks that can receive more weight (below the cap)
+                # Find stocks that can receive more weight (below the cap) - include CASH as eligible
                 eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
-                                 if weight < max_allocation_decimal}
+                                 if ticker == 'CASH' or weight < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total weight of eligible stocks
@@ -4596,8 +4610,12 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             additional_weight = excess_weight * proportion
                             new_weight = capped_weights[ticker] + additional_weight
                             
-                            # Make sure we don't exceed the cap
-                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the cap
+                                capped_weights[ticker] = min(new_weight, max_allocation_decimal)
             
             weights = capped_weights
             
@@ -4639,7 +4657,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         if use_max_allocation and current_allocations:
             max_allocation_decimal = max_allocation_percent / 100.0
             
-            # FIRST PASS: Apply maximum allocation filter
+            # FIRST PASS: Apply maximum allocation filter (EXCLUDE CASH from max_allocation limit)
             capped_allocations = {}
             excess_allocation = 0.0
             
@@ -4657,9 +4675,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             
             # Redistribute excess allocation proportionally among stocks that are below the cap
             if excess_allocation > 0:
-                # Find stocks that can receive more allocation (below the cap)
+                # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
                 eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                 if allocation < max_allocation_decimal}
+                                 if ticker == 'CASH' or allocation < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total allocation of eligible stocks
@@ -4672,15 +4690,14 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             additional_allocation = excess_allocation * proportion
                             new_allocation = capped_allocations[ticker] + additional_allocation
                             
-                            # Make sure we don't exceed the cap
-                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                            # CASH can receive unlimited allocation, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_allocations[ticker] = new_allocation
+                            else:
+                                # Make sure we don't exceed the cap
+                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
             
             current_allocations = capped_allocations
-            
-            # Final normalization to 100% in case not enough stocks to distribute excess
-            total_alloc = sum(current_allocations.values())
-            if total_alloc > 0:
-                current_allocations = {ticker: allocation / total_alloc for ticker, allocation in current_allocations.items()}
         
         # Apply minimal threshold filter for non-momentum strategies
         if use_threshold and current_allocations:
@@ -4726,9 +4743,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             
             # Redistribute excess allocation proportionally among stocks that are below the cap
             if excess_allocation > 0:
-                # Find stocks that can receive more allocation (below the cap)
+                # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
                 eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                 if allocation < max_allocation_decimal}
+                                 if ticker == 'CASH' or allocation < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total allocation of eligible stocks
@@ -4741,8 +4758,12 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             additional_allocation = excess_allocation * proportion
                             new_allocation = capped_allocations[ticker] + additional_allocation
                             
-                            # Make sure we don't exceed the cap
-                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                            # CASH can receive unlimited allocation, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_allocations[ticker] = new_allocation
+                            else:
+                                # Make sure we don't exceed the cap
+                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
             
             current_allocations = capped_allocations
     else:
@@ -4764,8 +4785,8 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     historical_allocations[sim_index[0]]['CASH'] = unallocated_cash[0] / initial_value if initial_value > 0 else 0
     
     for i in range(len(sim_index)):
-        # Check for interrupt every 100 iterations
-        if i % 100 == 0:
+        # Check for interrupt every 5 iterations (much more frequent)
+        if i % 5 == 0:
             # Check if interrupt was requested
             if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
                 print("🛑 Hard kill requested - stopping backtest")
@@ -5026,6 +5047,60 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                         unallocated_cash[-1] = current_total
                         unreinvested_cash[-1] = 0
                     else:
+                        # Apply max_allocation to momentum weights if enabled
+                        use_max_allocation = config.get('use_max_allocation', False)
+                        max_allocation_percent = config.get('max_allocation_percent', 10.0)
+                        
+                        if use_max_allocation and weights:
+                            max_allocation_decimal = max_allocation_percent / 100.0
+                            
+                            # Apply maximum allocation filter to momentum weights (EXCLUDE CASH from max_allocation limit)
+                            capped_weights = {}
+                            excess_weight = 0.0
+                            
+                            for ticker, weight in weights.items():
+                                # CASH is exempt from max_allocation limit to prevent money loss
+                                if ticker == 'CASH':
+                                    capped_weights[ticker] = weight
+                                elif weight > max_allocation_decimal:
+                                    # Cap the weight and collect excess
+                                    capped_weights[ticker] = max_allocation_decimal
+                                    excess_weight += (weight - max_allocation_decimal)
+                                else:
+                                    # Keep original weight
+                                    capped_weights[ticker] = weight
+                            
+                            # Redistribute excess weight proportionally among stocks that are below the cap
+                            if excess_weight > 0:
+                                # Find stocks that can receive more weight (below the cap) - include CASH as eligible
+                                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
+                                                 if ticker == 'CASH' or weight < max_allocation_decimal}
+                                
+                                if eligible_stocks:
+                                    # Calculate total weight of eligible stocks
+                                    total_eligible_weight = sum(eligible_stocks.values())
+                                    
+                                    if total_eligible_weight > 0:
+                                        # Redistribute excess proportionally
+                                        for ticker in eligible_stocks:
+                                            proportion = eligible_stocks[ticker] / total_eligible_weight
+                                            additional_weight = excess_weight * proportion
+                                            new_weight = capped_weights[ticker] + additional_weight
+                                            
+                                            # CASH can receive unlimited weight, other stocks are capped
+                                            if ticker == 'CASH':
+                                                capped_weights[ticker] = new_weight
+                                            else:
+                                                # Make sure we don't exceed the cap
+                                                capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+                            
+                            weights = capped_weights
+                            
+                            # Final normalization to 100% in case not enough stocks to distribute excess
+                            total_weight = sum(weights.values())
+                            if total_weight > 0:
+                                weights = {ticker: weight / total_weight for ticker, weight in weights.items()}
+                        
                         # For Buy & Hold strategies with momentum, only distribute new cash
                         if rebalancing_frequency in ["Buy & Hold", "Buy & Hold (Target)"]:
                             # Calculate current proportions for Buy & Hold, or use momentum weights for Buy & Hold (Target)
@@ -5072,7 +5147,10 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     excess_allocation = 0.0
                     
                     for ticker, allocation in rebalance_allocations.items():
-                        if allocation > max_allocation_decimal:
+                        # CASH is exempt from max_allocation limit to prevent money loss
+                        if ticker == 'CASH':
+                            capped_allocations[ticker] = allocation
+                        elif allocation > max_allocation_decimal:
                             # Cap the allocation and collect excess
                             capped_allocations[ticker] = max_allocation_decimal
                             excess_allocation += (allocation - max_allocation_decimal)
@@ -5082,9 +5160,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     
                     # Redistribute excess allocation proportionally among stocks that are below the cap
                     if excess_allocation > 0:
-                        # Find stocks that can receive more allocation (below the cap)
+                        # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
                         eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                         if allocation < max_allocation_decimal}
+                                         if ticker == 'CASH' or allocation < max_allocation_decimal}
                         
                         if eligible_stocks:
                             # Calculate total allocation of eligible stocks
@@ -5097,10 +5175,19 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                                     additional_allocation = excess_allocation * proportion
                                     new_allocation = capped_allocations[ticker] + additional_allocation
                                     
-                                    # Make sure we don't exceed the cap
-                                    capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                    # CASH can receive unlimited allocation, other stocks are capped
+                                    if ticker == 'CASH':
+                                        capped_allocations[ticker] = new_allocation
+                                    else:
+                                        # Make sure we don't exceed the cap
+                                        capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
                     
                     rebalance_allocations = capped_allocations
+                    
+                    # Final normalization to 100% in case not enough stocks to distribute excess
+                    total_alloc = sum(rebalance_allocations.values())
+                    if total_alloc > 0:
+                        rebalance_allocations = {ticker: allocation / total_alloc for ticker, allocation in rebalance_allocations.items()}
                 
                 # Apply minimal threshold filter for non-momentum strategies during rebalancing
                 if use_threshold and rebalance_allocations:
@@ -5134,7 +5221,10 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     excess_allocation = 0.0
                     
                     for ticker, allocation in rebalance_allocations.items():
-                        if allocation > max_allocation_decimal:
+                        # CASH is exempt from max_allocation limit to prevent money loss
+                        if ticker == 'CASH':
+                            capped_allocations[ticker] = allocation
+                        elif allocation > max_allocation_decimal:
                             # Cap the allocation and collect excess
                             capped_allocations[ticker] = max_allocation_decimal
                             excess_allocation += (allocation - max_allocation_decimal)
@@ -5144,9 +5234,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     
                     # Redistribute excess allocation proportionally among stocks that are below the cap
                     if excess_allocation > 0:
-                        # Find stocks that can receive more allocation (below the cap)
+                        # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
                         eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                         if allocation < max_allocation_decimal}
+                                         if ticker == 'CASH' or allocation < max_allocation_decimal}
                         
                         if eligible_stocks:
                             # Calculate total allocation of eligible stocks
@@ -5159,10 +5249,19 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                                     additional_allocation = excess_allocation * proportion
                                     new_allocation = capped_allocations[ticker] + additional_allocation
                                     
-                                    # Make sure we don't exceed the cap
-                                    capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                    # CASH can receive unlimited allocation, other stocks are capped
+                                    if ticker == 'CASH':
+                                        capped_allocations[ticker] = new_allocation
+                                    else:
+                                        # Make sure we don't exceed the cap
+                                        capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
                     
                     rebalance_allocations = capped_allocations
+                    
+                    # Final normalization to 100% in case not enough stocks to distribute excess
+                    total_alloc = sum(rebalance_allocations.values())
+                    if total_alloc > 0:
+                        rebalance_allocations = {ticker: allocation / total_alloc for ticker, allocation in rebalance_allocations.items()}
                 
                 sum_alloc = sum(rebalance_allocations.values())
                 if sum_alloc > 0:
@@ -6179,8 +6278,8 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     
     # Calculate fusion portfolio value for each date
     for date_idx, current_date in enumerate(sim_index):
-        # Check for interrupt every 100 iterations
-        if date_idx % 100 == 0:
+        # Check for interrupt every 5 iterations (much more frequent)
+        if date_idx % 5 == 0:
             # Check if interrupt was requested
             if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
                 print("🛑 Hard kill requested - stopping fusion calculation")
@@ -6264,8 +6363,8 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     print(f"📊 BUILDING FUSION HISTORICAL DATA:")
     
     for date_idx, current_date in enumerate(sim_index):
-        # Check for interrupt every 100 iterations
-        if date_idx % 100 == 0:
+        # Check for interrupt every 5 iterations (much more frequent)
+        if date_idx % 5 == 0:
             # Check if interrupt was requested
             if hasattr(st.session_state, 'hard_kill_requested') and st.session_state.hard_kill_requested:
                 print("🛑 Hard kill requested - stopping historical data building")
@@ -6753,7 +6852,7 @@ def sync_cashflow_from_first_portfolio_callback():
                 st.session_state['multi_backtest_cashflow_sync_message_type'] = 'success'
                 
                 # Force immediate rerun to show changes
-                st.session_state.multi_backtest_rerun_flag = True
+                st.session_state.strategy_comparison_rerun_flag = True
             else:
                 # Store info message in session state
                 st.session_state['multi_backtest_cashflow_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
@@ -6795,7 +6894,7 @@ def sync_rebalancing_from_first_portfolio_callback():
                 st.session_state['multi_backtest_rebalancing_sync_message_type'] = 'success'
                 
                 # Force immediate rerun to show changes
-                st.session_state.multi_backtest_rerun_flag = True
+                st.session_state.strategy_comparison_rerun_flag = True
             else:
                 # Store info message in session state
                 st.session_state['multi_backtest_rebalancing_sync_message'] = "ℹ️ No portfolios were updated (all were excluded or already had matching values)"
@@ -6896,10 +6995,8 @@ def paste_json_callback():
             json_data['use_minimal_threshold'] = False
         if 'minimal_threshold_percent' not in json_data:
             json_data['minimal_threshold_percent'] = 2.0
-        if 'use_max_allocation' not in json_data:
-            json_data['use_max_allocation'] = False
-        if 'max_allocation_percent' not in json_data:
-            json_data['max_allocation_percent'] = 10.0
+        # Don't override max_allocation values from JSON - preserve imported values
+        # REMOVED: Don't force max_allocation values to preserve JSON values
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -7096,33 +7193,7 @@ def paste_json_callback():
         st.error(f"An error occurred: {e}")
     st.session_state.multi_backtest_rerun_flag = True
 
-def save_current_portfolio_beta_vol_settings():
-    """Save current beta and volatility settings to the active portfolio before switching"""
-    if (st.session_state.multi_backtest_active_portfolio_index is not None and 
-        st.session_state.multi_backtest_active_portfolio_index < len(st.session_state.multi_backtest_portfolio_configs)):
-        
-        active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
-        
-        # Save beta settings
-        if 'multi_backtest_active_calc_beta' in st.session_state:
-            active_portfolio['calc_beta'] = st.session_state['multi_backtest_active_calc_beta']
-        if 'multi_backtest_active_beta_window' in st.session_state:
-            active_portfolio['beta_window_days'] = st.session_state['multi_backtest_active_beta_window']
-        if 'multi_backtest_active_beta_exclude' in st.session_state:
-            active_portfolio['exclude_days_beta'] = st.session_state['multi_backtest_active_beta_exclude']
-        
-        # Save volatility settings
-        if 'multi_backtest_active_calc_vol' in st.session_state:
-            active_portfolio['calc_volatility'] = st.session_state['multi_backtest_active_calc_vol']
-        if 'multi_backtest_active_vol_window' in st.session_state:
-            active_portfolio['vol_window_days'] = st.session_state['multi_backtest_active_vol_window']
-        if 'multi_backtest_active_vol_exclude' in st.session_state:
-            active_portfolio['exclude_days_vol'] = st.session_state['multi_backtest_active_vol_exclude']
-
 def update_active_portfolio_index():
-    # CRITICAL: Save current portfolio's beta and volatility settings before switching
-    save_current_portfolio_beta_vol_settings()
-    
     # Use safe accessors to avoid AttributeError when keys are not yet set
     selected_name = st.session_state.get('multi_backtest_portfolio_selector', None)
     portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
@@ -7665,7 +7736,6 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
             st.caption("No portfolios selected for deletion")
 
 # Fusion Portfolio Creator - Collapsible Interface
-# Fusion Portfolio Creator - Robust System
 def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
     """Generate a descriptive fusion portfolio name based on allocations"""
     if not allocations_dict:
@@ -7699,28 +7769,13 @@ def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
     else:
         return f"Fusion ({rebalancing_freq})"
 
-def sync_and_normalize_allocations(selected_portfolios, allocations):
-    """Force synchronization and normalization of allocations"""
-    # Force refresh allocations from session state
-    for portfolio_name in selected_portfolios:
-        key = f"alloc_{portfolio_name}"
-        if key in st.session_state:
-            allocations[portfolio_name] = st.session_state[key]
-    
-    # Normalize to 100%
-    total = sum(allocations.values())
-    if total > 0:
-        for name in allocations:
-            allocations[name] = allocations[name] / total * 100.0
-    
-    return allocations
-
 st.sidebar.markdown("---")
 
 # Check if we have at least 2 portfolios - ALWAYS refresh the count
 portfolio_count = len(st.session_state.multi_backtest_portfolio_configs)
 if portfolio_count >= 2:
     # Get available portfolio names (excluding any existing fusion portfolios)
+    # Force refresh by recalculating every time
     available_portfolios = [
         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
         if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
@@ -7732,7 +7787,7 @@ if portfolio_count >= 2:
         if cfg.get('fusion_portfolio', {}).get('enabled', False)
     ]
     
-    # Debug info
+    # Debug info to help with server issues
     st.sidebar.caption(f"📊 Found {len(available_portfolios)} portfolios for fusion")
     
     # Show fusion portfolio info if we have any
@@ -7789,34 +7844,36 @@ if portfolio_count >= 2:
                 
                 # Handle the selected action
                 if fusion_action == "Create New Fusion":
-                    # FORCE REFRESH: Always recalculate available portfolios
+                    # FORCE REFRESH: Always recalculate available portfolios to ensure latest count
                     current_available_portfolios = [
                         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
                         if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
                     ]
                     
-                    # Portfolio selection with dynamic key
+                    # Simple portfolio selection with forced refresh
                     selected_portfolios = st.multiselect(
                         "Select Portfolios",
                         current_available_portfolios,
                         key=f"fusion_portfolios_select_{len(current_available_portfolios)}",
                         help="Choose portfolios to combine",
-                        default=[]
+                        default=[]  # Always start with empty selection
                     )
                     
                     if selected_portfolios:
+                        # Debug: Show current portfolio count
                         st.info(f"🔍 Creating fusion with {len(selected_portfolios)} portfolios: {', '.join(selected_portfolios)}")
                         
-                        # Allocation inputs
+                        # Simple allocation inputs
                         st.markdown("**Allocations (%)**")
                         allocations = {}
                         total = 0
                         
-                        for portfolio_name in selected_portfolios:
+                        for i, portfolio_name in enumerate(selected_portfolios):
                             col1, col2 = st.columns([2, 1])
                             with col1:
                                 st.markdown(portfolio_name)
                             with col2:
+                                # Default to equal allocation
                                 default_alloc = int(100.0 / len(selected_portfolios))
                                 alloc = st.number_input(
                                     "Allocation percentage",
@@ -7840,24 +7897,36 @@ if portfolio_count >= 2:
                             for name in allocations:
                                 allocations[name] = allocations[name] / total * 100.0
                         
-                        # Rebalancing frequency
+                        # Generate descriptive default name based on allocations
+                        
+                        # Portfolio name will be generated after frequency selection
+                        
+                        
+                        # Fusion portfolio has its own independent rebalancing frequency
+                        # This ensures momentum portfolios don't override fusion frequency
+                        
+                        # Initialize fusion frequency session state if not exists
+                        if "fusion_rebalancing_frequency" not in st.session_state:
+                            st.session_state["fusion_rebalancing_frequency"] = "Monthly"
+                        
+                        # Fusion rebalancing frequency selector
                         fusion_freq_options = ["Never", "Buy & Hold", "Buy & Hold (Target)", "Weekly", "Biweekly", "Monthly", "Quarterly", "Semiannually", "Annually"]
                         fusion_rebalancing_frequency = st.selectbox(
                             "Fusion Rebalancing Frequency",
                             fusion_freq_options,
                             index=fusion_freq_options.index(st.session_state.get("fusion_rebalancing_frequency", "Monthly")),
                             key="fusion_rebalancing_frequency_selector",
-                            help="How often the fusion portfolio rebalances between its constituent portfolios"
+                            help="How often the fusion portfolio rebalances between its constituent portfolios. This is independent of individual portfolio rebalancing frequencies."
                         )
                         
                         # Update session state
                         st.session_state["fusion_rebalancing_frequency"] = fusion_rebalancing_frequency
                         
-                        # POWERFUL Sync & Normalize button
+                        # Sync & Normalize button for server synchronization
                         col1, col2 = st.columns([1, 1])
                         with col1:
-                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization", key="fusion_sync_button", use_container_width=True):
-                                # Force sync from session state
+                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization of allocations", key="fusion_sync_button"):
+                                # Force refresh allocations from inputs
                                 for portfolio_name in selected_portfolios:
                                     key = f"alloc_{portfolio_name}"
                                     if key in st.session_state:
@@ -7869,13 +7938,13 @@ if portfolio_count >= 2:
                                     for name in allocations:
                                         allocations[name] = allocations[name] / total * 100.0
                                 
-                                # Force rerun
+                                # Force rerun to update UI
                                 st.rerun()
                         
                         with col2:
-                            st.caption("💡 Click to sync and normalize")
+                            st.caption("💡 Click to sync allocations and normalize to 100%")
                         
-                        # Generate name
+                        # Portfolio name (generated after rebalancing frequency is selected)
                         default_name = generate_fusion_name(allocations, fusion_rebalancing_frequency)
                         fusion_name = st.text_input(
                             "Fusion Name",
@@ -7883,71 +7952,102 @@ if portfolio_count >= 2:
                             key="fusion_name_input"
                         )
                         
+                        # Information about independent rebalancing
+                        st.info(f"""
+                        **Independent Rebalancing System:**
+                        - Individual portfolios keep their own rebalancing frequencies
+                        - Fusion portfolio rebalances between portfolios at **{fusion_rebalancing_frequency}**
+                        - This allows maximum flexibility for different strategies
+                        - **Fusion frequency is completely independent** of individual portfolio frequencies
+                        """)
+                        
                         # Create button
-                        if st.button("Create Fusion Portfolio", type="primary", use_container_width=True):
-                            if len(selected_portfolios) < 2:
-                                st.error("Select at least 2 portfolios")
-                            elif not fusion_name.strip():
-                                st.error("Enter a fusion portfolio name")
-                            else:
-                                # Create fusion config
-                                fusion_config = {
-                                    'name': fusion_name.strip(),
+                        if st.button("🔗 Create Fusion", type="primary"):
+                            # Test toast first
+                            st.toast("🧪 Testing fusion toast...")
+                            
+                            # Validate selection
+                            if not selected_portfolios:
+                                st.error("❌ Please select at least one portfolio for fusion")
+                                st.stop()
+                            
+                            # Get first portfolio for defaults
+                            first_portfolio = st.session_state.multi_backtest_portfolio_configs[0]
+                            
+                            # Create fusion portfolio with its own independent frequency
+                            new_fusion_portfolio = {
+                                'name': fusion_name,
+                                'stocks': [],
+                                'use_momentum': False,
+                                'momentum_windows': [],
+                                'initial_value': first_portfolio.get('initial_value', 10000),
+                                'added_amount': first_portfolio.get('added_amount', 1000),
+                                'added_frequency': first_portfolio.get('added_frequency', 'Monthly'),
+                                'rebalancing_frequency': fusion_rebalancing_frequency,  # Use fusion's own independent frequency
+                                'benchmark_ticker': first_portfolio.get('benchmark_ticker', '^GSPC'),
                                 'fusion_portfolio': {
                                     'enabled': True,
-                                        'constituent_portfolios': selected_portfolios,
-                                        'allocations': allocations,
-                                        'rebalancing_frequency': fusion_rebalancing_frequency
+                                    'selected_portfolios': selected_portfolios,
+                                    'allocations': {name: alloc/100.0 for name, alloc in allocations.items()}
                                 }
                             }
                             
-                                # Add to session state
-                                st.session_state.multi_backtest_portfolio_configs.append(fusion_config)
-                                
-                                # Success
+                            st.session_state.multi_backtest_portfolio_configs.append(new_fusion_portfolio)
                             st.success(f"✅ Created: {fusion_name}")
                             st.toast(f"🎉 Fusion portfolio '{fusion_name}' created successfully!")
                             st.rerun()
                 
-                # Handle edit/delete actions
                 elif fusion_action.startswith("Edit:"):
+                    # Edit existing fusion portfolio
                     fusion_name = fusion_action.replace("Edit: ", "")
-                    fusion_config = next((cfg for cfg in existing_fusion_portfolios if cfg['name'] == fusion_name), None)
+                    fusion_portfolio = next(fp for fp in existing_fusion_portfolios if fp['name'] == fusion_name)
+                    fusion_config = fusion_portfolio['fusion_portfolio']
+                    current_portfolios = fusion_config.get('selected_portfolios', [])
+                    current_allocations = fusion_config.get('allocations', {})
                     
-                    if fusion_config:
-                        st.markdown(f"**Editing: {fusion_name}**")
-                        
-                        # Current allocations
-                        current_allocations = fusion_config['fusion_portfolio']['allocations']
-                        current_freq = fusion_config['fusion_portfolio']['rebalancing_frequency']
-                        
-                        st.markdown("**Current Allocations:**")
-                        for portfolio, alloc in current_allocations.items():
-                            st.markdown(f"• {portfolio}: {alloc:.1f}%")
-                        
-                        st.markdown(f"**Current Frequency:** {current_freq}")
-                        
-                        # Edit allocations
-                        st.markdown("**Edit Allocations (%)**")
-                        new_allocations = {}
+                    st.markdown(f"**Editing: {fusion_name}**")
+                    
+                    # Portfolio selection with dynamic refresh
+                    current_available_portfolios = [
+                        cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
+                        if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
+                    ]
+                    
+                    selected_portfolios = st.multiselect(
+                        "Select Portfolios",
+                        current_available_portfolios,
+                        default=current_portfolios,
+                        key=f"edit_fusion_portfolios_{len(current_available_portfolios)}",
+                        help="Choose portfolios to combine"
+                    )
+                    
+                    if selected_portfolios:
+                        # Allocation inputs
+                        st.markdown("**Allocations (%)**")
+                        allocations = {}
                         total = 0
                         
-                        for portfolio_name in current_allocations.keys():
+                        for portfolio_name in selected_portfolios:
                             col1, col2 = st.columns([2, 1])
                             with col1:
                                 st.markdown(portfolio_name)
                             with col2:
+                                # Use current allocation or default to equal
+                                current_alloc = current_allocations.get(portfolio_name, 0) * 100.0
+                                if current_alloc == 0:
+                                    current_alloc = 100.0 / len(selected_portfolios)
+                                
                                 alloc = st.number_input(
-                                    "Allocation percentage",
+                                    f"Allocation for {portfolio_name} (%)",
                                     min_value=0,
                                     max_value=100,
-                                    value=int(current_allocations[portfolio_name]),
+                                    value=int(current_alloc),
                                     step=1,
                                     format="%d",
-                                    label_visibility="collapsed",
-                                    key=f"edit_alloc_{portfolio_name}"
+                                    key=f"edit_alloc_{portfolio_name}",
+                                    label_visibility="collapsed"
                                 )
-                                new_allocations[portfolio_name] = alloc
+                                allocations[portfolio_name] = alloc
                                 total += alloc
                         
                         # Show total
@@ -7956,83 +8056,87 @@ if portfolio_count >= 2:
                         # Auto-normalize if needed
                         if abs(total - 100.0) > 0.1 and total > 0:
                             st.info("Auto-normalizing to 100%")
-                            for name in new_allocations:
-                                new_allocations[name] = new_allocations[name] / total * 100.0
+                            for name in allocations:
+                                allocations[name] = allocations[name] / total * 100.0
                         
-                        # Edit frequency
+                        # Fusion portfolio has its own independent rebalancing frequency
+                        # This ensures momentum portfolios don't override fusion frequency
+                        
+                        # Get current fusion frequency
+                        current_fusion_freq = fusion_portfolio.get('rebalancing_frequency', 'Monthly')
+                        
+                        # Initialize fusion frequency session state if not exists
+                        if "fusion_edit_rebalancing_frequency" not in st.session_state:
+                            st.session_state["fusion_edit_rebalancing_frequency"] = current_fusion_freq
+                        
+                        # Fusion rebalancing frequency selector for editing
                         fusion_freq_options = ["Never", "Buy & Hold", "Buy & Hold (Target)", "Weekly", "Biweekly", "Monthly", "Quarterly", "Semiannually", "Annually"]
-                        new_frequency = st.selectbox(
+                        fusion_rebalancing_frequency = st.selectbox(
                             "Fusion Rebalancing Frequency",
                             fusion_freq_options,
-                            index=fusion_freq_options.index(current_freq),
-                            key="edit_fusion_frequency"
+                            index=fusion_freq_options.index(st.session_state.get("fusion_edit_rebalancing_frequency", current_fusion_freq)),
+                            key="fusion_edit_rebalancing_frequency_selector",
+                            help="How often the fusion portfolio rebalances between its constituent portfolios. This is independent of individual portfolio rebalancing frequencies."
                         )
                         
-                        # POWERFUL Sync & Normalize button for edit
-                        col1, col2 = st.columns([1, 1])
-                        with col1:
-                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization", key="edit_fusion_sync_button", use_container_width=True):
-                                # Force sync from session state
-                                for portfolio_name in current_allocations.keys():
-                                    key = f"edit_alloc_{portfolio_name}"
-                                    if key in st.session_state:
-                                        new_allocations[portfolio_name] = st.session_state[key]
-                                
-                                # Normalize to 100%
-                                total = sum(new_allocations.values())
-                                if total > 0:
-                                    for name in new_allocations:
-                                        new_allocations[name] = new_allocations[name] / total * 100.0
-                                
-                                # Force rerun
-                                st.rerun()
+                        # Update session state
+                        st.session_state["fusion_edit_rebalancing_frequency"] = fusion_rebalancing_frequency
                         
-                        with col2:
-                            st.caption("💡 Click to sync and normalize")
+                        # Generate updated fusion name based on current allocations
+                        updated_fusion_name = generate_fusion_name(allocations, fusion_rebalancing_frequency)
                         
-                        # Auto-update name
-                        new_name = generate_fusion_name(new_allocations, new_frequency)
+                        # Fusion name input for editing
+                        st.markdown("**Fusion Name**")
+                        current_fusion_name = fusion_portfolio['name']
                         new_fusion_name = st.text_input(
                             "Fusion Name",
-                            value=new_name,
-                            key="edit_fusion_name"
+                            value=updated_fusion_name,  # Auto-update based on allocations
+                            key=f"edit_fusion_name_{fusion_name}",
+                            help="Fusion name auto-updates based on allocations. You can modify it if needed."
                         )
                         
+                        # Information about independent rebalancing
+                        st.info(f"""
+                        **Independent Rebalancing System:**
+                        - Individual portfolios keep their own rebalancing frequencies
+                        - Fusion portfolio rebalances between portfolios at **{fusion_rebalancing_frequency}**
+                        - This allows maximum flexibility for different strategies
+                        - **Fusion frequency is completely independent** of individual portfolio frequencies
+                        """)
+                        
                         # Update button
-                        if st.button("Update Fusion Portfolio", type="primary", use_container_width=True):
-                            # Update the configuration
-                            fusion_config['name'] = new_fusion_name.strip()
-                            fusion_config['fusion_portfolio']['allocations'] = new_allocations
-                            fusion_config['fusion_portfolio']['rebalancing_frequency'] = new_frequency
+                        if st.button("💾 Update Fusion", type="primary"):
+                            # Update the fusion portfolio name if changed
+                            if new_fusion_name and new_fusion_name != current_fusion_name:
+                                fusion_portfolio['name'] = new_fusion_name
+                                updated_name = new_fusion_name
+                            else:
+                                updated_name = current_fusion_name
                             
-                            # Success
-                            st.success(f"✅ Updated: {new_fusion_name}")
-                            st.toast(f"🔄 Fusion portfolio '{new_fusion_name}' updated successfully!")
+                            # Update the fusion portfolio
+                            fusion_portfolio['fusion_portfolio']['selected_portfolios'] = selected_portfolios
+                            fusion_portfolio['fusion_portfolio']['allocations'] = {
+                                name: alloc/100.0 for name, alloc in allocations.items()
+                            }
+                            # Update fusion frequency to maintain independence
+                            fusion_portfolio['rebalancing_frequency'] = fusion_rebalancing_frequency
+                            st.success(f"✅ Updated: {updated_name}")
+                            st.toast(f"🔄 Fusion portfolio '{updated_name}' updated successfully!")
                             st.rerun()
                 
                 elif fusion_action.startswith("Delete:"):
+                    # Delete existing fusion portfolio
                     fusion_name = fusion_action.replace("Delete: ", "")
-                    fusion_config = next((cfg for cfg in existing_fusion_portfolios if cfg['name'] == fusion_name), None)
+                    fusion_portfolio = next(fp for fp in existing_fusion_portfolios if fp['name'] == fusion_name)
                     
-                    if fusion_config:
-                        st.markdown(f"**Delete: {fusion_name}**")
-                        st.warning("This action cannot be undone!")
-                        
-                        # Show current configuration
-                        st.markdown("**Current Configuration:**")
-                        for portfolio, alloc in fusion_config['fusion_portfolio']['allocations'].items():
-                            st.markdown(f"• {portfolio}: {alloc:.1f}%")
-                        st.markdown(f"• Frequency: {fusion_config['fusion_portfolio']['rebalancing_frequency']}")
-                        
-                        # Delete button
-                        if st.button("Delete Fusion Portfolio", type="secondary", use_container_width=True):
-                            # Remove from session state
-                            st.session_state.multi_backtest_portfolio_configs = [
-                                cfg for cfg in st.session_state.multi_backtest_portfolio_configs 
-                                if cfg['name'] != fusion_name
-                            ]
-                            
-                            # Success
+                    st.markdown(f"**Delete: {fusion_name}**")
+                    st.markdown("**Current Composition:**")
+                    allocations = fusion_portfolio['fusion_portfolio'].get('allocations', {})
+                    for name, alloc in allocations.items():
+                        st.markdown(f"• {name}: {alloc*100:.1f}%")
+                    
+                    if st.button("🗑️ Delete Fusion", type="primary"):
+                        st.session_state.multi_backtest_portfolio_configs.remove(fusion_portfolio)
                         st.success(f"✅ Deleted: {fusion_name}")
                         st.toast(f"🗑️ Fusion portfolio '{fusion_name}' deleted successfully!")
                         st.rerun()
@@ -8119,7 +8223,6 @@ else:
     for i, portfolio in enumerate(st.session_state.multi_backtest_portfolio_configs):
         st.session_state.multi_backtest_portfolio_configs[i]['start_date_user'] = None
         st.session_state.multi_backtest_portfolio_configs[i]['end_date_user'] = None
-
 
 st.header(f"Editing Portfolio: {active_portfolio['name']}")
 
@@ -8779,7 +8882,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         
                         # CRITICAL: Force a proper portfolio switch to update all UI widgets
                         # This ensures the portfolio name text box and other widgets show the new portfolio's data
-                        st.session_state.multi_backtest_rerun_flag = True
+                        st.session_state.strategy_comparison_rerun_flag = True
                         
                         st.success("🗑️ Removed original portfolio - Active portfolio updated")
                     else:
@@ -9179,12 +9282,12 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     col_quick1, col_quick2 = st.columns([1, 1])
     
     with col_quick1:
-        if st.button("Select All", key="page4_select_all_tickers"):
+        if st.button("Select All", key="page1_select_all_tickers"):
             st.session_state.bulk_selected_tickers = available_tickers.copy()
             st.rerun()
     
     with col_quick2:
-        if st.button("Clear Selection", key="page4_clear_all_tickers"):
+        if st.button("Clear Selection", key="page1_clear_all_tickers"):
             st.session_state.bulk_selected_tickers = []
             st.rerun()
     
@@ -9200,7 +9303,7 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
                 display_text += f" (L:{leverage}x, E:{expense}%)"
             
             # Use checkbox state directly
-            checkbox_key = f"page4_bulk_ticker_select_{i}"
+            checkbox_key = f"page1_bulk_ticker_select_{i}"
             is_checked = st.checkbox(
                 display_text, 
                 value=ticker in st.session_state.bulk_selected_tickers,
@@ -9558,7 +9661,7 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                                 'include_dividends': True
                             })
                     
-                    # Update the portfolio with new stocks
+                    # Update the portfolio with combined stocks
                     st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'] = current_stocks
                     
                     # Update the active_portfolio reference to match session state
@@ -10255,6 +10358,7 @@ if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", use_container_widt
     st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
     emergency_kill()
 
+
 # Move Run Backtest to the left sidebar to make it conspicuous and separate from config
 if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
     # Reset kill request when starting new backtest
@@ -10538,7 +10642,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO_CACHE VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -10551,7 +10655,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO_CACHE)...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (CACHED)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -10577,6 +10681,33 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                         import logging
                         warnings.filterwarnings('ignore', message='.*ScriptRunContext.*')
                         logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
+                        
+                        # Check for kill request immediately
+                        if st.session_state.get('hard_kill_requested', False):
+                            return {
+                                'index': i,
+                                'success': False,
+                                'error': 'Kill requested before processing'
+                            }
+                        
+                        # Set a global kill flag for this thread
+                        import threading
+                        threading.current_thread().kill_requested = False
+                        
+                        # Add a more aggressive kill check mechanism
+                        def check_kill_request():
+                            return st.session_state.get('hard_kill_requested', False)
+                        
+                        # Check kill request every 5 iterations in the main processing loop
+                        kill_check_counter = 0
+                        
+                        # Add kill check in the main processing loop
+                        def check_kill_in_loop():
+                            nonlocal kill_check_counter
+                            kill_check_counter += 1
+                            if kill_check_counter % 5 == 0:
+                                return check_kill_request()
+                            return False
                         
                         name = cfg.get('name', f'Portfolio {i}')
                         
@@ -10680,6 +10811,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             # Store cash flows and portfolio values for MWRR calculation
                             result['cash_flows'] = cash_flows
                             result['portfolio_values'] = total_series
+                            result['success'] = True
                             
                             return result
                         else:
@@ -10751,6 +10883,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             # Store cash flows and portfolio values for MWRR calculation
                             result['cash_flows'] = cash_flows
                             result['portfolio_values'] = total_series
+                            result['success'] = True
                             
                             return result
                         else:
@@ -10766,7 +10899,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             'index': i-1,
                             'name': cfg.get('name', f'Portfolio {i}'),
                             'success': False,
-                            'error': str(e)
+                            'error': f"Fusion backtest error: {str(e)}"
                         }
                 
                 # Determine number of workers (optimized for threading)
@@ -10801,6 +10934,14 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             # Collect results as they complete
                             completed_count = 0
                             for future in concurrent.futures.as_completed(future_to_index):
+                                # Check for kill request before processing each result
+                                if st.session_state.get('hard_kill_requested', False):
+                                    print("🛑 Hard kill requested - stopping regular portfolio processing")
+                                    # Cancel remaining futures
+                                    for f in future_to_index:
+                                        f.cancel()
+                                    break
+                                
                                 completed_count += 1
                                 progress_percent = completed_count / len(regular_portfolios)
                                 progress_bar.progress(progress_percent, text=f"Phase 1: Completed {completed_count}/{len(regular_portfolios)} regular portfolios...")
@@ -10881,13 +11022,22 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     if st.session_state.get('use_parallel_processing', True) and len(fusion_portfolios) > 1:
                         # Process fusion portfolios in parallel using optimized threading
                         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            # Submit all fusion portfolio tasks - pass all configs for fusion dependencies
-                            fusion_args = [(i, cfg, st.session_state.multi_backtest_portfolio_configs) for i, cfg in fusion_portfolios]
+                            # Submit all fusion portfolio tasks - pass only regular portfolios for fusion dependencies
+                            regular_configs = [cfg for cfg in st.session_state.multi_backtest_portfolio_configs if not cfg.get('fusion_portfolio', {}).get('enabled', False)]
+                            fusion_args = [(i, cfg, regular_configs) for i, cfg in fusion_portfolios]
                             future_to_index = {executor.submit(process_single_fusion_portfolio, args): args[0] for args in fusion_args}
                             
                             # Collect results as they complete
                             completed_count = 0
                             for future in concurrent.futures.as_completed(future_to_index):
+                                # Check for kill request before processing each result
+                                if st.session_state.get('hard_kill_requested', False):
+                                    print("🛑 Hard kill requested - stopping fusion portfolio processing")
+                                    # Cancel remaining futures
+                                    for f in future_to_index:
+                                        f.cancel()
+                                    break
+                                
                                 completed_count += 1
                                 progress_percent = completed_count / len(fusion_portfolios)
                                 progress_bar.progress(progress_percent, text=f"Phase 2: Completed {completed_count}/{len(fusion_portfolios)} fusion portfolios...")
@@ -10930,8 +11080,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             progress_percent = i / len(fusion_portfolios)
                             progress_bar.progress(progress_percent, text=f"Phase 2: Processing fusion portfolio {i}/{len(fusion_portfolios)}: {args[1].get('name', f'Portfolio {i}')}")
                             
-                            # Add all configs for fusion dependencies
-                            fusion_args = (args[0], args[1], st.session_state.multi_backtest_portfolio_configs)
+                            # Add only regular portfolios for fusion dependencies
+                            regular_configs = [cfg for cfg in st.session_state.multi_backtest_portfolio_configs if not cfg.get('fusion_portfolio', {}).get('enabled', False)]
+                            fusion_args = (args[0], args[1], regular_configs)
                             result = process_single_fusion_portfolio(fusion_args)
                             
                             if result['success']:
@@ -10976,9 +11127,6 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     phase_info = f" (Phase 1: {len(regular_portfolios)} regular, Phase 2: {len(fusion_portfolios)} fusion)" if fusion_portfolios else f" ({len(regular_portfolios)} regular portfolios only)"
                     st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios in {processing_mode} mode{phase_info}!**")
                     st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
-                    if failed_portfolios:
-                        # Failed portfolios handled silently
-                        pass
                 else:
                     st.error("❌ **No portfolios were processed successfully!** Please check your configuration.")
                     st.stop()
@@ -11496,7 +11644,7 @@ def paste_all_json_callback():
             obj = json.loads(json_text)
             st.success("✅ Multi-portfolio JSON parsed successfully using advanced cleaning!")
         
-        # Add missing fields for compatibility if they don't exist
+        # Add missing fields for compatibility if they don't exist (based on page 3 logic)
         if isinstance(obj, list):
             for portfolio in obj:
                 # Add missing fields with default values
@@ -11506,14 +11654,13 @@ def paste_all_json_callback():
                     portfolio['exclude_from_cashflow_sync'] = False
                 if 'exclude_from_rebalancing_sync' not in portfolio:
                     portfolio['exclude_from_rebalancing_sync'] = False
+                # Only add missing fields if they don't exist in the JSON (like minimal_threshold)
                 if 'use_minimal_threshold' not in portfolio:
                     portfolio['use_minimal_threshold'] = False
                 if 'minimal_threshold_percent' not in portfolio:
                     portfolio['minimal_threshold_percent'] = 2.0
-                if 'use_max_allocation' not in portfolio:
-                    portfolio['use_max_allocation'] = False
-                if 'max_allocation_percent' not in portfolio:
-                    portfolio['max_allocation_percent'] = 10.0
+                # Don't override max_allocation values from JSON - preserve imported values like minimal_threshold
+                # REMOVED: Don't force max_allocation values to preserve JSON values
         
         if isinstance(obj, list):
             # Clear widget keys to force re-initialization
@@ -11538,9 +11685,9 @@ def paste_all_json_callback():
                 is_fusion_portfolio = 'fusion_portfolio' in cfg and isinstance(cfg.get('fusion_portfolio'), dict)
                 if is_fusion_portfolio:
                     fusion_config = cfg.get('fusion_portfolio', {})
-                    # st.info(f"🔗 Detected fusion portfolio: {cfg.get('name', 'Unknown')}")
-                    # st.info(f"   Selected portfolios: {fusion_config.get('selected_portfolios', [])}")
-                    # st.info(f"   Allocations: {fusion_config.get('allocations', {})}")
+                    st.info(f"🔗 Detected fusion portfolio: {cfg.get('name', 'Unknown')}")
+                    st.info(f"   Selected portfolios: {fusion_config.get('selected_portfolios', [])}")
+                    st.info(f"   Allocations: {fusion_config.get('allocations', {})}")
                 
                 # Handle momentum strategy value mapping from other pages
                 momentum_strategy = cfg.get('momentum_strategy', 'Classic')
@@ -11608,11 +11755,9 @@ def paste_all_json_callback():
                 
                 # Debug: Show what we received for this portfolio
                 if 'momentum_windows' in cfg:
-                    # st.info(f"Momentum windows for {cfg.get('name', 'Unknown')}: {cfg['momentum_windows']}")
-                    pass
+                    st.info(f"Momentum windows for {cfg.get('name', 'Unknown')}: {cfg['momentum_windows']}")
                 if 'use_momentum' in cfg:
-                    # st.info(f"Use momentum for {cfg.get('name', 'Unknown')}: {cfg['use_momentum']}")
-                    pass
+                    st.info(f"Use momentum for {cfg.get('name', 'Unknown')}: {cfg['use_momentum']}")
                 
                 # Map frequency values from app.py format to Multi-Backtest format
                 def map_frequency(freq):
@@ -11740,10 +11885,9 @@ def paste_all_json_callback():
             st.success('All portfolio configurations updated from JSON (Multi-Backtest page).')
             # Debug: Show final momentum windows for first portfolio
             if processed_configs:
-                # st.info(f"Final momentum windows for first portfolio: {processed_configs[0]['momentum_windows']}")
-                # st.info(f"Final use_momentum for first portfolio: {processed_configs[0]['use_momentum']}")
-                # st.info(f"Sync exclusions for first portfolio - Cash Flow: {processed_configs[0].get('exclude_from_cashflow_sync', False)}, Rebalancing: {processed_configs[0].get('exclude_from_rebalancing_sync', False)}")
-                pass
+                st.info(f"Final momentum windows for first portfolio: {processed_configs[0]['momentum_windows']}")
+                st.info(f"Final use_momentum for first portfolio: {processed_configs[0]['use_momentum']}")
+                st.info(f"Sync exclusions for first portfolio - Cash Flow: {processed_configs[0].get('exclude_from_cashflow_sync', False)}, Rebalancing: {processed_configs[0].get('exclude_from_rebalancing_sync', False)}")
             # Sync date widgets with the updated portfolio
             sync_date_widgets_with_portfolio()
             
@@ -11966,6 +12110,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         last_date = max(series['no_additions'].index.max() for series in st.session_state.multi_all_results.values())
         st.subheader(f"Results for Backtest Period: {first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')}")
 
+        # Hover mode option
+        show_closest_only = st.checkbox(
+            "Show Only Closest Portfolio on Hover",
+            value=False,
+            help="When enabled, hovering will show only the portfolio line closest to your cursor instead of all portfolios.",
+            key="multi_chart_closest_hover"
+        )
+        
         fig1 = go.Figure()
         for name, series_dict in st.session_state.multi_all_results.items():
             # Plot the series that includes added cash (with_additions) for comparison
@@ -11976,11 +12128,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             else:
                 x_dates = pd.to_datetime(series_to_plot.index)
             fig1.add_trace(go.Scatter(x=x_dates, y=series_to_plot.values, mode='lines', name=name))
+        # Set hover mode based on user preference
+        hover_mode = "closest" if show_closest_only else "x unified"
+        
         fig1.update_layout(
             title="Backtest Comparison — Portfolio Value (with cash additions)",
             xaxis_title="Date",
             legend_title="Portfolios",
-            hovermode="x unified",
+            hovermode=hover_mode,
             template="plotly_dark",
             yaxis_tickprefix="$",
             yaxis_tickformat=",.0f",
@@ -12034,7 +12189,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             title="Backtest Comparison (Max Drawdown)",
             xaxis_title="Date",
             legend_title="Portfolios",
-            hovermode="x unified",
+            hovermode=hover_mode,  # Use the same hover mode as the main chart
             template="plotly_dark",
             # No width/height restrictions - let them be responsive like other plots
             xaxis=dict(
