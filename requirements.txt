@@ -1,34 +1,16 @@
-# Core Streamlit and Data Science Libraries
-streamlit==1.47.1
-pandas==2.3.1
-numpy==2.3.2
-yfinance==0.2.66
-requests==2.32.4
+# Core dependencies for Momentum Backtesting App
+streamlit>=1.28.0
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+plotly>=5.15.0
+yfinance>=0.2.18
+scipy>=1.10.0
+pandas-market-calendars>=4.3.0
 
-# Performance Optimization
-numba==0.62.1
+# Optional dependencies (for enhanced features)
+mplcursors>=0.5.0  # For interactive matplotlib cursors
+streamlit-plotly-events>=0.1.0  # For interactive plotly events
 
-# Financial and Statistical Libraries
-scipy==1.16.2
-pandas-market-calendars==5.1.1
-
-# Visualization Libraries
-plotly==6.3.1
-matplotlib==3.10.6
-
-# Additional useful libraries for financial analysis
-scikit-learn==1.7.2
-
-# PDF Generation and Image Processing
-reportlab==4.4.3
-Pillow==11.3.0
-kaleido==1.0.0
-PyPDF2==3.0.1
-pdfplumber==0.11.7
-
-# Date and Time Handling
-python-dateutil==2.9.0.post0
-
-# Excel and Data Import Support
-openpyxl==3.1.5
-xlrd==2.0.2
+# Note: The app will work without the optional dependencies,
+# but some interactive features may be disabled.
