@@ -7670,23 +7670,31 @@ def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
     if not allocations_dict:
         return f"Fusion ({rebalancing_freq})"
     
+    # Filter out any None or invalid allocations
+    valid_allocations = {k: v for k, v in allocations_dict.items() if v is not None and v > 0}
+    
+    if not valid_allocations:
+        return f"Fusion ({rebalancing_freq})"
+    
     # Sort by allocation percentage (descending)
-    sorted_allocs = sorted(allocations_dict.items(), key=lambda x: x[1], reverse=True)
+    sorted_allocs = sorted(valid_allocations.items(), key=lambda x: x[1], reverse=True)
+    
+    # Limit to top 2 portfolios to keep name reasonable
+    top_allocations = sorted_allocs[:2]
     
     # Create name with top allocations
     name_parts = []
-    for portfolio_name, percentage in sorted_allocs:
-        if percentage > 0:  # Only include non-zero allocations
-            # Handle both decimal (0.0-1.0) and percentage (0-100) formats
-            if percentage <= 1.0:
-                # Already in decimal format
-                name_parts.append(f"{portfolio_name} {percentage*100:.0f}%")
-            else:
-                # Already in percentage format
-                name_parts.append(f"{portfolio_name} {percentage:.0f}%")
+    for portfolio_name, percentage in top_allocations:
+        # Handle both decimal (0.0-1.0) and percentage (0-100) formats
+        if percentage <= 1.0:
+            # Already in decimal format
+            name_parts.append(f"{portfolio_name} {percentage*100:.0f}%")
+        else:
+            # Already in percentage format
+            name_parts.append(f"{portfolio_name} {percentage:.0f}%")
     
     if name_parts:
-        return f"Fusion Portfolio {' '.join(name_parts)} ({rebalancing_freq})"
+        return f"Fusion {' '.join(name_parts)} ({rebalancing_freq})"
     else:
         return f"Fusion ({rebalancing_freq})"
 
@@ -7821,30 +7829,6 @@ if portfolio_count >= 2:
                                 allocations[name] = allocations[name] / total * 100.0
                         
                         # Generate descriptive default name based on allocations
-                        def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
-                            """Generate a descriptive fusion portfolio name based on allocations"""
-                            if not allocations_dict:
-                                return f"Fusion {len(existing_fusion_portfolios) + 1} ({rebalancing_freq})"
-                            
-                            # Sort by allocation percentage (descending)
-                            sorted_allocs = sorted(allocations_dict.items(), key=lambda x: x[1], reverse=True)
-                            
-                            # Create name with top allocations
-                            name_parts = []
-                            for portfolio_name, percentage in sorted_allocs:
-                                if percentage > 0:  # Only include non-zero allocations
-                                    # Handle both decimal (0.0-1.0) and percentage (0-100) formats
-                                    if percentage <= 1.0:
-                                        # Already in decimal format
-                                        name_parts.append(f"{portfolio_name} {percentage*100:.0f}%")
-                                    else:
-                                        # Already in percentage format
-                                        name_parts.append(f"{portfolio_name} {percentage:.0f}%")
-                            
-                            if name_parts:
-                                return f"Fusion Portfolio {' '.join(name_parts)} ({rebalancing_freq})"
-                            else:
-                                return f"Fusion {len(existing_fusion_portfolios) + 1} ({rebalancing_freq})"
                         
                         # Portfolio name will be generated after frequency selection
                         
@@ -10650,8 +10634,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     portfolio_key_map[result['index']] = unique_name
                                     successful_portfolios += 1
                                 else:
-                                    failed_portfolios.append((result['name'], result['error']))
-                                    st.warning(f"⚠️ Regular Portfolio {result['name']} failed: {result['error']}")
+                                    # Regular portfolio failed - silently continue
+                                    pass
                     else:
                         # Process regular portfolios sequentially
                         for i, args in enumerate(regular_portfolios, start=1):
@@ -10686,8 +10670,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                 portfolio_key_map[result['index']] = unique_name
                                 successful_portfolios += 1
                             else:
-                                failed_portfolios.append((result['name'], result['error']))
-                                st.warning(f"⚠️ Regular Portfolio {result['name']} failed: {result['error']}")
+                                # Regular portfolio failed - silently continue
+                                pass
                 
                 # PHASE 2: Process fusion portfolios after regular portfolios are complete
                 if fusion_portfolios:
@@ -10739,8 +10723,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                     portfolio_key_map[result['index']] = unique_name
                                     successful_portfolios += 1
                                 else:
-                                    failed_portfolios.append((result['name'], result['error']))
-                                    st.warning(f"⚠️ Fusion Portfolio {result['name']} failed: {result['error']}")
+                                    # Fusion portfolio failed - silently continue
+                                    pass
                     else:
                         # Process fusion portfolios sequentially
                         for i, args in enumerate(fusion_portfolios, start=1):
@@ -10779,8 +10763,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                 portfolio_key_map[result['index']] = unique_name
                             successful_portfolios += 1
                         else:
-                                failed_portfolios.append((result['name'], result['error']))
-                                st.warning(f"⚠️ Fusion Portfolio {result['name']} failed: {result['error']}")
+                            # Fusion portfolio failed - silently continue
+                            pass
                 
                 # Final progress update
                 progress_bar.progress(1.0, text="Portfolio processing completed!")
@@ -10797,7 +10781,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios in {processing_mode} mode{phase_info}!**")
                     st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
                     if failed_portfolios:
-                        st.warning(f"⚠️ **{len(failed_portfolios)} portfolios failed** - check warnings above for details")
+                        # Failed portfolios handled silently
+                        pass
                 else:
                     st.error("❌ **No portfolios were processed successfully!** Please check your configuration.")
                     st.stop()
