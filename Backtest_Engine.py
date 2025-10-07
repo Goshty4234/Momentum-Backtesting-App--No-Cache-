@@ -1,6 +1,14 @@
 import numpy as np
 # Backtest_Engine.py
 import streamlit as st
+
+# Configure Streamlit page
+st.set_page_config(
+    page_title="Quantitative Portfolio Momentum Backtest & Analytics",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import matplotlib.pyplot as plt
 import io
 import contextlib
