@@ -4627,39 +4627,6 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
         if st.button("Remove to All", on_click=remove_bulk_leverage_callback, type="secondary"):
             pass
 
-# Leverage Summary Section - moved here to appear right after ticker input
-leveraged_tickers = []
-for stock in active_portfolio['stocks']:
-    if "?L=" in stock['ticker']:
-        try:
-            base_ticker, leverage = parse_leverage_ticker(stock['ticker'])
-            leveraged_tickers.append((base_ticker, leverage))
-        except:
-            pass
-
-if leveraged_tickers:
-    st.markdown("---")
-    st.markdown("### 🚀 Leverage Summary")
-    
-    # Get risk-free rate for drag calculation
-    try:
-        risk_free_rates = get_risk_free_rate_robust([pd.Timestamp.now()])
-        daily_rf = risk_free_rates.iloc[0] if len(risk_free_rates) > 0 else 0.000105
-    except:
-        daily_rf = 0.000105  # fallback
-    
-    # Group by leverage level
-    leverage_groups = {}
-    for base_ticker, leverage in leveraged_tickers:
-        if leverage not in leverage_groups:
-            leverage_groups[leverage] = []
-        leverage_groups[leverage].append(base_ticker)
-    
-    for leverage in sorted(leverage_groups.keys()):
-        base_tickers = leverage_groups[leverage]
-        daily_drag = (leverage - 1) * daily_rf * 100
-        st.markdown(f"🚀 **{leverage}x leverage** on {', '.join(base_tickers)}")
-        st.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {daily_rf*100:.1f}%)")
 
 # Special tickers and leverage guide sections
 with st.expander("📈 Broad Long-Term Tickers", expanded=False):
@@ -4919,6 +4886,39 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
         else:
             st.error("❌ Please enter ticker symbols.")
 
+# Leverage Summary Section
+leveraged_tickers = []
+for stock in active_portfolio['stocks']:
+    if "?L=" in stock['ticker'] or "?E=" in stock['ticker']:
+        try:
+            base_ticker, leverage, expense_ratio = parse_ticker_parameters(stock['ticker'])
+            leveraged_tickers.append((base_ticker, leverage))
+        except:
+            pass
+
+if leveraged_tickers:
+    st.markdown("---")
+    st.markdown("### 🚀 Leverage Summary")
+    
+    # Get risk-free rate for drag calculation
+    try:
+        risk_free_rates = get_risk_free_rate_robust([pd.Timestamp.now()])
+        daily_rf = risk_free_rates.iloc[0] if len(risk_free_rates) > 0 else 0.000105
+    except:
+        daily_rf = 0.000105  # fallback
+    
+    # Group by leverage level
+    leverage_groups = {}
+    for base_ticker, leverage in leveraged_tickers:
+        if leverage not in leverage_groups:
+            leverage_groups[leverage] = []
+        leverage_groups[leverage].append(base_ticker)
+    
+    for leverage in sorted(leverage_groups.keys()):
+        base_tickers = leverage_groups[leverage]
+        daily_drag = (leverage - 1) * daily_rf * 100
+        st.markdown(f"🚀 **{leverage}x leverage** on {', '.join(base_tickers)}")
+        st.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {daily_rf*100:.1f}%)")
 
 st.subheader("Strategy")
 if "alloc_active_use_momentum" not in st.session_state:
