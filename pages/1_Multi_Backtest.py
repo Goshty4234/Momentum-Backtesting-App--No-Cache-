@@ -9295,9 +9295,13 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
         # Create checkboxes for each ticker
         for i, ticker in enumerate(available_tickers):
             base_ticker, leverage, expense = parse_ticker_parameters(ticker)
-            display_text = f"{base_ticker}"
+            display_text = f"{base_ticker}" if base_ticker else f"{ticker}"
             if leverage != 1.0 or expense > 0.0:
                 display_text += f" (L:{leverage}x, E:{expense}%)"
+            
+            # Ensure display_text is never empty (accessibility requirement)
+            if not display_text or display_text.strip() == "":
+                display_text = f"Ticker {i+1}"
             
             # Use checkbox state directly
             checkbox_key = f"page1_bulk_ticker_select_{i}"
@@ -16788,6 +16792,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         template='plotly_dark',
                         height=600,
                         hovermode=hover_mode_alloc,
+                        hoverdistance=20,
+                        spikedistance=100,
                         # Improve legend layout to prevent name truncation
                         legend=dict(
                             orientation="v",
