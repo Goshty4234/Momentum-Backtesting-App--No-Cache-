@@ -12152,8 +12152,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     y=series_to_plot.values, 
                     mode='lines', 
                     name=name,
-                    hovertemplate=f"<b>{name}</b><br>Value: $%{{y:,.2f}}<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only else None,
-                    hoverinfo='text' if show_closest_only else 'x+y+name'
+                    hovertemplate=f"<b>{name}</b><br>Portfolio Value: $%{{y:,.2f}}<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only else f"<b>{name}</b><br>Portfolio Value: $%{{y:,.2f}}<br>Date: %{{x|%Y-%m-%d}}<extra></extra>",
+                    hoverinfo='text'
                 ))
             except Exception as e:
                 st.warning(f"⚠️ Error plotting portfolio {name}: {str(e)}")
@@ -12183,14 +12183,17 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 automargin=True,  # Ensure labels fit
                 range=None  # Let Plotly auto-range to ensure perfect alignment
             ),
+            # Improve legend layout to prevent name truncation
             legend=dict(
-                orientation="h",  # Horizontal legend
+                orientation="h",
                 yanchor="top",
-                y=1.15,
+                y=1.05,
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                font=dict(size=10),
+                itemwidth=30
             ),
-            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as Strategy Comparison Chart 1
+            margin=dict(t=120, l=80, r=80, b=80),  # Standardized margins for alignment
             height=600,  # Taller height to prevent crushing
             yaxis=dict(
                 title="Portfolio Value ($)", 
@@ -12244,8 +12247,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     y=drawdowns, 
                     mode='lines', 
                     name=name,
-                    hovertemplate=f"<b>{name}</b><br>Drawdown: %{{y:.2f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only else None,
-                    hoverinfo='text' if show_closest_only else 'x+y+name'
+                    hovertemplate=f"<b>{name}</b><br>Drawdown: %{{y:.2f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only else f"<b>{name}</b><br>Drawdown: %{{y:.2f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>",
+                    hoverinfo='text'
                 ))
             except Exception as e:
                 st.warning(f"⚠️ Error calculating drawdown for portfolio {name}: {str(e)}")
@@ -12266,14 +12269,17 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 automargin=True,  # Ensure labels fit
                 range=None  # Let Plotly auto-range to ensure perfect alignment
             ),
+            # Improve legend layout to prevent name truncation
             legend=dict(
-                orientation="h",  # Horizontal legend
-                yanchor="top",
-                y=1.15,
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                font=dict(size=10),
+                itemwidth=30
             ),
-            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as Strategy Comparison
+            margin=dict(t=80, l=80, r=80, b=120),  # More space at bottom for legend
             height=600,  # Taller height to prevent crushing
             yaxis=dict(
                 title="Drawdown (%)", 
@@ -12283,24 +12289,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             )
         )
         
-        # Add range selector to drawdown chart - EXACTLY LIKE PORTFOLIO ALLOCATION EVOLUTION
-        fig2.update_layout(
-            xaxis=dict(
-                rangeselector=dict(
-                    buttons=list([
-                        dict(count=7, label="1W", step="day", stepmode="backward"),
-                        dict(count=1, label="1M", step="month", stepmode="backward"),
-                        dict(count=3, label="3M", step="month", stepmode="backward"),
-                        dict(count=6, label="6M", step="month", stepmode="backward"),
-                        dict(count=1, label="1Y", step="year", stepmode="backward"),
-                        dict(count=5, label="5Y", step="year", stepmode="backward"),
-                        dict(step="all")
-                    ])
-                ),
-                rangeslider=dict(visible=True),
-                type="date"
-            )
-        )
         
         st.plotly_chart(fig2, use_container_width=True, key="multi_drawdown_chart")
         # Store in session state for PDF export
@@ -12388,7 +12376,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 xanchor="center",
                 x=0.5
             ),
-            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            margin=dict(t=120, l=80, r=80, b=80),  # Standardized margins for alignment
             height=600,  # Same height as the other plots
             yaxis=dict(
                 title="VIX Level", 
@@ -12401,151 +12389,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         st.plotly_chart(fig_vix, use_container_width=True, key="vix_chart")
         # Store in session state for PDF export
         st.session_state.fig_vix = fig_vix
-
-        # Third plot: Multi-Portfolio PE Ratio Comparison
-        if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
-            st.markdown("---")
-            st.markdown("**📊 Multi-Portfolio PE Ratio Comparison**")
-            st.warning("⚠️ **Work in Progress:** PE ratio calculations are currently using current PE ratios only. Historical PE evolution is not yet implemented and may not be fully accurate.")
-            
-            try:
-                # Create multi-portfolio PE ratio chart
-                fig_pe_multi = go.Figure()
-                
-                # Get all available portfolio names
-                available_portfolio_names = [cfg.get('name', 'Portfolio') for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])]
-                extra_names = [n for n in st.session_state.get('multi_all_results', {}).keys() if n not in available_portfolio_names]
-                all_portfolio_names = available_portfolio_names + extra_names
-                
-                # Color palette for different portfolios
-                colors = [
-                    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-                    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-                    '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
-                ]
-                
-                # Collect PE data for all portfolios
-                all_pe_data = {}
-                portfolio_pe_series = {}
-                
-                for i, portfolio_name in enumerate(all_portfolio_names):
-                    allocs_data = st.session_state.multi_all_allocations.get(portfolio_name, {})
-                    
-                    if allocs_data:
-                        # Get all unique tickers for this portfolio (exclude CASH)
-                        all_tickers = set()
-                        for date, allocs in allocs_data.items():
-                            for ticker in allocs.keys():
-                                if ticker is not None and ticker != 'CASH':
-                                    all_tickers.add(ticker)
-                        all_tickers = sorted(list(all_tickers))
-                        
-                        if all_tickers:
-                            # Fetch PE data for all tickers (cached per portfolio)
-                            pe_data = {}
-                            for ticker in all_tickers:
-                                try:
-                                    stock = yf.Ticker(ticker)
-                                    info = stock.info
-                                    pe_ratio = info.get('trailingPE', None)
-                                    if pe_ratio is not None and pe_ratio > 0:
-                                        pe_data[ticker] = pe_ratio
-                                except:
-                                    continue
-                            
-                            if pe_data:
-                                # Calculate weighted PE ratio over time for this portfolio
-                                dates = sorted(allocs_data.keys())
-                                portfolio_pe_ratios = []
-                                
-                                for date in dates:
-                                    allocs = allocs_data[date]
-                                    weighted_pe = 0
-                                    total_weight = 0
-                                    
-                                    # Check if portfolio is in cash
-                                    stock_allocation = sum(weight for ticker, weight in allocs.items() if ticker != 'CASH' and weight > 0)
-                                    
-                                    if stock_allocation == 0:
-                                        portfolio_pe_ratios.append(None)
-                                    else:
-                                        # Calculate weighted PE only for stock allocations
-                                        for ticker, weight in allocs.items():
-                                            if ticker != 'CASH' and ticker in pe_data and weight > 0:
-                                                weighted_pe += pe_data[ticker] * weight
-                                                total_weight += weight
-                                        
-                                        if total_weight > 0:
-                                            portfolio_pe_ratios.append(weighted_pe / total_weight)
-                                        else:
-                                            portfolio_pe_ratios.append(None)
-                                
-                                # Filter out None values and create clean data
-                                clean_dates = []
-                                clean_pe_ratios = []
-                                for j, pe in enumerate(portfolio_pe_ratios):
-                                    if pe is not None:
-                                        clean_dates.append(dates[j])
-                                        clean_pe_ratios.append(pe)
-                                
-                                if clean_pe_ratios:
-                                    portfolio_pe_series[portfolio_name] = {
-                                        'dates': clean_dates,
-                                        'pe_ratios': clean_pe_ratios,
-                                        'color': colors[i % len(colors)]
-                                    }
-                
-                # Add traces for each portfolio
-                for portfolio_name, data in portfolio_pe_series.items():
-                    fig_pe_multi.add_trace(go.Scatter(
-                        x=data['dates'],
-                        y=data['pe_ratios'],
-                        mode='lines',
-                        name=portfolio_name,
-                        line=dict(color=data['color'], width=2),
-                        hovertemplate=(
-                            f'<b>{portfolio_name}</b><br>' +
-                            'Date: %{x|%Y-%m-%d}<br>' +
-                            'PE Ratio: %{y:.2f}<br>' +
-                            '<extra></extra>'
-                        ),
-                        connectgaps=False
-                    ))
-                
-                if portfolio_pe_series:
-                    # Update layout
-                    fig_pe_multi.update_layout(
-                        title="Multi-Portfolio PE Ratio Comparison",
-                        xaxis_title="Date",
-                        yaxis_title="PE Ratio",
-                        template='plotly_dark',
-                        height=500,
-                        hovermode='x unified',
-                        showlegend=True,
-                        xaxis=dict(
-                            type='date',
-                            automargin=True
-                        ),
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
-                    )
-                    
-                    # Store in session state
-                    st.session_state.fig_pe_multi = fig_pe_multi
-                    
-                    # Display chart
-                    st.plotly_chart(st.session_state.fig_pe_multi, use_container_width=True)
-                    
-                else:
-                    st.warning("No PE ratio data available for any portfolios.")
-                    
-            except Exception as e:
-                st.error(f"Error creating multi-portfolio PE ratio chart: {str(e)}")
 
         # Fourth plot: Daily Risk-Free Rate (13-Week Treasury)
         fig3 = go.Figure()
@@ -12609,7 +12452,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 xanchor="center",
                 x=0.5
             ),
-            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            margin=dict(t=120, l=80, r=80, b=80),  # Standardized margins for alignment
             height=600,  # Same height as the other plots
             yaxis=dict(
                 title="Daily Risk-Free Rate (basis points)", 
@@ -12685,7 +12528,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 xanchor="center",
                 x=0.5
             ),
-            margin=dict(l=80, r=80, t=120, b=80),  # EXACT same margins as the other plots
+            margin=dict(t=120, l=80, r=80, b=80),  # Standardized margins for alignment
             height=600,  # Same height as the other plots
             yaxis=dict(
                 title="Annualized Risk-Free Rate (%)", 
@@ -12698,6 +12541,133 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         st.plotly_chart(fig4, use_container_width=True, key="multi_annual_risk_free_chart")
         # Store in session state for PDF export
         st.session_state.fig4 = fig4
+
+        # Multi-Portfolio PE Ratio Comparison (moved after Risk Free Rate charts)
+        st.markdown("---")
+        st.markdown("**📊 Multi-Portfolio PE Ratio Comparison**")
+        st.warning("⚠️ **Work in Progress:** PE ratio calculations are currently using current PE ratios only. Historical PE evolution is not yet implemented and may not be fully accurate.")
+        
+        try:
+            # Create multi-portfolio PE ratio chart
+            fig_pe_multi = go.Figure()
+            
+            # Get all available portfolio names
+            available_portfolio_names = [cfg.get('name', 'Portfolio') for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])]
+            extra_names = [n for n in st.session_state.get('multi_all_results', {}).keys() if n not in available_portfolio_names]
+            all_portfolio_names = available_portfolio_names + extra_names
+            
+            # Color palette for different portfolios
+            colors = [
+                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+            ]
+            
+            # Collect PE data for all portfolios
+            all_pe_data = {}
+            portfolio_pe_series = {}
+            
+            for i, portfolio_name in enumerate(all_portfolio_names):
+                allocs_data = st.session_state.multi_all_allocations.get(portfolio_name, {})
+                
+                if allocs_data:
+                    # Get all unique tickers for this portfolio (exclude CASH)
+                    all_tickers = set()
+                    for date, allocs in allocs_data.items():
+                        for ticker in allocs.keys():
+                            if ticker is not None and ticker != 'CASH':
+                                all_tickers.add(ticker)
+                    all_tickers = sorted(list(all_tickers))
+                    
+                    if all_tickers:
+                        # Fetch PE data for all tickers (cached per portfolio)
+                        pe_data = {}
+                        for ticker in all_tickers:
+                            try:
+                                stock = yf.Ticker(ticker)
+                                info = stock.info
+                                pe_ratio = info.get('trailingPE', None)
+                                if pe_ratio is not None and pe_ratio > 0:
+                                    pe_data[ticker] = pe_ratio
+                            except:
+                                continue
+                        
+                        if pe_data:
+                            # Calculate weighted average PE for this portfolio
+                            total_weighted_pe = 0
+                            total_weight = 0
+                            
+                            for date, allocs in allocs_data.items():
+                                for ticker, weight in allocs.items():
+                                    if ticker in pe_data and ticker != 'CASH':
+                                        total_weighted_pe += pe_data[ticker] * weight
+                                        total_weight += weight
+                            
+                            if total_weight > 0:
+                                avg_pe = total_weighted_pe / total_weight
+                                all_pe_data[portfolio_name] = avg_pe
+                                
+                                # Create a simple time series for visualization (using backtest dates)
+                                if st.session_state.multi_all_results.get(portfolio_name):
+                                    series_data = st.session_state.multi_all_results[portfolio_name]
+                                    if isinstance(series_data, dict) and 'with_additions' in series_data:
+                                        dates = series_data['with_additions'].index
+                                    else:
+                                        dates = series_data.index if hasattr(series_data, 'index') else []
+                                    
+                                    if len(dates) > 0:
+                                        # Create PE series with constant value (since we only have current PE)
+                                        pe_series = pd.Series([avg_pe] * len(dates), index=dates)
+                                        portfolio_pe_series[portfolio_name] = pe_series
+                                        
+                                        # Add to chart
+                                        fig_pe_multi.add_trace(go.Scatter(
+                                            x=dates,
+                                            y=pe_series.values,
+                                            mode='lines',
+                                            name=portfolio_name,
+                                            line=dict(color=colors[i % len(colors)], width=2),
+                                            hovertemplate=f'<b>{portfolio_name}</b><br>PE Ratio: %{{y:.2f}}<br>Date: %{{x|%Y-%m-%d}}<extra></extra>'
+                                        ))
+            
+            # Update layout
+            fig_pe_multi.update_layout(
+                title="Multi-Portfolio PE Ratio Comparison",
+                xaxis_title="Date",
+                yaxis_title="PE Ratio",
+                legend_title="Portfolios",
+                hovermode="x unified",
+                template="plotly_dark",
+                height=600,
+                xaxis=dict(
+                    type='date',
+                    tickformat="%Y-%m-%d",
+                    tickmode="auto",
+                    nticks=10,
+                    tickangle=45,
+                    automargin=True
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=1.15,
+                    xanchor="center",
+                    x=0.5
+                ),
+                margin=dict(t=120, l=80, r=80, b=80)
+            )
+            
+            # Store in session state and display
+            st.session_state.fig_pe_multi = fig_pe_multi
+            
+            if portfolio_pe_series:
+                st.plotly_chart(st.session_state.fig_pe_multi, use_container_width=True)
+                
+            else:
+                st.warning("No PE ratio data available for any portfolios.")
+                
+        except Exception as e:
+            st.error(f"Error creating multi-portfolio PE ratio chart: {str(e)}")
 
         # --- Variation summary chart: compares total return, CAGR, volatility and max drawdown across portfolios ---
         try:
@@ -16801,8 +16771,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     mode='lines',
                                     name=ticker,
                                     line=dict(color=colors[i % len(colors)], width=2),
-                                    hovertemplate=f"<b>{ticker}</b><br>Allocation: %{{y:.1f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only_allocation else None,
-                                    hoverinfo='text' if show_closest_only_allocation else 'x+y+name'
+                                    hovertemplate=f"<b>{ticker}</b><br>Allocation: %{{y:.1f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>" if show_closest_only_allocation else f"<b>{ticker}</b><br>Allocation: %{{y:.1f}}%<br>Date: %{{x|%Y-%m-%d}}<extra></extra>",
+                                    hoverinfo='text'
                                 ))
                     
                     # Update layout - EXACTLY LIKE MAIN CHARTS
@@ -16818,13 +16788,17 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         template='plotly_dark',
                         height=600,
                         hovermode=hover_mode_alloc,
+                        # Improve legend layout to prevent name truncation
                         legend=dict(
                             orientation="v",
                             yanchor="top",
                             y=1,
                             xanchor="left",
-                            x=1.01
-                        )
+                            x=1.02,
+                            font=dict(size=10),
+                            itemwidth=30
+                        ),
+                        margin=dict(t=120, l=80, r=80, b=80)  # Standardized margins for alignment
                     )
                     
                     # Add range selector
@@ -16836,6 +16810,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     dict(count=3, label="3M", step="month", stepmode="backward"),
                                     dict(count=6, label="6M", step="month", stepmode="backward"),
                                     dict(count=1, label="1Y", step="year", stepmode="backward"),
+                                    dict(count=5, label="5Y", step="year", stepmode="backward"),
                                     dict(step="all")
                                 ])
                             ),
