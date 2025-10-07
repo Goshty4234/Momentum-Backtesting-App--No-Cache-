@@ -1,3 +1,4 @@
+# NO_CACHE VERSION - All @st.cache_data decorators have been removed for reliability
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -1089,9 +1090,8 @@ def get_goldsim_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
-    """Cache ticker data to improve performance across multiple tabs
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -3439,7 +3439,7 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Multi-Portfolio Analysis")
 
-st.title("Multi-Portfolio Backtest")
+st.title("Multi-Portfolio Backtest (NO_CACHE)")
 
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
@@ -3570,9 +3570,8 @@ def get_portfolio_value(portfolio_name):
                     portfolio_value = float(latest_value)
     return portfolio_value
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio - cached for performance"""
+    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3647,9 +3646,8 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
         st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
         return None
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame - cached for performance"""
+    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
     try:
         # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
         all_tickers = set()
@@ -3687,9 +3685,8 @@ def process_allocation_dataframe(portfolio_name, allocation_data):
         st.error(f"Error processing allocation data for {portfolio_name}: {str(e)}")
         return None, []
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
 def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
-    """Create pie chart for portfolio allocation - cached for performance"""
+    """Create pie chart for portfolio allocation (NO_CACHE version)"""
     try:
         if not allocation_data:
             return None
@@ -10642,7 +10639,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO_CACHE VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -10655,7 +10652,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (CACHED)...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO_CACHE)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
