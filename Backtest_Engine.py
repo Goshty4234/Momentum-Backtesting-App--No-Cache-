@@ -13,7 +13,10 @@ from typing import List, Dict
 import yfinance as yf
 import pandas as pd
 import matplotlib.dates as mdates
-import mplcursors
+try:
+    import mplcursors
+except ImportError:
+    mplcursors = None
 from scipy.optimize import newton, brentq, root_scalar
 import pandas_market_calendars as mcal
 from warnings import warn
