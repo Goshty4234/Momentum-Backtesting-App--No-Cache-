@@ -7738,9 +7738,24 @@ if portfolio_count >= 2:
     # Show fusion portfolio info if we have any
     if existing_fusion_portfolios:
         st.warning("""
-        **🔗 Fusion Portfolio Detected!**
+        **🔗 Fusion Portfolio Detected! (BETA)**
         
         A fusion portfolio combines multiple individual portfolios by rebalancing between them at regular intervals.
+        
+        **⚠️ IMPORTANT: Only the Rebalance Frequency setting below affects the backtest!**
+        
+        **How it works:**
+        • Each individual portfolio runs with its own settings (initial value, additions, rebalancing frequency)
+        • The fusion portfolio takes the current value of each portfolio and multiplies by the allocation percentage
+        • **Only the fusion portfolio's rebalancing frequency matters** for between-portfolio rebalancing
+        • The fusion portfolio's initial value, added amount, and added frequency are **NOT used**
+        • Final value = (Portfolio A value * A%) + (Portfolio B value * B%) + ...
+        
+        **Example:**
+        
+        If Portfolio A (60%) is worth 15k and Portfolio B (40%) is worth 12k, the fusion portfolio value = (15k * 0.60) + (12k * 0.40) = 13.8k
+        
+        **Note:** This feature is in BETA - not all functionality is complete yet.
         """)
     
     # Create expander title with count
@@ -9188,18 +9203,19 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
             if leverage != 1.0 or expense > 0.0:
                 display_text += f" (L:{leverage}x, E:{expense}%)"
             
-            is_selected = ticker in st.session_state.bulk_selected_tickers
-            
-            if st.checkbox(
+            # Use checkbox state directly
+            checkbox_key = f"page4_bulk_ticker_select_{i}"
+            is_checked = st.checkbox(
                 display_text, 
-                value=is_selected,
-                key=f"page4_bulk_ticker_select_{i}"
-            ):
-                if ticker not in st.session_state.bulk_selected_tickers:
-                    st.session_state.bulk_selected_tickers.append(ticker)
-            else:
-                if ticker in st.session_state.bulk_selected_tickers:
-                    st.session_state.bulk_selected_tickers.remove(ticker)
+                value=ticker in st.session_state.bulk_selected_tickers,
+                key=checkbox_key
+            )
+            
+            # Update selection based on checkbox state
+            if is_checked and ticker not in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.append(ticker)
+            elif not is_checked and ticker in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.remove(ticker)
     else:
         st.info("No tickers available in the current portfolio.")
     
@@ -9453,66 +9469,121 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
         value=st.session_state.multi_backtest_bulk_tickers,
         key="multi_backtest_bulk_ticker_input",
         height=100,
-        help="Enter ticker symbols separated by spaces or commas. Click 'Fill Tickers' to replace tickers (keeps existing allocations)."
+        help="Enter ticker symbols separated by spaces or commas. Choose 'Replace All' to replace all tickers or 'Add to Existing' to add new tickers."
     )
     
-    if st.button("Fill Tickers", key="multi_backtest_fill_tickers_btn"):
-        if bulk_tickers.strip():
-            # Parse tickers (split by comma or space)
-            ticker_list = []
-            for ticker in bulk_tickers.replace(',', ' ').split():
-                ticker = ticker.strip().upper()
-                if ticker:
-                    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-                    if ticker == 'BRK.B':
-                        ticker = 'BRK-B'
-                    elif ticker == 'BRK.A':
-                        ticker = 'BRK-A'
-                    ticker_list.append(ticker)
-            
-            if ticker_list:
-                portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-                current_stocks = st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].copy()
+    # Action buttons
+    col_replace, col_add = st.columns([1, 1])
+    
+    with col_replace:
+        if st.button("🔄 Replace All", key="multi_backtest_fill_tickers_btn", type="secondary"):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
                 
-                # Replace tickers - new ones get 0% allocation
-                new_stocks = []
-                
-                for i, ticker in enumerate(ticker_list):
-                    if i < len(current_stocks):
-                        # Use existing allocation if available
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': current_stocks[i]['allocation'],
-                            'include_dividends': current_stocks[i]['include_dividends']
-                        })
-                    else:
-                        # New tickers get 0% allocation
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': 0.0,
-                            'include_dividends': True
-                        })
-                
-                # Update the portfolio with new stocks
-                st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'] = new_stocks
-                
-                # Update the active_portfolio reference to match session state
-                active_portfolio['stocks'] = new_stocks
-                
-                # Clear any existing session state keys for individual ticker inputs to force refresh
-                for key in list(st.session_state.keys()):
-                    if key.startswith(f"multi_backtest_ticker_{portfolio_index}_") or key.startswith(f"multi_backtest_alloc_{portfolio_index}_"):
-                        del st.session_state[key]
-                
-                st.success(f"✅ Replaced tickers with: {', '.join(ticker_list)}")
-                st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
-                
-                # Force immediate rerun to refresh the UI
-                st.rerun()
+                if ticker_list:
+                    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+                    current_stocks = st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].copy()
+                    
+                    # Replace tickers - new ones get 0% allocation
+                    new_stocks = []
+                    
+                    for i, ticker in enumerate(ticker_list):
+                        if i < len(current_stocks):
+                            # Use existing allocation if available
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': current_stocks[i]['allocation'],
+                                'include_dividends': current_stocks[i]['include_dividends']
+                            })
+                        else:
+                            # New tickers get 0% allocation
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the portfolio with new stocks
+                    st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'] = new_stocks
+                    
+                    # Update the active_portfolio reference to match session state
+                    active_portfolio['stocks'] = new_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(f"multi_backtest_ticker_{portfolio_index}_") or key.startswith(f"multi_backtest_alloc_{portfolio_index}_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
             else:
-                st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
-        else:
-            st.error("❌ Please enter ticker symbols.")
+                st.warning("⚠️ Please enter some tickers.")
+    
+    with col_add:
+        if st.button("➕ Add to Existing", key="multi_backtest_add_tickers_btn", type="primary"):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
+                
+                if ticker_list:
+                    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+                    current_stocks = st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].copy()
+                    
+                    # Add new tickers to existing ones
+                    for ticker in ticker_list:
+                        # Check if ticker already exists
+                        ticker_exists = any(stock['ticker'] == ticker for stock in current_stocks)
+                        if not ticker_exists:
+                            current_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the portfolio with new stocks
+                    st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'] = current_stocks
+                    
+                    # Update the active_portfolio reference to match session state
+                    active_portfolio['stocks'] = current_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith(f"multi_backtest_ticker_{portfolio_index}_") or key.startswith(f"multi_backtest_alloc_{portfolio_index}_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Added new tickers: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** New tickers added with 0% allocation. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
+            else:
+                st.warning("⚠️ Please enter some tickers.")
 
 # Leverage Summary Section
 leveraged_tickers = []
