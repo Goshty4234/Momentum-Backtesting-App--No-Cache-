@@ -7665,6 +7665,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
             st.caption("No portfolios selected for deletion")
 
 # Fusion Portfolio Creator - Collapsible Interface
+# Fusion Portfolio Creator - Robust System
 def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
     """Generate a descriptive fusion portfolio name based on allocations"""
     if not allocations_dict:
@@ -7698,6 +7699,22 @@ def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
     else:
         return f"Fusion ({rebalancing_freq})"
 
+def sync_and_normalize_allocations(selected_portfolios, allocations):
+    """Force synchronization and normalization of allocations"""
+    # Force refresh allocations from session state
+    for portfolio_name in selected_portfolios:
+        key = f"alloc_{portfolio_name}"
+        if key in st.session_state:
+            allocations[portfolio_name] = st.session_state[key]
+    
+    # Normalize to 100%
+    total = sum(allocations.values())
+    if total > 0:
+        for name in allocations:
+            allocations[name] = allocations[name] / total * 100.0
+    
+    return allocations
+
 st.sidebar.markdown("---")
 
 # Check if we have at least 2 portfolios - ALWAYS refresh the count
@@ -7721,24 +7738,9 @@ if portfolio_count >= 2:
     # Show fusion portfolio info if we have any
     if existing_fusion_portfolios:
         st.warning("""
-        **🔗 Fusion Portfolio Detected! (BETA)**
+        **🔗 Fusion Portfolio Detected!**
         
         A fusion portfolio combines multiple individual portfolios by rebalancing between them at regular intervals.
-        
-        **⚠️ IMPORTANT: Only the Rebalance Frequency setting below affects the backtest!**
-        
-        **How it works:**
-        • Each individual portfolio runs with its own settings (initial value, additions, rebalancing frequency)
-        • The fusion portfolio takes the current value of each portfolio and multiplies by the allocation percentage
-        • **Only the fusion portfolio's rebalancing frequency matters** for between-portfolio rebalancing
-        • The fusion portfolio's initial value, added amount, and added frequency are **NOT used**
-        • Final value = (Portfolio A value * A%) + (Portfolio B value * B%) + ...
-        
-        **Example:**
-        
-        If Portfolio A (60%) is worth 15k and Portfolio B (40%) is worth 12k, the fusion portfolio value = (15k * 0.60) + (12k * 0.40) = 13.8k
-        
-        **Note:** This feature is in BETA - not all functionality is complete yet.
         """)
     
     # Create expander title with count
@@ -7772,40 +7774,35 @@ if portfolio_count >= 2:
                 
                 # Handle the selected action
                 if fusion_action == "Create New Fusion":
-                    # Force refresh of available portfolios for fusion creation
+                    # FORCE REFRESH: Always recalculate available portfolios
                     current_available_portfolios = [
                         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
                         if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
                     ]
                     
-                    # Debug info
-                    st.sidebar.caption(f"📊 Found {len(current_available_portfolios)} portfolios for fusion")
-                    
-                    # Simple portfolio selection
+                    # Portfolio selection with dynamic key
                     selected_portfolios = st.multiselect(
                         "Select Portfolios",
                         current_available_portfolios,
                         key=f"fusion_portfolios_select_{len(current_available_portfolios)}",
-                        default=[],
-                        help="Choose portfolios to combine"
+                        help="Choose portfolios to combine",
+                        default=[]
                     )
                     
                     if selected_portfolios:
-                        # Debug: Show current portfolio count
                         st.info(f"🔍 Creating fusion with {len(selected_portfolios)} portfolios: {', '.join(selected_portfolios)}")
                         
-                        # Simple allocation inputs
+                        # Allocation inputs
                         st.markdown("**Allocations (%)**")
                         allocations = {}
                         total = 0
                         
-                        for i, portfolio_name in enumerate(selected_portfolios):
+                        for portfolio_name in selected_portfolios:
                             col1, col2 = st.columns([2, 1])
                             with col1:
                                 st.markdown(portfolio_name)
                             with col2:
-                                # Default to equal allocation
-                                default_alloc = int(100 / len(selected_portfolios))
+                                default_alloc = int(100.0 / len(selected_portfolios))
                                 alloc = st.number_input(
                                     "Allocation percentage",
                                     min_value=0,
@@ -7828,36 +7825,24 @@ if portfolio_count >= 2:
                             for name in allocations:
                                 allocations[name] = allocations[name] / total * 100.0
                         
-                        # Generate descriptive default name based on allocations
-                        
-                        # Portfolio name will be generated after frequency selection
-                        
-                        
-                        # Fusion portfolio has its own independent rebalancing frequency
-                        # This ensures momentum portfolios don't override fusion frequency
-                        
-                        # Initialize fusion frequency session state if not exists
-                        if "fusion_rebalancing_frequency" not in st.session_state:
-                            st.session_state["fusion_rebalancing_frequency"] = "Monthly"
-                        
-                        # Fusion rebalancing frequency selector
+                        # Rebalancing frequency
                         fusion_freq_options = ["Never", "Buy & Hold", "Buy & Hold (Target)", "Weekly", "Biweekly", "Monthly", "Quarterly", "Semiannually", "Annually"]
                         fusion_rebalancing_frequency = st.selectbox(
                             "Fusion Rebalancing Frequency",
                             fusion_freq_options,
                             index=fusion_freq_options.index(st.session_state.get("fusion_rebalancing_frequency", "Monthly")),
                             key="fusion_rebalancing_frequency_selector",
-                            help="How often the fusion portfolio rebalances between its constituent portfolios. This is independent of individual portfolio rebalancing frequencies."
+                            help="How often the fusion portfolio rebalances between its constituent portfolios"
                         )
                         
                         # Update session state
                         st.session_state["fusion_rebalancing_frequency"] = fusion_rebalancing_frequency
                         
-                        # Sync & Normalize button for server synchronization
+                        # POWERFUL Sync & Normalize button
                         col1, col2 = st.columns([1, 1])
                         with col1:
-                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization of allocations", key="fusion_sync_button"):
-                                # Force refresh allocations from inputs
+                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization", key="fusion_sync_button", use_container_width=True):
+                                # Force sync from session state
                                 for portfolio_name in selected_portfolios:
                                     key = f"alloc_{portfolio_name}"
                                     if key in st.session_state:
@@ -7869,13 +7854,13 @@ if portfolio_count >= 2:
                                     for name in allocations:
                                         allocations[name] = allocations[name] / total * 100.0
                                 
-                                # Force rerun to update UI
+                                # Force rerun
                                 st.rerun()
                         
                         with col2:
-                            st.caption("💡 Click to sync allocations and normalize to 100%")
+                            st.caption("💡 Click to sync and normalize")
                         
-                        # Portfolio name (generated after rebalancing frequency is selected)
+                        # Generate name
                         default_name = generate_fusion_name(allocations, fusion_rebalancing_frequency)
                         fusion_name = st.text_input(
                             "Fusion Name",
@@ -7883,89 +7868,71 @@ if portfolio_count >= 2:
                             key="fusion_name_input"
                         )
                         
-                        # Information about independent rebalancing
-                        st.info(f"""
-                        **Independent Rebalancing System:**
-                        - Individual portfolios keep their own rebalancing frequencies
-                        - Fusion portfolio rebalances between portfolios at **{fusion_rebalancing_frequency}**
-                        - This allows maximum flexibility for different strategies
-                        - **Fusion frequency is completely independent** of individual portfolio frequencies
-                        """)
-                        
                         # Create button
-                        if st.button("🔗 Create Fusion", type="primary"):
-                            # Get first portfolio for defaults
-                            first_portfolio = st.session_state.multi_backtest_portfolio_configs[0]
-                            
-                            # Create fusion portfolio with its own independent frequency
-                            new_fusion_portfolio = {
-                                'name': fusion_name,
-                                'stocks': [],
-                                'use_momentum': False,
-                                'momentum_windows': [],
-                                'initial_value': first_portfolio.get('initial_value', 10000),
-                                'added_amount': first_portfolio.get('added_amount', 1000),
-                                'added_frequency': first_portfolio.get('added_frequency', 'Monthly'),
-                                'rebalancing_frequency': fusion_rebalancing_frequency,  # Use fusion's own independent frequency
-                                'benchmark_ticker': first_portfolio.get('benchmark_ticker', '^GSPC'),
-                                'fusion_portfolio': {
-                                    'enabled': True,
-                                    'selected_portfolios': selected_portfolios,
-                                    'allocations': {name: alloc/100.0 for name, alloc in allocations.items()}
+                        if st.button("Create Fusion Portfolio", type="primary", use_container_width=True):
+                            if len(selected_portfolios) < 2:
+                                st.error("Select at least 2 portfolios")
+                            elif not fusion_name.strip():
+                                st.error("Enter a fusion portfolio name")
+                            else:
+                                # Create fusion config
+                                fusion_config = {
+                                    'name': fusion_name.strip(),
+                                    'fusion_portfolio': {
+                                        'enabled': True,
+                                        'constituent_portfolios': selected_portfolios,
+                                        'allocations': allocations,
+                                        'rebalancing_frequency': fusion_rebalancing_frequency
+                                    }
                                 }
-                            }
-                            
-                            st.session_state.multi_backtest_portfolio_configs.append(new_fusion_portfolio)
-                            st.success(f"✅ Created: {fusion_name}")
-                            st.toast(f"🎉 Fusion portfolio '{fusion_name}' created successfully!")
-                            st.rerun()
+                                
+                                # Add to session state
+                                st.session_state.multi_backtest_portfolio_configs.append(fusion_config)
+                                
+                                # Success
+                                st.success(f"✅ Created: {fusion_name}")
+                                st.toast(f"🎉 Fusion portfolio '{fusion_name}' created successfully!")
+                                st.rerun()
                 
+                # Handle edit/delete actions
                 elif fusion_action.startswith("Edit:"):
-                    # Edit existing fusion portfolio
                     fusion_name = fusion_action.replace("Edit: ", "")
-                    fusion_portfolio = next(fp for fp in existing_fusion_portfolios if fp['name'] == fusion_name)
-                    fusion_config = fusion_portfolio['fusion_portfolio']
-                    current_portfolios = fusion_config.get('selected_portfolios', [])
-                    current_allocations = fusion_config.get('allocations', {})
+                    fusion_config = next((cfg for cfg in existing_fusion_portfolios if cfg['name'] == fusion_name), None)
                     
-                    st.markdown(f"**Editing: {fusion_name}**")
-                    
-                    # Portfolio selection
-                    selected_portfolios = st.multiselect(
-                        "Select Portfolios",
-                        available_portfolios,
-                        default=current_portfolios,
-                        key="edit_fusion_portfolios",
-                        help="Choose portfolios to combine"
-                    )
-                    
-                    if selected_portfolios:
-                        # Allocation inputs
-                        st.markdown("**Allocations (%)**")
-                        allocations = {}
+                    if fusion_config:
+                        st.markdown(f"**Editing: {fusion_name}**")
+                        
+                        # Current allocations
+                        current_allocations = fusion_config['fusion_portfolio']['allocations']
+                        current_freq = fusion_config['fusion_portfolio']['rebalancing_frequency']
+                        
+                        st.markdown("**Current Allocations:**")
+                        for portfolio, alloc in current_allocations.items():
+                            st.markdown(f"• {portfolio}: {alloc:.1f}%")
+                        
+                        st.markdown(f"**Current Frequency:** {current_freq}")
+                        
+                        # Edit allocations
+                        st.markdown("**Edit Allocations (%)**")
+                        new_allocations = {}
                         total = 0
                         
-                        for portfolio_name in selected_portfolios:
+                        for portfolio_name in current_allocations.keys():
                             col1, col2 = st.columns([2, 1])
                             with col1:
                                 st.markdown(portfolio_name)
                             with col2:
-                                # Use current allocation or default to equal
-                                current_alloc = current_allocations.get(portfolio_name, 0) * 100.0
-                                if current_alloc == 0:
-                                    current_alloc = int(100 / len(selected_portfolios))
-                                
                                 alloc = st.number_input(
-                                    f"Allocation for {portfolio_name} (%)",
+                                    "Allocation percentage",
                                     min_value=0,
                                     max_value=100,
-                                    value=int(current_alloc),
+                                    value=int(current_allocations[portfolio_name]),
                                     step=1,
                                     format="%d",
-                                    key=f"edit_alloc_{portfolio_name}",
-                                    label_visibility="collapsed"
+                                    label_visibility="collapsed",
+                                    key=f"edit_alloc_{portfolio_name}"
                                 )
-                                allocations[portfolio_name] = alloc
+                                new_allocations[portfolio_name] = alloc
                                 total += alloc
                         
                         # Show total
@@ -7974,86 +7941,86 @@ if portfolio_count >= 2:
                         # Auto-normalize if needed
                         if abs(total - 100.0) > 0.1 and total > 0:
                             st.info("Auto-normalizing to 100%")
-                            for name in allocations:
-                                allocations[name] = allocations[name] / total * 100.0
+                            for name in new_allocations:
+                                new_allocations[name] = new_allocations[name] / total * 100.0
                         
-                        # Fusion portfolio has its own independent rebalancing frequency
-                        # This ensures momentum portfolios don't override fusion frequency
-                        
-                        # Get current fusion frequency
-                        current_fusion_freq = fusion_portfolio.get('rebalancing_frequency', 'Monthly')
-                        
-                        # Initialize fusion frequency session state if not exists
-                        if "fusion_edit_rebalancing_frequency" not in st.session_state:
-                            st.session_state["fusion_edit_rebalancing_frequency"] = current_fusion_freq
-                        
-                        # Fusion rebalancing frequency selector for editing
+                        # Edit frequency
                         fusion_freq_options = ["Never", "Buy & Hold", "Buy & Hold (Target)", "Weekly", "Biweekly", "Monthly", "Quarterly", "Semiannually", "Annually"]
-                        fusion_rebalancing_frequency = st.selectbox(
+                        new_frequency = st.selectbox(
                             "Fusion Rebalancing Frequency",
                             fusion_freq_options,
-                            index=fusion_freq_options.index(st.session_state.get("fusion_edit_rebalancing_frequency", current_fusion_freq)),
-                            key="fusion_edit_rebalancing_frequency_selector",
-                            help="How often the fusion portfolio rebalances between its constituent portfolios. This is independent of individual portfolio rebalancing frequencies."
+                            index=fusion_freq_options.index(current_freq),
+                            key="edit_fusion_frequency"
                         )
                         
-                        # Update session state
-                        st.session_state["fusion_edit_rebalancing_frequency"] = fusion_rebalancing_frequency
+                        # POWERFUL Sync & Normalize button for edit
+                        col1, col2 = st.columns([1, 1])
+                        with col1:
+                            if st.button("🔄 Sync & Normalize", help="Force synchronization and normalization", key="edit_fusion_sync_button", use_container_width=True):
+                                # Force sync from session state
+                                for portfolio_name in current_allocations.keys():
+                                    key = f"edit_alloc_{portfolio_name}"
+                                    if key in st.session_state:
+                                        new_allocations[portfolio_name] = st.session_state[key]
+                                
+                                # Normalize to 100%
+                                total = sum(new_allocations.values())
+                                if total > 0:
+                                    for name in new_allocations:
+                                        new_allocations[name] = new_allocations[name] / total * 100.0
+                                
+                                # Force rerun
+                                st.rerun()
                         
-                        # Generate updated fusion name based on current allocations
-                        updated_fusion_name = generate_fusion_name(allocations, fusion_rebalancing_frequency)
+                        with col2:
+                            st.caption("💡 Click to sync and normalize")
                         
-                        # Fusion name input for editing
-                        st.markdown("**Fusion Name**")
-                        current_fusion_name = fusion_portfolio['name']
+                        # Auto-update name
+                        new_name = generate_fusion_name(new_allocations, new_frequency)
                         new_fusion_name = st.text_input(
                             "Fusion Name",
-                            value=updated_fusion_name,  # Auto-update based on allocations
-                            key=f"edit_fusion_name_{fusion_name}",
-                            help="Fusion name auto-updates based on allocations. You can modify it if needed."
+                            value=new_name,
+                            key="edit_fusion_name"
                         )
                         
-                        # Information about independent rebalancing
-                        st.info(f"""
-                        **Independent Rebalancing System:**
-                        - Individual portfolios keep their own rebalancing frequencies
-                        - Fusion portfolio rebalances between portfolios at **{fusion_rebalancing_frequency}**
-                        - This allows maximum flexibility for different strategies
-                        - **Fusion frequency is completely independent** of individual portfolio frequencies
-                        """)
-                        
                         # Update button
-                        if st.button("💾 Update Fusion", type="primary"):
-                            # Update the fusion portfolio
-                            fusion_portfolio['fusion_portfolio']['selected_portfolios'] = selected_portfolios
-                            fusion_portfolio['fusion_portfolio']['allocations'] = {
-                                name: alloc/100.0 for name, alloc in allocations.items()
-                            }
-                            # Update fusion frequency to maintain independence
-                            fusion_portfolio['rebalancing_frequency'] = fusion_rebalancing_frequency
-                            # Update fusion name if changed
-                            updated_name = new_fusion_name if new_fusion_name else fusion_name
-                            fusion_portfolio['name'] = updated_name
-                            st.success(f"✅ Updated: {updated_name}")
-                            st.toast(f"🔄 Fusion portfolio '{updated_name}' updated successfully!")
+                        if st.button("Update Fusion Portfolio", type="primary", use_container_width=True):
+                            # Update the configuration
+                            fusion_config['name'] = new_fusion_name.strip()
+                            fusion_config['fusion_portfolio']['allocations'] = new_allocations
+                            fusion_config['fusion_portfolio']['rebalancing_frequency'] = new_frequency
+                            
+                            # Success
+                            st.success(f"✅ Updated: {new_fusion_name}")
+                            st.toast(f"🔄 Fusion portfolio '{new_fusion_name}' updated successfully!")
                             st.rerun()
                 
                 elif fusion_action.startswith("Delete:"):
-                    # Delete existing fusion portfolio
                     fusion_name = fusion_action.replace("Delete: ", "")
-                    fusion_portfolio = next(fp for fp in existing_fusion_portfolios if fp['name'] == fusion_name)
+                    fusion_config = next((cfg for cfg in existing_fusion_portfolios if cfg['name'] == fusion_name), None)
                     
-                    st.markdown(f"**Delete: {fusion_name}**")
-                    st.markdown("**Current Composition:**")
-                    allocations = fusion_portfolio['fusion_portfolio'].get('allocations', {})
-                    for name, alloc in allocations.items():
-                        st.markdown(f"• {name}: {alloc*100:.1f}%")
-                    
-                    if st.button("🗑️ Delete Fusion", type="primary"):
-                        st.session_state.multi_backtest_portfolio_configs.remove(fusion_portfolio)
-                        st.success(f"✅ Deleted: {fusion_name}")
-                        st.toast(f"🗑️ Fusion portfolio '{fusion_name}' deleted successfully!")
-                        st.rerun()
+                    if fusion_config:
+                        st.markdown(f"**Delete: {fusion_name}**")
+                        st.warning("This action cannot be undone!")
+                        
+                        # Show current configuration
+                        st.markdown("**Current Configuration:**")
+                        for portfolio, alloc in fusion_config['fusion_portfolio']['allocations'].items():
+                            st.markdown(f"• {portfolio}: {alloc:.1f}%")
+                        st.markdown(f"• Frequency: {fusion_config['fusion_portfolio']['rebalancing_frequency']}")
+                        
+                        # Delete button
+                        if st.button("Delete Fusion Portfolio", type="secondary", use_container_width=True):
+                            # Remove from session state
+                            st.session_state.multi_backtest_portfolio_configs = [
+                                cfg for cfg in st.session_state.multi_backtest_portfolio_configs 
+                                if cfg['name'] != fusion_name
+                            ]
+                            
+                            # Success
+                            st.success(f"✅ Deleted: {fusion_name}")
+                            st.toast(f"🗑️ Fusion portfolio '{fusion_name}' deleted successfully!")
+                            st.rerun()
             else:
                 st.info("Create at least 2 regular portfolios to use fusion feature")
 
@@ -9201,12 +9168,12 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     col_quick1, col_quick2 = st.columns([1, 1])
     
     with col_quick1:
-        if st.button("Select All", key="select_all_tickers"):
+        if st.button("Select All", key="page4_select_all_tickers"):
             st.session_state.bulk_selected_tickers = available_tickers.copy()
             st.rerun()
     
     with col_quick2:
-        if st.button("Clear Selection", key="clear_all_tickers"):
+        if st.button("Clear Selection", key="page4_clear_all_tickers"):
             st.session_state.bulk_selected_tickers = []
             st.rerun()
     
@@ -9226,7 +9193,7 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
             if st.checkbox(
                 display_text, 
                 value=is_selected,
-                key=f"bulk_ticker_select_{i}"
+                key=f"page4_bulk_ticker_select_{i}"
             ):
                 if ticker not in st.session_state.bulk_selected_tickers:
                     st.session_state.bulk_selected_tickers.append(ticker)
