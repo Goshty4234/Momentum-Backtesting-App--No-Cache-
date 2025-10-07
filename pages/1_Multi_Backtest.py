@@ -7665,10 +7665,36 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
             st.caption("No portfolios selected for deletion")
 
 # Fusion Portfolio Creator - Collapsible Interface
+def generate_fusion_name(allocations_dict, rebalancing_freq="Monthly"):
+    """Generate a descriptive fusion portfolio name based on allocations"""
+    if not allocations_dict:
+        return f"Fusion ({rebalancing_freq})"
+    
+    # Sort by allocation percentage (descending)
+    sorted_allocs = sorted(allocations_dict.items(), key=lambda x: x[1], reverse=True)
+    
+    # Create name with top allocations
+    name_parts = []
+    for portfolio_name, percentage in sorted_allocs:
+        if percentage > 0:  # Only include non-zero allocations
+            # Handle both decimal (0.0-1.0) and percentage (0-100) formats
+            if percentage <= 1.0:
+                # Already in decimal format
+                name_parts.append(f"{portfolio_name} {percentage*100:.0f}%")
+            else:
+                # Already in percentage format
+                name_parts.append(f"{portfolio_name} {percentage:.0f}%")
+    
+    if name_parts:
+        return f"Fusion Portfolio {' '.join(name_parts)} ({rebalancing_freq})"
+    else:
+        return f"Fusion ({rebalancing_freq})"
+
 st.sidebar.markdown("---")
 
-# Check if we have at least 2 portfolios
-if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
+# Check if we have at least 2 portfolios - ALWAYS refresh the count
+portfolio_count = len(st.session_state.multi_backtest_portfolio_configs)
+if portfolio_count >= 2:
     # Get available portfolio names (excluding any existing fusion portfolios)
     available_portfolios = [
         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
@@ -7680,6 +7706,9 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
         cfg for cfg in st.session_state.multi_backtest_portfolio_configs 
         if cfg.get('fusion_portfolio', {}).get('enabled', False)
     ]
+    
+    # Debug info
+    st.sidebar.caption(f"📊 Found {len(available_portfolios)} portfolios for fusion")
     
     # Show fusion portfolio info if we have any
     if existing_fusion_portfolios:
@@ -7735,15 +7764,28 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                 
                 # Handle the selected action
                 if fusion_action == "Create New Fusion":
+                    # Force refresh of available portfolios for fusion creation
+                    current_available_portfolios = [
+                        cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
+                        if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
+                    ]
+                    
+                    # Debug info
+                    st.sidebar.caption(f"📊 Found {len(current_available_portfolios)} portfolios for fusion")
+                    
                     # Simple portfolio selection
                     selected_portfolios = st.multiselect(
                         "Select Portfolios",
-                        available_portfolios,
-                        key="fusion_portfolios_select",
+                        current_available_portfolios,
+                        key=f"fusion_portfolios_select_{len(current_available_portfolios)}",
+                        default=[],
                         help="Choose portfolios to combine"
                     )
                     
                     if selected_portfolios:
+                        # Debug: Show current portfolio count
+                        st.info(f"🔍 Creating fusion with {len(selected_portfolios)} portfolios: {', '.join(selected_portfolios)}")
+                        
                         # Simple allocation inputs
                         st.markdown("**Allocations (%)**")
                         allocations = {}
@@ -7755,14 +7797,14 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                                 st.markdown(portfolio_name)
                             with col2:
                                 # Default to equal allocation
-                                default_alloc = 100.0 / len(selected_portfolios)
+                                default_alloc = int(100 / len(selected_portfolios))
                                 alloc = st.number_input(
                                     "Allocation percentage",
-                                    min_value=0.0,
-                                    max_value=100.0,
+                                    min_value=0,
+                                    max_value=100,
                                     value=default_alloc,
-                                    step=0.1,
-                                    format="%.1f",
+                                    step=1,
+                                    format="%d",
                                     label_visibility="collapsed",
                                     key=f"alloc_{portfolio_name}"
                                 )
@@ -7770,7 +7812,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                                 total += alloc
                         
                         # Show total
-                        st.markdown(f"**Total: {total:.1f}%**")
+                        st.markdown(f"**Total: {total}%**")
                         
                         # Auto-normalize if needed
                         if abs(total - 100.0) > 0.1 and total > 0:
@@ -7869,6 +7911,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             
                             st.session_state.multi_backtest_portfolio_configs.append(new_fusion_portfolio)
                             st.success(f"✅ Created: {fusion_name}")
+                            st.toast(f"🎉 Fusion portfolio '{fusion_name}' created successfully!")
                             st.rerun()
                 
                 elif fusion_action.startswith("Edit:"):
@@ -7904,15 +7947,15 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                                 # Use current allocation or default to equal
                                 current_alloc = current_allocations.get(portfolio_name, 0) * 100.0
                                 if current_alloc == 0:
-                                    current_alloc = 100.0 / len(selected_portfolios)
+                                    current_alloc = int(100 / len(selected_portfolios))
                                 
                                 alloc = st.number_input(
                                     f"Allocation for {portfolio_name} (%)",
-                                    min_value=0.0,
-                                    max_value=100.0,
-                                    value=current_alloc,
-                                    step=0.1,
-                                    format="%.1f",
+                                    min_value=0,
+                                    max_value=100,
+                                    value=int(current_alloc),
+                                    step=1,
+                                    format="%d",
                                     key=f"edit_alloc_{portfolio_name}",
                                     label_visibility="collapsed"
                                 )
@@ -7920,7 +7963,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                                 total += alloc
                         
                         # Show total
-                        st.markdown(f"**Total: {total:.1f}%**")
+                        st.markdown(f"**Total: {total}%**")
                         
                         # Auto-normalize if needed
                         if abs(total - 100.0) > 0.1 and total > 0:
@@ -7951,6 +7994,19 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                         # Update session state
                         st.session_state["fusion_edit_rebalancing_frequency"] = fusion_rebalancing_frequency
                         
+                        # Generate updated fusion name based on current allocations
+                        updated_fusion_name = generate_fusion_name(allocations, fusion_rebalancing_frequency)
+                        
+                        # Fusion name input for editing
+                        st.markdown("**Fusion Name**")
+                        current_fusion_name = fusion_portfolio['name']
+                        new_fusion_name = st.text_input(
+                            "Fusion Name",
+                            value=updated_fusion_name,  # Auto-update based on allocations
+                            key=f"edit_fusion_name_{fusion_name}",
+                            help="Fusion name auto-updates based on allocations. You can modify it if needed."
+                        )
+                        
                         # Information about independent rebalancing
                         st.info(f"""
                         **Independent Rebalancing System:**
@@ -7969,7 +8025,11 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                             }
                             # Update fusion frequency to maintain independence
                             fusion_portfolio['rebalancing_frequency'] = fusion_rebalancing_frequency
-                            st.success(f"✅ Updated: {fusion_name}")
+                            # Update fusion name if changed
+                            updated_name = new_fusion_name if new_fusion_name else fusion_name
+                            fusion_portfolio['name'] = updated_name
+                            st.success(f"✅ Updated: {updated_name}")
+                            st.toast(f"🔄 Fusion portfolio '{updated_name}' updated successfully!")
                             st.rerun()
                 
                 elif fusion_action.startswith("Delete:"):
@@ -7986,6 +8046,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) >= 2:
                     if st.button("🗑️ Delete Fusion", type="primary"):
                         st.session_state.multi_backtest_portfolio_configs.remove(fusion_portfolio)
                         st.success(f"✅ Deleted: {fusion_name}")
+                        st.toast(f"🗑️ Fusion portfolio '{fusion_name}' deleted successfully!")
                         st.rerun()
             else:
                 st.info("Create at least 2 regular portfolios to use fusion feature")
