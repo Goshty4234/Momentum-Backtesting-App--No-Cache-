@@ -6525,56 +6525,136 @@ for i in range(len(st.session_state.strategy_comparison_global_tickers)):
 # Bulk Leverage Controls
 with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
     def apply_bulk_leverage_callback():
-        """Apply leverage and expense ratio to all tickers in the current portfolio"""
+        """Apply leverage and expense ratio to selected tickers in the current portfolio"""
         try:
             leverage_value = st.session_state.get('bulk_leverage_value', 1.0)
             expense_ratio_value = st.session_state.get('bulk_expense_ratio_value', 1.0)
+            selected_tickers = st.session_state.get('bulk_selected_tickers', [])
             
+            # Check if any tickers are selected
+            if not selected_tickers:
+                st.warning("⚠️ Please select at least one ticker to apply leverage to.")
+                return
+            
+            applied_count = 0
             for i, stock in enumerate(st.session_state.strategy_comparison_global_tickers):
                 current_ticker = stock['ticker']
                 
-                # Parse current ticker to get base ticker
+                # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Create new ticker with leverage and expense ratio
+                    new_ticker = base_ticker
+                    if leverage_value != 1.0:
+                        new_ticker += f"?L={leverage_value}"
+                    if expense_ratio_value > 0.0:
+                        new_ticker += f"?E={expense_ratio_value}"
+                    
+                    # Update the ticker in the global tickers
+                    st.session_state.strategy_comparison_global_tickers[i]['ticker'] = new_ticker
                 
-                # Create new ticker with leverage and expense ratio
-                new_ticker = base_ticker
-                if leverage_value != 1.0:
-                    new_ticker += f"?L={leverage_value}"
-                if expense_ratio_value > 0.0:
-                    new_ticker += f"?E={expense_ratio_value}"
-                
-                # Update the ticker in the global tickers
-                st.session_state.strategy_comparison_global_tickers[i]['ticker'] = new_ticker
-                
-                # Update the session state for the text input
-                ticker_key = f"strategy_comparison_global_ticker_{i}"
-                st.session_state[ticker_key] = new_ticker
+                    # Update the session state for the text input
+                    ticker_key = f"strategy_comparison_global_ticker_{i}"
+                    st.session_state[ticker_key] = new_ticker
+                    
+                    applied_count += 1
             
-            st.toast(f"✅ Applied {leverage_value}x leverage and {expense_ratio_value}% expense ratio to all tickers!")
+            if applied_count > 0:
+                st.toast(f"✅ Applied {leverage_value}x leverage and {expense_ratio_value}% expense ratio to {applied_count} ticker(s)!")
+            else:
+                st.warning("⚠️ No tickers were selected for modification.")
             
         except Exception as e:
             st.error(f"Error applying bulk leverage: {str(e)}")
 
     def remove_bulk_leverage_callback():
-        """Remove all leverage and expense ratio from all tickers"""
+        """Remove all leverage and expense ratio from selected tickers"""
         try:
+            selected_tickers = st.session_state.get('bulk_selected_tickers', [])
+            
+            # Check if any tickers are selected
+            if not selected_tickers:
+                st.warning("⚠️ Please select at least one ticker to remove leverage from.")
+                return
+            
+            removed_count = 0
             for i, stock in enumerate(st.session_state.strategy_comparison_global_tickers):
                 current_ticker = stock['ticker']
                 
-                # Parse current ticker to get base ticker
+                # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
-                
-                # Update the ticker to base ticker (no leverage, no expense ratio)
-                st.session_state.strategy_comparison_global_tickers[i]['ticker'] = base_ticker
-                
-                # Update the session state for the text input
-                ticker_key = f"strategy_comparison_global_ticker_{i}"
-                st.session_state[ticker_key] = base_ticker
+                if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Update the ticker to base ticker (no leverage, no expense ratio)
+                    st.session_state.strategy_comparison_global_tickers[i]['ticker'] = base_ticker
+                    
+                    # Update the session state for the text input
+                    ticker_key = f"strategy_comparison_global_ticker_{i}"
+                    st.session_state[ticker_key] = base_ticker
+                    
+                    removed_count += 1
             
-            st.toast("✅ Removed all leverage and expense ratio from all tickers!")
+            if removed_count > 0:
+                st.toast(f"✅ Removed leverage and expense ratio from {removed_count} ticker(s)!")
+            else:
+                st.warning("⚠️ No tickers were selected for modification.")
             
         except Exception as e:
             st.error(f"Error removing leverage: {str(e)}")
+
+    # Get current global tickers for selection
+    available_tickers = [stock['ticker'] for stock in st.session_state.strategy_comparison_global_tickers]
+    
+    # Initialize selected tickers if not exists
+    if 'bulk_selected_tickers' not in st.session_state:
+        st.session_state.bulk_selected_tickers = []
+    
+    # Ticker selection interface
+    st.markdown("**Select Tickers:**")
+    
+    # Quick selection buttons
+    col_quick1, col_quick2 = st.columns([1, 1])
+    
+    with col_quick1:
+        if st.button("Select All", key="page6_select_all_tickers", use_container_width=True):
+            st.session_state.bulk_selected_tickers = available_tickers.copy()
+            st.rerun()
+    
+    with col_quick2:
+        if st.button("Clear", key="page6_clear_all_tickers", use_container_width=True):
+            st.session_state.bulk_selected_tickers = []
+            st.rerun()
+    
+    # Individual ticker selection
+    if available_tickers:
+        # Create checkboxes for each ticker
+        for i, ticker in enumerate(available_tickers):
+            base_ticker, leverage, expense = parse_ticker_parameters(ticker)
+            display_text = f"{base_ticker}"
+            if leverage != 1.0 or expense > 0.0:
+                display_text += f" (L:{leverage}x, E:{expense}%)"
+            
+            # Use checkbox state directly
+            checkbox_key = f"page6_bulk_ticker_select_{i}"
+            is_checked = st.checkbox(
+                display_text, 
+                value=ticker in st.session_state.bulk_selected_tickers,
+                key=checkbox_key
+            )
+            
+            # Update selection based on checkbox state
+            if is_checked and ticker not in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.append(ticker)
+            elif not is_checked and ticker in st.session_state.bulk_selected_tickers:
+                st.session_state.bulk_selected_tickers.remove(ticker)
+    else:
+        st.info("No tickers available.")
+    
+    # Show selected tickers count
+    selected_count = len(st.session_state.bulk_selected_tickers)
+    if selected_count > 0:
+        st.success(f"📊 {selected_count} selected")
+    else:
+        st.info("💡 No selection = ALL tickers")
 
     # Bulk leverage controls - Compact layout
     st.markdown("**Leverage & Expense Ratio:**")
@@ -6607,10 +6687,10 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
     # Second row: Buttons
     col3, col4 = st.columns([1, 1])
     with col3:
-        if st.button("Apply to All", on_click=apply_bulk_leverage_callback, type="secondary", use_container_width=True):
+        if st.button("Apply to Selected", on_click=apply_bulk_leverage_callback, type="primary", use_container_width=True):
             pass
     with col4:
-        if st.button("Remove to All", on_click=remove_bulk_leverage_callback, type="secondary", use_container_width=True):
+        if st.button("Remove from Selected", on_click=remove_bulk_leverage_callback, type="secondary", use_container_width=True):
             pass
 
 # Bulk ticker input section
@@ -6635,13 +6715,17 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
         value=st.session_state.strategy_comparison_bulk_tickers,
         key="strategy_comparison_bulk_ticker_input",
         height=100,
-        help="Enter ticker symbols separated by spaces or commas. Click 'Fill Tickers' to replace tickers (keeps existing allocations)."
+        help="Enter ticker symbols separated by spaces or commas. Choose 'Replace All' to replace all tickers or 'Add to Existing' to add new tickers."
     )
     
-    if st.button("Fill Tickers", key="strategy_comparison_fill_tickers_btn"):
-        if bulk_tickers.strip():
-            # Parse tickers (split by comma or space)
-            ticker_list = []
+    # Action buttons
+    col_replace, col_add, col_fetch, col_copy = st.columns([1, 1, 1, 1])
+    
+    with col_replace:
+        if st.button("🔄 Replace All", key="strategy_comparison_fill_tickers_btn", type="secondary", use_container_width=True):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
             for ticker in bulk_tickers.replace(',', ' ').split():
                 ticker = ticker.strip().upper()
                 if ticker:
@@ -6682,15 +6766,116 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
                     if key.startswith("strategy_comparison_global_ticker_") or key.startswith("strategy_comparison_global_alloc_"):
                         del st.session_state[key]
                 
-                st.success(f"✅ Replaced tickers with: {', '.join(ticker_list)}")
+                    st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
                 st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
                 
                 # Force immediate rerun to refresh the UI
                 st.rerun()
             else:
-                st.error("❌ No valid tickers found. Please enter ticker symbols separated by spaces or commas.")
+                    st.warning("⚠️ No valid tickers found in input.")
         else:
-            st.error("❌ Please enter ticker symbols.")
+                st.warning("⚠️ No valid tickers found in input.")
+    
+    with col_add:
+        if st.button("➕ Add to Existing", key="strategy_comparison_add_tickers_btn", type="secondary", use_container_width=True):
+            if bulk_tickers.strip():
+                # Parse tickers (split by comma or space)
+                ticker_list = []
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
+                
+                if ticker_list:
+                    current_stocks = st.session_state.strategy_comparison_global_tickers.copy()
+                    
+                    # Add new tickers to existing ones
+                    for ticker in ticker_list:
+                        # Check if ticker already exists
+                        ticker_exists = any(stock['ticker'] == ticker for stock in current_stocks)
+                        if not ticker_exists:
+                            current_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the global tickers
+                    st.session_state.strategy_comparison_global_tickers = current_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("strategy_comparison_global_ticker_") or key.startswith("strategy_comparison_global_alloc_"):
+                            del st.session_state[key]
+                    
+                    st.success(f"✅ Added new tickers: {', '.join(ticker_list)}")
+                    st.info("💡 **Note:** New tickers added with 0% allocation. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
+            else:
+                st.warning("⚠️ No valid tickers found in input.")
+    
+    with col_fetch:
+        if st.button("🔍 Fetch Tickers", key="strategy_comparison_fetch_tickers_btn", type="secondary", use_container_width=True):
+            # Get current tickers from the global tickers
+            current_tickers = [stock['ticker'] for stock in st.session_state.strategy_comparison_global_tickers if stock['ticker']]
+            
+            if current_tickers:
+                # Update the bulk ticker input with current tickers
+                current_ticker_string = ' '.join(current_tickers)
+                st.session_state.strategy_comparison_bulk_tickers = current_ticker_string
+                st.success(f"✅ Fetched {len(current_tickers)} tickers: {current_ticker_string}")
+                st.rerun()
+            else:
+                st.warning("⚠️ No tickers found in the current portfolio.")
+    
+    with col_copy:
+        if bulk_tickers.strip():
+            # Create a custom button with direct copy functionality
+            import streamlit.components.v1 as components
+            
+            # JavaScript function to copy and show feedback
+            copy_js = f"""
+            <script>
+            function copyTickers() {{
+                navigator.clipboard.writeText({json.dumps(bulk_tickers.strip())}).then(function() {{
+                    // Show success feedback
+                    const button = document.querySelector('#copy-tickers-btn');
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '✅ Copied!';
+                    button.style.backgroundColor = '#28a745';
+                    setTimeout(function() {{
+                        button.innerHTML = originalText;
+                        button.style.backgroundColor = '';
+                    }}, 2000);
+                }}).catch(function(err) {{
+                    alert('Failed to copy: ' + err);
+                }});
+            }}
+            </script>
+            <button id="copy-tickers-btn" onclick="copyTickers()" style="
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                width: 100%;
+                font-size: 14px;
+            ">📋 Copy</button>
+            """
+            components.html(copy_js, height=50)
+        else:
+            st.button("📋 Copy", key="strategy_comparison_copy_tickers_btn", type="secondary", use_container_width=True, disabled=True)
+            st.warning("⚠️ No tickers to copy. Please enter some tickers first.")
 
 # Validation constants
 _TOTAL_TOL = 1.0
