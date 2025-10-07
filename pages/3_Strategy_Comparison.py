@@ -6796,8 +6796,10 @@ if leveraged_tickers:
     try:
         risk_free_rates = get_risk_free_rate_robust([pd.Timestamp.now()])
         daily_rf = risk_free_rates.iloc[0] if len(risk_free_rates) > 0 else 0.000105
+        annual_rf = daily_rf * 365.25 * 100  # Convert daily to annual percentage
     except:
         daily_rf = 0.000105  # fallback
+        annual_rf = 3.86  # fallback annual rate
     
     # Group by leverage level
     leverage_groups = {}
@@ -6810,7 +6812,7 @@ if leveraged_tickers:
         base_tickers = leverage_groups[leverage]
         daily_drag = (leverage - 1) * daily_rf * 100
         st.sidebar.markdown(f"🚀 **{leverage}x leverage** on {', '.join(base_tickers)}")
-        st.sidebar.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {daily_rf*100:.1f}%)")
+        st.sidebar.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {annual_rf:.2f}%)")
 
 # Special tickers and leverage guide sections
 with st.sidebar.expander("📈 Broad Long-Term Tickers", expanded=False):
