@@ -11320,6 +11320,8 @@ def paste_all_json_callback():
                     'momentum_windows': momentum_windows,
                     'use_minimal_threshold': cfg.get('use_minimal_threshold', False),
                     'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 2.0),
+                    'use_max_allocation': cfg.get('use_max_allocation', False),
+                    'max_allocation_percent': cfg.get('max_allocation_percent', 10.0),
                     'calc_beta': cfg.get('calc_beta', False),
                     'calc_volatility': cfg.get('calc_volatility', True),
                     'beta_window_days': cfg.get('beta_window_days', 365),
