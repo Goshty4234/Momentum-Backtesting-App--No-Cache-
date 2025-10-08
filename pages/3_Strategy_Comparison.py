@@ -1,3 +1,4 @@
+# NO_CACHE VERSION - All @st.cache_data decorators removed for maximum reliability
 import streamlit as st
 from datetime import datetime, timedelta, time, date
 import numpy as np
@@ -3289,7 +3290,7 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Strategy Performance Comparison")
 
-st.title("Strategy Comparison")
+st.title("Strategy Comparison (NO_CACHE)")
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
 # Simple performance toggle
