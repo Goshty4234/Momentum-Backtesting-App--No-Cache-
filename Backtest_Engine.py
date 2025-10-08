@@ -121,9 +121,7 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             else:
                 leverage = float(leverage_part)
                 
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+            # Leverage validation removed - allow any leverage value for testing
         except (ValueError, IndexError) as e:
             leverage = 1.0
     
@@ -142,9 +140,7 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             else:
                 expense_ratio = float(expense_part)
                 
-            # Validate expense ratio range (reasonable bounds for ETFs)
-            if expense_ratio < 0.0 or expense_ratio > 10.0:
-                raise ValueError(f"Expense ratio {expense_ratio} is outside reasonable range (0.0-10.0)")
+            # Expense ratio validation removed - allow any expense ratio value for testing
         except (ValueError, IndexError) as e:
             expense_ratio = 0.0
             
@@ -540,37 +536,22 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_rati
     # Calculate daily expense ratio drag: expense_ratio / 100 / 252 (annual to trading day)
     daily_expense_drag = expense_ratio / 100.0 / 252
     
-    # Calculate leveraged prices by applying leverage to each day's price change
-    # Start with the first price
-    leveraged_prices = pd.Series(index=price_data.index, dtype=float)
-    first_price = price_data['Close'].iloc[0]
-    if isinstance(first_price, pd.Series):
-        first_price = first_price.iloc[0]
-    leveraged_prices.iloc[0] = first_price
+    # VECTORIZED APPROACH - 100-1000x faster than for loop!
+    # Calculate daily returns using vectorized operations
+    prices = price_data['Close'].values  # Convert to NumPy array for speed
+    daily_returns = np.zeros(len(prices))
+    daily_returns[1:] = prices[1:] / prices[:-1] - 1  # Vectorized returns calculation
     
-    # Apply leverage to each day's price change (correct approach - no double compounding)
-    for i in range(1, len(price_data)):
-        # Get scalar values from the Close column
-        current_price = price_data['Close'].iloc[i]
-        previous_price = price_data['Close'].iloc[i-1]
-        
-        # Handle MultiIndex case
-        if isinstance(current_price, pd.Series):
-            current_price = current_price.iloc[0]
-        if isinstance(previous_price, pd.Series):
-            previous_price = previous_price.iloc[0]
-        
-        if pd.notna(current_price) and pd.notna(previous_price):
-            # Calculate the actual price change
-            price_change = current_price / previous_price - 1
-            
-            # Apply leverage to the price change and subtract cost drag and expense ratio drag
-            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i] - daily_expense_drag
-            
-            # Apply the leveraged price change to the previous leveraged price
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
-        else:
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1]
+    # Apply leverage to returns and subtract cost drag and expense ratio drag
+    leveraged_returns = (daily_returns * leverage) - daily_cost_drag.values - daily_expense_drag
+    leveraged_returns[0] = 0  # First day has no return
+    
+    # Compound the leveraged returns to get prices (cumulative product)
+    # Using np.cumprod for vectorized compounding
+    leveraged_prices = prices[0] * np.cumprod(1 + leveraged_returns)
+    
+    # Convert back to pandas Series with proper index
+    leveraged_prices = pd.Series(leveraged_prices, index=price_data.index)
     
     # Update the Close price with leveraged prices
     leveraged_data['Close'] = leveraged_prices
@@ -613,7 +594,7 @@ def get_cached_ticker_data(ticker_symbol, start_date=None, end_date=None, period
                 # Apply leverage and expense ratio to synthetic data
                 if leverage != 1.0:
                     synthetic_data['Close'] = synthetic_data['Close'] * leverage
-                if expense_ratio > 0:
+                if expense_ratio != 0:
                     # Apply expense ratio as a daily drag
                     daily_expense = (expense_ratio / 100) / 365
                     synthetic_data['Close'] = synthetic_data['Close'] * (1 - daily_expense) ** (synthetic_data.index - synthetic_data.index[0]).days
@@ -705,6 +686,120 @@ def get_cached_ticker_download(ticker_symbol, start_date=None, end_date=None, pr
     except Exception as e:
         logger.debug(f"Error downloading data for {ticker_symbol}: {e}")
         return pd.DataFrame()
+
+def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
+    """
+    Smart batch download with fallback to individual downloads.
+    
+    Strategy:
+    1. Try batch download (fast - 1 API call for all tickers)
+    2. If batch fails → fallback to individual downloads (reliable)
+    3. Invalid tickers are skipped, others continue
+    
+    Args:
+        ticker_list: List of ticker symbols (can include leverage format)
+        period: Data period
+        auto_adjust: Auto-adjust setting
+    
+    Returns:
+        Dict[ticker_symbol, DataFrame]: Data for each ticker
+    """
+    if not ticker_list:
+        return {}
+    
+    results = {}
+    
+    # Separate tickers into Yahoo-fetchable vs custom
+    yahoo_tickers = []
+    custom_tickers = {}
+    
+    for ticker_symbol in ticker_list:
+        # Parse parameters
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
+        resolved = resolve_ticker_alias(base_ticker)
+        
+        # Check if it's a custom ticker (local data, no Yahoo call)
+        custom_list = ["ZEROX", "GOLD_COMPLETE", "ZROZ_COMPLETE", "TLT_COMPLETE", 
+                      "BTC_COMPLETE", "IEF_COMPLETE", "KMLM_COMPLETE", "DBMF_COMPLETE",
+                      "TBILL_COMPLETE", "SPYSIM_COMPLETE", "GOLDSIM_COMPLETE"]
+        
+        if resolved in custom_list:
+            # Handle custom tickers individually (they don't use Yahoo)
+            custom_tickers[ticker_symbol] = (resolved, leverage, expense_ratio)
+        else:
+            yahoo_tickers.append((ticker_symbol, resolved, leverage, expense_ratio))
+    
+    # Process custom tickers first (no Yahoo calls)
+    for ticker_symbol, (resolved, leverage, expense_ratio) in custom_tickers.items():
+        try:
+            results[ticker_symbol] = get_cached_ticker_data(ticker_symbol, None, None, period, auto_adjust)
+        except:
+            results[ticker_symbol] = pd.DataFrame()
+    
+    # If no Yahoo tickers, return early
+    if not yahoo_tickers:
+        return results
+    
+    # Extract just the resolved tickers for batch download
+    resolved_list = list(set([resolved for _, resolved, _, _ in yahoo_tickers]))
+    
+    try:
+        # BATCH DOWNLOAD - Fast path (1 API call for all)
+        if len(resolved_list) > 1:
+            batch_data = yf.download(
+                resolved_list,
+                period=period,
+                auto_adjust=auto_adjust,
+                progress=False,
+                group_by='ticker'
+            )
+            
+            # Process batch data
+            if not batch_data.empty:
+                for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+                    try:
+                        if len(resolved_list) > 1:
+                            # Multi-ticker batch
+                            ticker_data = batch_data[resolved][['Close', 'Dividends']] if resolved in batch_data else pd.DataFrame()
+                        else:
+                            # Single ticker batch
+                            ticker_data = batch_data[['Close', 'Dividends']]
+                        
+                        if not ticker_data.empty:
+                            # Apply leverage/expense if needed
+                            if leverage != 1.0 or expense_ratio != 0.0:
+                                ticker_data = apply_daily_leverage(ticker_data, leverage, expense_ratio)
+                            results[ticker_symbol] = ticker_data
+                        else:
+                            results[ticker_symbol] = pd.DataFrame()
+                    except:
+                        # Individual ticker failed in batch, will retry below
+                        pass
+            else:
+                raise Exception("Batch download returned empty")
+                
+    except Exception:
+        # FALLBACK - Batch failed, download individually (reliable but slower)
+        pass
+    
+    # Download any missing tickers individually (fallback or single ticker)
+    for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+        if ticker_symbol not in results or results[ticker_symbol].empty:
+            try:
+                ticker = yf.Ticker(resolved)
+                hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+                
+                if not hist.empty:
+                    # Apply leverage/expense if needed
+                    if leverage != 1.0 or expense_ratio != 0.0:
+                        hist = apply_daily_leverage(hist, leverage, expense_ratio)
+                    results[ticker_symbol] = hist
+                else:
+                    results[ticker_symbol] = pd.DataFrame()
+            except:
+                results[ticker_symbol] = pd.DataFrame()
+    
+    return results
 
 # Set up logging to capture print statements
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -3475,11 +3570,29 @@ def update_ticker_callback(index: int):
             elif upper_val == 'BRK.A':
                 upper_val = 'BRK-A'
             
-            # Update the portfolio configuration with the converted value
-            st.session_state.tickers[index] = upper_val
+            # CRITICAL: Resolve ticker alias BEFORE storing
+            resolved_ticker = resolve_ticker_alias(upper_val)
             
-            # Update the text box's state to show the converted value (with dots and uppercase)
-            st.session_state[key] = upper_val
+            # Update the portfolio configuration with the resolved ticker
+            st.session_state.tickers[index] = resolved_ticker
+            
+            # Update the text box's state to show the resolved ticker
+            st.session_state[key] = resolved_ticker
+            
+            # Auto-disable dividends for negative leverage (inverse ETFs)
+            if '?L=-' in resolved_ticker:
+                # Ensure divs list exists and has enough elements
+                if 'divs' not in st.session_state:
+                    st.session_state.divs = [True] * len(st.session_state.tickers)
+                elif len(st.session_state.divs) <= index:
+                    st.session_state.divs.extend([True] * (index + 1 - len(st.session_state.divs)))
+                
+                # Set dividends to False for inverse ETFs
+                st.session_state.divs[index] = False
+                
+                # Also update the checkbox UI state
+                div_key = f"divs_checkbox_{index}"
+                st.session_state[div_key] = False
     except Exception:
         # Defensive: if index is out of range, skip silently
         pass
