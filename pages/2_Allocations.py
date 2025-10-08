@@ -429,16 +429,17 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_rati
     
     Leveraged ETFs reset daily, so we apply the leverage to daily returns and then
     compound the results to get the leveraged price series. Includes daily cost drag
-    equivalent to (leverage - 1) × risk_free_rate.
+    equivalent to (leverage - 1) × risk_free_rate plus daily expense ratio drag.
     
     Args:
         price_data: DataFrame with 'Close' column containing price data
         leverage: Leverage multiplier (e.g., 3.0 for 3x leverage)
+        expense_ratio: Annual expense ratio in percentage (e.g., 1.0 for 1% annual expense)
         
     Returns:
-        DataFrame with leveraged price data including cost drag
+        DataFrame with leveraged price data including cost drag and expense ratio drag
     """
-    if leverage == 1.0:
+    if leverage == 1.0 and expense_ratio == 0.0:
         return price_data.copy()
     
     # Create a copy to avoid modifying original data
@@ -460,14 +461,17 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_rati
     except Exception as e:
         raise
     
+    # Calculate daily expense ratio drag: expense_ratio / 100 / 365.25 (annual to daily)
+    daily_expense_drag = expense_ratio / 100.0 / 365.25
+    
     # VECTORIZED APPROACH - 100-1000x faster than for loop!
     # Calculate daily returns using vectorized operations
     prices = price_data['Close'].values  # Convert to NumPy array for speed
     daily_returns = np.zeros(len(prices))
     daily_returns[1:] = prices[1:] / prices[:-1] - 1  # Vectorized returns calculation
     
-    # Apply leverage to returns and subtract cost drag
-    leveraged_returns = (daily_returns * leverage) - daily_cost_drag.values
+    # Apply leverage to returns and subtract cost drag and expense ratio drag
+    leveraged_returns = (daily_returns * leverage) - daily_cost_drag.values - daily_expense_drag
     leveraged_returns[0] = 0  # First day has no return
     
     # Compound the leveraged returns to get prices (cumulative product)
