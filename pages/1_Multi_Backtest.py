@@ -3595,7 +3595,7 @@ def get_portfolio_value(portfolio_name):
     return portfolio_value
 
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
+    """Create allocation evolution chart for a portfolio (NO_CACHE for reliability)"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3671,7 +3671,7 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
         return None
 
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
+    """Process allocation data into a clean DataFrame (NO_CACHE for reliability)"""
     try:
         # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
         all_tickers = set()
