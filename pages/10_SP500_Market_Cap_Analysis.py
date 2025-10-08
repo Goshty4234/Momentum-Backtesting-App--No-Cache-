@@ -44,7 +44,7 @@ if session_state_size > 100:  # More than 100 keys in session state = potential 
 st.markdown("**Current S&P 500 companies ranked by market cap with key performance metrics**")
 
 # Function to get S&P 500 companies from Wikipedia
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=86400)  # Cache for 24 hours (1 day)
 def get_sp500_companies():
     """Get S&P 500 companies from Wikipedia"""
     try:
@@ -387,7 +387,7 @@ def get_single_ticker_data(ticker):
         }
 
 # Function to get market data using bulk download - MUCH faster!
-@st.cache_data(ttl=1800)  # Cache for 30 minutes
+@st.cache_data(ttl=21600)  # Cache for 6 hours
 def get_market_data(tickers):
     """Get comprehensive market data using bulk download - reduces API calls dramatically"""
     import yfinance as yf
