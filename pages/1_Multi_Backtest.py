@@ -654,37 +654,22 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_rati
     # Calculate daily expense ratio drag: expense_ratio / 100 / 365.25 (annual to daily)
     daily_expense_drag = expense_ratio / 100.0 / 365.25
     
-    # Calculate leveraged prices by applying leverage to each day's price change
-    # Start with the first price
-    leveraged_prices = pd.Series(index=price_data.index, dtype=float)
-    first_price = price_data['Close'].iloc[0]
-    if isinstance(first_price, pd.Series):
-        first_price = first_price.iloc[0]
-    leveraged_prices.iloc[0] = first_price
+    # VECTORIZED APPROACH - 100-1000x faster than for loop!
+    # Calculate daily returns using vectorized operations
+    prices = price_data['Close'].values  # Convert to NumPy array for speed
+    daily_returns = np.zeros(len(prices))
+    daily_returns[1:] = prices[1:] / prices[:-1] - 1  # Vectorized returns calculation
     
-    # Apply leverage to each day's price change (correct approach - no double compounding)
-    for i in range(1, len(price_data)):
-        # Get scalar values from the Close column
-        current_price = price_data['Close'].iloc[i]
-        previous_price = price_data['Close'].iloc[i-1]
-        
-        # Handle MultiIndex case
-        if isinstance(current_price, pd.Series):
-            current_price = current_price.iloc[0]
-        if isinstance(previous_price, pd.Series):
-            previous_price = previous_price.iloc[0]
-        
-        if pd.notna(current_price) and pd.notna(previous_price):
-            # Calculate the actual price change
-            price_change = current_price / previous_price - 1
-            
-            # Apply leverage to the price change and subtract cost drag and expense ratio drag
-            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i] - daily_expense_drag
-            
-            # Apply the leveraged price change to the previous leveraged price
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
-        else:
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1]
+    # Apply leverage to returns and subtract cost drag
+    leveraged_returns = (daily_returns * leverage) - daily_cost_drag.values - daily_expense_drag
+    leveraged_returns[0] = 0  # First day has no return
+    
+    # Compound the leveraged returns to get prices (cumulative product)
+    # Using np.cumprod for vectorized compounding
+    leveraged_prices = prices[0] * np.cumprod(1 + leveraged_returns)
+    
+    # Convert back to pandas Series with proper index
+    leveraged_prices = pd.Series(leveraged_prices, index=price_data.index)
     
     # Update the Close price with leveraged prices
     leveraged_data['Close'] = leveraged_prices
@@ -1113,6 +1098,120 @@ def get_goldsim_complete_data(period="max"):
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
+
+def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
+    """
+    Smart batch download with fallback to individual downloads.
+    
+    Strategy:
+    1. Try batch download (fast - 1 API call for all tickers)
+    2. If batch fails → fallback to individual downloads (reliable)
+    3. Invalid tickers are skipped, others continue
+    
+    Args:
+        ticker_list: List of ticker symbols (can include leverage format)
+        period: Data period
+        auto_adjust: Auto-adjust setting
+    
+    Returns:
+        Dict[ticker_symbol, DataFrame]: Data for each ticker
+    """
+    if not ticker_list:
+        return {}
+    
+    results = {}
+    
+    # Separate tickers into Yahoo-fetchable vs custom
+    yahoo_tickers = []
+    custom_tickers = {}
+    
+    for ticker_symbol in ticker_list:
+        # Parse parameters
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
+        resolved = resolve_ticker_alias(base_ticker)
+        
+        # Check if it's a custom ticker (local data, no Yahoo call)
+        custom_list = ["ZEROX", "GOLD_COMPLETE", "ZROZ_COMPLETE", "TLT_COMPLETE", 
+                      "BTC_COMPLETE", "IEF_COMPLETE", "KMLM_COMPLETE", "DBMF_COMPLETE",
+                      "TBILL_COMPLETE", "SPYSIM_COMPLETE", "GOLDSIM_COMPLETE"]
+        
+        if resolved in custom_list:
+            # Handle custom tickers individually (they don't use Yahoo)
+            custom_tickers[ticker_symbol] = (resolved, leverage, expense_ratio)
+        else:
+            yahoo_tickers.append((ticker_symbol, resolved, leverage, expense_ratio))
+    
+    # Process custom tickers first (no Yahoo calls)
+    for ticker_symbol, (resolved, leverage, expense_ratio) in custom_tickers.items():
+        try:
+            results[ticker_symbol] = get_ticker_data(ticker_symbol, period, auto_adjust)
+        except:
+            results[ticker_symbol] = pd.DataFrame()
+    
+    # If no Yahoo tickers, return early
+    if not yahoo_tickers:
+        return results
+    
+    # Extract just the resolved tickers for batch download
+    resolved_list = list(set([resolved for _, resolved, _, _ in yahoo_tickers]))
+    
+    try:
+        # BATCH DOWNLOAD - Fast path (1 API call for all)
+        if len(resolved_list) > 1:
+            batch_data = yf.download(
+                resolved_list,
+                period=period,
+                auto_adjust=auto_adjust,
+                progress=False,
+                group_by='ticker'
+            )
+            
+            # Process batch data
+            if not batch_data.empty:
+                for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+                    try:
+                        if len(resolved_list) > 1:
+                            # Multi-ticker batch
+                            ticker_data = batch_data[resolved][['Close', 'Dividends']] if resolved in batch_data else pd.DataFrame()
+                        else:
+                            # Single ticker batch
+                            ticker_data = batch_data[['Close', 'Dividends']]
+                        
+                        if not ticker_data.empty:
+                            # Apply leverage/expense if needed
+                            if leverage != 1.0 or expense_ratio != 0.0:
+                                ticker_data = apply_daily_leverage(ticker_data, leverage, expense_ratio)
+                            results[ticker_symbol] = ticker_data
+                        else:
+                            results[ticker_symbol] = pd.DataFrame()
+                    except:
+                        # Individual ticker failed in batch, will retry below
+                        pass
+            else:
+                raise Exception("Batch download returned empty")
+                
+    except Exception:
+        # FALLBACK - Batch failed, download individually (reliable but slower)
+        pass
+    
+    # Download any missing tickers individually (fallback or single ticker)
+    for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+        if ticker_symbol not in results or results[ticker_symbol].empty:
+            try:
+                ticker = yf.Ticker(resolved)
+                hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+                
+                if not hist.empty:
+                    # Apply leverage/expense if needed
+                    if leverage != 1.0 or expense_ratio != 0.0:
+                        hist = apply_daily_leverage(hist, leverage, expense_ratio)
+                    results[ticker_symbol] = hist
+                else:
+                    results[ticker_symbol] = pd.DataFrame()
+            except:
+                results[ticker_symbol] = pd.DataFrame()
+    
+    return results
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
     """Get ticker data (NO_CACHE version)
@@ -10865,20 +10964,29 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             total_downloads = len(all_tickers_to_download) + len(special_tickers)
             download_count = 0
             
-            # Download individual tickers
+            # BATCH DOWNLOAD - Much faster! (1 API call instead of N calls)
+            progress_text = f"Batch downloading data for {len(all_tickers_to_download)} tickers..."
+            progress_bar.progress(0.5, text=progress_text)
+            
+            # Use batch download function
+            batch_results = get_multiple_tickers_batch(all_tickers_to_download, period="max", auto_adjust=False)
+            
+            # Process batch results
             for i, t in enumerate(all_tickers_to_download):
-                # Check for kill request during data download
+                # Check for kill request during processing
                 check_kill_request()
                 
+                download_count += 1
+                progress_text = f"Processing {t} ({download_count}/{total_downloads})..."
+                progress_bar.progress(download_count / total_downloads, text=progress_text)
+                
+                hist = batch_results.get(t, pd.DataFrame())
+                
+                if hist.empty:
+                    invalid_tickers.append(t)
+                    continue
+                
                 try:
-                    download_count += 1
-                    progress_text = f"Downloading data for {t} ({download_count}/{total_downloads})..."
-                    progress_bar.progress(download_count / total_downloads, text=progress_text)
-                    hist = get_ticker_data(t, period="max", auto_adjust=False)
-                    if hist.empty:
-                        invalid_tickers.append(t)
-                        continue
-                    
                     # Force tz-naive for hist (like Backtest_Engine.py)
                     hist = hist.copy()
                     hist.index = hist.index.tz_localize(None)
