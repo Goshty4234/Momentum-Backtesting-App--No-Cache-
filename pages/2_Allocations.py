@@ -1,3 +1,4 @@
+# NO_CACHE VERSION - All @st.cache_data decorators removed for maximum reliability
 import streamlit as st
 import datetime
 from datetime import timedelta, time
@@ -156,6 +157,7 @@ def get_ticker_aliases():
 def resolve_ticker_alias(ticker):
     """Resolve ticker alias to actual ticker symbol"""
     aliases = get_ticker_aliases()
+    
     # Extract base ticker before any parameters (e.g., CNSWF?L=2?E=1 -> CNSWF)
     base_ticker = ticker.split('?')[0].upper()
     
@@ -434,115 +436,81 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
     
     return leveraged_data
 
-def get_ticker_aliases():
-    """Define ticker aliases for easier entry"""
-    return {
-        # Stock Market Indices
-        'SPX': '^GSPC',           # S&P 500 (price only, no dividends) - 1927+
-        'SPXTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
-        'SP500': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
-        'SP500TR': '^SP500TR',    # S&P 500 Total Return (with dividends) - 1988+
-        'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
-        'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
-        'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
-        'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
-        
-        # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
-        'TNX': '^TNX',           # 10-Year Treasury Yield (1962+) - Price only, no coupons
-        'TYX': '^TYX',           # 30-Year Treasury Yield (1977+) - Price only, no coupons
-        'FVX': '^FVX',           # 5-Year Treasury Yield (1962+) - Price only, no coupons
-        'IRX': '^IRX',           # 3-Month Treasury Yield (1960+) - Price only, no coupons
-        
-        # Treasury Bond ETFs (MODERN - WITH COUPONS/DIVIDENDS)
-        'TLTETF': 'TLT',          # 20+ Year Treasury Bond ETF (2002+) - With coupons
-        'IEFETF': 'IEF',          # 7-10 Year Treasury Bond ETF (2002+) - With coupons
-        'SHY': 'SHY',            # 1-3 Year Treasury Bond ETF (2002+) - With coupons
-        'BIL': 'BIL',            # 1-3 Month T-Bill ETF (2007+) - With coupons
-        'GOVT': 'GOVT',          # US Treasury Bond ETF (2012+) - With coupons
-        'SPTL': 'SPTL',          # Long Term Treasury ETF (2007+) - With coupons
-        'SPTS': 'SPTS',          # Short Term Treasury ETF (2011+) - With coupons
-        'SPTI': 'SPTI',          # Intermediate Term Treasury ETF (2007+) - With coupons
-        
-        # Cash/Zero Return
-        'ZEROX': 'ZEROX',        # Zero-cost portfolio (literally cash doing nothing)
-        
-        # Gold & Commodities
-        'GOLDX': 'GOLDX',        # Fidelity Gold Fund (1994+) - With dividends
-        'GLD': 'GLD',            # SPDR Gold Trust ETF (2004+) - With dividends
-        'IAU': 'IAU',            # iShares Gold Trust ETF (2005+) - With dividends
-        'GOLDF': 'GC=F',         # Gold Futures (2000+) - No dividends
-        'SILVER': 'SI=F',        # Silver Futures (2000+) - No dividends
-        'OIL': 'CL=F',           # Crude Oil Futures (2000+) - No dividends
-        'NATGAS': 'NG=F',        # Natural Gas Futures (2000+) - No dividends
-        'CORN': 'ZC=F',          # Corn Futures (2000+) - No dividends
-        'SOYBEAN': 'ZS=F',       # Soybean Futures (2000+) - No dividends
-        'COFFEE': 'KC=F',        # Coffee Futures (2000+) - No dividends
-        'SUGAR': 'SB=F',         # Sugar Futures (2000+) - No dividends
-        'COTTON': 'CT=F',        # Cotton Futures (2000+) - No dividends
-        'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
-        'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
-        'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
-        
-        # Leveraged & Inverse ETFs (Synthetic Aliases)
-        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
-        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
-        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
-        'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
-        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends)
-        'SHTR': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
-        'PSQTR': '^IXIC?L=-1?E=0.95',    # -1x NASDAQ Composite (price only, no dividends) - 1971+
-        'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
-        'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
-        'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
-        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
-        
-        # Synthetic Complete Tickers
-        'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
-        'GOLDSIM': 'GOLDSIM_COMPLETE',  # Complete Gold Simulation (1968+) - New Historical + GOLDX
-        'GOLDX': 'GOLD_COMPLETE',  # Complete Gold Dataset (1975+) - Historical + GLD
-        'ZROZX': 'ZROZ_COMPLETE',  # Complete ZROZ Dataset (1962+) - Historical + ZROZ
-        'TLTTR': 'TLT_COMPLETE',  # Complete TLT Dataset (1962+) - Historical + TLT
-        'BITCOINX': 'BTC_COMPLETE',  # Complete Bitcoin Dataset (2010+) - Historical + BTC-USD
-        'KMLMX': 'KMLM_COMPLETE',  # Complete KMLM Dataset (1992+) - Historical + KMLM
-        'IEFTR': 'IEF_COMPLETE',  # Complete IEF Dataset (1962+) - Historical + IEF
-        'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
-        'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
-        
-        # Canadian Ticker Mappings (USD OTC -> Canadian Exchange)
-        'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX
-        'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture
-        'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX
-        'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture
-        'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture
-        'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX
-        'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX
-    }
+def apply_leverage_to_hist_data(hist_data, leverage):
+    """Apply leverage to historical data"""
+    if leverage == 1.0:
+        return hist_data
+    
+    # Create a copy to avoid modifying original
+    leveraged_data = hist_data.copy()
+    
+    # Apply leverage to price columns
+    price_columns = ['Open', 'High', 'Low', 'Close']
+    for col in price_columns:
+        if col in leveraged_data.columns:
+            leveraged_data[col] = leveraged_data[col] * leverage
+    
+    # Recalculate price changes with the new leveraged prices
+    leveraged_data['Price_change'] = leveraged_data['Close'].pct_change(fill_method=None)
+    
+    return leveraged_data
 
-def resolve_ticker_alias(ticker):
-    """Resolve ticker alias to actual ticker symbol"""
-    aliases = get_ticker_aliases()
-    # Extract base ticker before any parameters (e.g., CNSWF?L=2?E=1 -> CNSWF)
-    base_ticker = ticker.split('?')[0].upper()
+def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False):
+    """Get ticker data specifically for valuation tables - converts Canadian USD tickers to CAD
     
-    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-    if base_ticker == 'BRK.B':
-        base_ticker = 'BRK-B'
-    elif base_ticker == 'BRK.A':
-        base_ticker = 'BRK-A'
-    
-    # Get the Canadian ticker if available
-    resolved_base = aliases.get(base_ticker, base_ticker)
-    
-    # If we have parameters, add them back to the resolved ticker
-    if '?' in ticker:
-        parameters = ticker.split('?', 1)[1]  # Get everything after the first ?
-        return f"{resolved_base}?{parameters}"
-    else:
-        return resolved_base
+    Args:
+        ticker_symbol: Stock ticker symbol
+        period: Data period
+        auto_adjust: Auto-adjust setting
+    """
+    try:
+        # Parse leverage from ticker symbol
+        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        
+        # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange)
+        resolved_ticker = resolve_ticker_alias(base_ticker)
+        
+        # Special handling for synthetic complete tickers
+        if resolved_ticker == "SPYSIM_COMPLETE":
+            return get_spysim_complete_data(period)
+        if resolved_ticker == "GOLDSIM_COMPLETE":
+            return get_goldsim_complete_data(period)
+        if resolved_ticker == "TBILL_COMPLETE":
+            return get_tbill_complete_data(period)
+        if resolved_ticker == "IEF_COMPLETE":
+            return get_ief_complete_data(period)
+        if resolved_ticker == "TLT_COMPLETE":
+            return get_tlt_complete_data(period)
+        if resolved_ticker == "ZROZ_COMPLETE":
+            return get_zroz_complete_data(period)
+        if resolved_ticker == "BTC_COMPLETE":
+            return get_bitcoin_complete_data(period)
+        if resolved_ticker == "KMLM_COMPLETE":
+            return get_kmlm_complete_data(period)
+        if resolved_ticker == "DBMF_COMPLETE":
+            return get_dbmf_complete_data(period)
+        
+        # Create ticker object with resolved ticker
+        ticker_obj = yf.Ticker(resolved_ticker)
+        
+        # Get historical data
+        hist = ticker_obj.history(period=period, auto_adjust=auto_adjust)
+        
+        if hist.empty:
+            return None
+            
+        # Apply leverage if specified
+        if leverage != 1.0:
+            hist = apply_leverage_to_hist_data(hist, leverage)
+            
+        return hist
+        
+    except Exception as e:
+        st.error(f"Error fetching data for {ticker_symbol}: {str(e)}")
+        return None
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data (NO_CACHE version)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -591,17 +559,6 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         return hist
     except Exception:
         return pd.DataFrame()
-
-def get_ticker_info(ticker_symbol):
-    """Get ticker info (NO_CACHE version)"""
-    try:
-        # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange)
-        resolved_ticker = resolve_ticker_alias(ticker_symbol)
-        stock = yf.Ticker(resolved_ticker)
-        info = stock.info
-        return info
-    except Exception:
-        return {}
 
 # Synthetic Complete Ticker Functions
 def get_spysim_complete_data(period="max"):
@@ -807,9 +764,20 @@ def get_tbill_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
+def get_ticker_info(ticker_symbol):
+    """Cache ticker info to improve performance across multiple tabs"""
+    try:
+        # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange)
+        resolved_ticker = resolve_ticker_alias(ticker_symbol)
+        stock = yf.Ticker(resolved_ticker)
+        info = stock.info
+        return info
+    except Exception:
+        return {}
+
 def calculate_portfolio_metrics(portfolio_config, allocation_data):
-    """Calculate portfolio metrics (NO_CACHE version)"""
-    # This will process the results of expensive portfolio calculations (NO_CACHE)
+    """Cache heavy portfolio calculations to improve performance"""
+    # This will cache the results of expensive portfolio calculations
     # Note: The actual calculation logic remains unchanged
     return portfolio_config, allocation_data  # Placeholder - will be filled in by calling functions
 
@@ -846,7 +814,7 @@ def create_safe_cache_key(data):
         return hashlib.md5(str(data).encode()).hexdigest()
 
 def run_cached_backtest(portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id="allocations"):
-    """Run backtest calculations (NO_CACHE version)
+    """Cache expensive backtest calculations with proper invalidation
     
     Args:
         portfolios_config_hash: Hash of portfolio configurations to detect changes
@@ -1182,7 +1150,7 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Portfolio Allocation Analysis")
 
-st.title("Portfolio Allocations")
+st.title("Portfolio Allocations (NO_CACHE)")
 st.markdown("Use the forms below to configure and run backtests to obtain allocation insights.")
 
 # Portfolio Name
@@ -2944,12 +2912,15 @@ def single_backtest(config, sim_index, reindexed_data):
         if use_max_allocation:
             max_allocation_decimal = max_allocation_percent / 100.0
             
-            # Check if any stocks exceed the cap after threshold filtering and normalization
+            # Check if any stocks exceed the cap after threshold filtering and normalization (EXCLUDE CASH)
             capped_allocations = {}
             excess_allocation = 0.0
             
             for ticker, allocation in allocations.items():
-                if allocation > max_allocation_decimal:
+                # CASH is exempt from max_allocation limit to prevent money loss
+                if ticker == 'CASH':
+                    capped_allocations[ticker] = allocation
+                elif allocation > max_allocation_decimal:
                     # Cap the allocation and collect excess
                     capped_allocations[ticker] = max_allocation_decimal
                     excess_allocation += (allocation - max_allocation_decimal)
@@ -3213,10 +3184,7 @@ def single_backtest(config, sim_index, reindexed_data):
             excess_weight = 0.0
             
             for ticker, weight in weights.items():
-                # CASH is exempt from max_allocation limit to prevent money loss
-                if ticker == 'CASH':
-                    capped_weights[ticker] = weight
-                elif weight > max_allocation_decimal:
+                if weight > max_allocation_decimal:
                     # Cap the weight and collect excess
                     capped_weights[ticker] = max_allocation_decimal
                     excess_weight += (weight - max_allocation_decimal)
@@ -3282,10 +3250,7 @@ def single_backtest(config, sim_index, reindexed_data):
             excess_weight = 0.0
             
             for ticker, weight in weights.items():
-                # CASH is exempt from max_allocation limit to prevent money loss
-                if ticker == 'CASH':
-                    capped_weights[ticker] = weight
-                elif weight > max_allocation_decimal:
+                if weight > max_allocation_decimal:
                     # Cap the weight and collect excess
                     capped_weights[ticker] = max_allocation_decimal
                     excess_weight += (weight - max_allocation_decimal)
@@ -4687,12 +4652,12 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     col_quick1, col_quick2 = st.columns([1, 1])
     
     with col_quick1:
-        if st.button("Select All", key="page5_select_all_tickers"):
+        if st.button("Select All", key="page2_select_all_tickers"):
             st.session_state.bulk_selected_tickers = available_tickers.copy()
             st.rerun()
     
     with col_quick2:
-        if st.button("Clear Selection", key="page5_clear_all_tickers"):
+        if st.button("Clear Selection", key="page2_clear_all_tickers"):
             st.session_state.bulk_selected_tickers = []
             st.rerun()
     
@@ -4708,7 +4673,7 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
                 display_text += f" (L:{leverage}x, E:{expense}%)"
             
             # Use checkbox state directly
-            checkbox_key = f"page5_bulk_ticker_select_{i}"
+            checkbox_key = f"page2_bulk_ticker_select_{i}"
             is_checked = st.checkbox(
                 display_text, 
                 value=ticker in st.session_state.bulk_selected_tickers,
@@ -4734,7 +4699,7 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     st.markdown("---")
     st.markdown("**Leverage & Expense Ratio Settings:**")
     
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    col1, col2, col3, col4 = st.columns([1.2, 1.2, 1, 1])
 
     with col1:
         st.number_input(
@@ -4927,6 +4892,11 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
+    st.markdown("**🇨🇦 Canadian Ticker Mappings:** USD OTC → Canadian TSX (for better data quality):")
+    st.markdown("- `MDALF` → `MDA.TO` (MDA Ltd), `KRKNF` → `PNG.TO` (Kraken Robotics)")
+    st.markdown("- `CNSWF` → `TOI.TO` (Constellation Software), `TOITF` → `TOI.TO` (Constellation Software)")
+    st.markdown("- `LMGIF` → `LMN.TO` (Lumine Group), `DLMAF` → `DOL.TO` (Dollarama)")
+    st.markdown("- `FRFHF` → `FFH.TO` (Fairfax Financial)")
 
 
 with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
@@ -5001,62 +4971,60 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
             if bulk_tickers.strip():
                 # Parse tickers (split by comma or space)
                 ticker_list = []
-                for ticker in bulk_tickers.replace(',', ' ').split():
-                    ticker = ticker.strip().upper()
-                    if ticker:
+            for ticker in bulk_tickers.replace(',', ' ').split():
+                ticker = ticker.strip().upper()
+                if ticker:
                         # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
                         if ticker == 'BRK.B':
                             ticker = 'BRK-B'
                         elif ticker == 'BRK.A':
                             ticker = 'BRK-A'
                         ticker_list.append(ticker)
+            
+            if ticker_list:
+                portfolio_index = st.session_state.alloc_active_portfolio_index
+                current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
                 
-                if ticker_list:
-                    portfolio_index = st.session_state.alloc_active_portfolio_index
-                    current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
-                    
-                    # Replace tickers - new ones get 0% allocation
-                    new_stocks = []
-                    
-                    for i, ticker in enumerate(ticker_list):
-                        if i < len(current_stocks):
-                            # Use existing allocation if available
-                            new_stocks.append({
-                                'ticker': ticker,
-                                'allocation': current_stocks[i]['allocation'],
-                                'include_dividends': current_stocks[i]['include_dividends']
-                            })
-                        else:
-                            # New tickers get 0% allocation
-                            new_stocks.append({
-                                'ticker': ticker,
-                                'allocation': 0.0,
-                                'include_dividends': True
-                            })
-                    
-                    # Update the portfolio with new stocks
-                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
-                    
-                    # Update the active_portfolio reference to match session state
-                    active_portfolio['stocks'] = new_stocks
-                    
-                    # Clear any existing session state keys for individual ticker inputs to force refresh
-                    for key in list(st.session_state.keys()):
-                        if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
-                            del st.session_state[key]
-                    
+                # Replace tickers - new ones get 0% allocation
+                new_stocks = []
+                
+                for i, ticker in enumerate(ticker_list):
+                    if i < len(current_stocks):
+                        # Use existing allocation if available
+                        new_stocks.append({
+                            'ticker': ticker,
+                            'allocation': current_stocks[i]['allocation'],
+                            'include_dividends': current_stocks[i]['include_dividends']
+                        })
+                    else:
+                        # New tickers get 0% allocation
+                        new_stocks.append({
+                            'ticker': ticker,
+                            'allocation': 0.0,
+                            'include_dividends': True
+                        })
+                
+                # Update the portfolio with new stocks
+                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
+                
+                # Update the active_portfolio reference to match session state
+                active_portfolio['stocks'] = new_stocks
+                
+                # Clear any existing session state keys for individual ticker inputs to force refresh
+                for key in list(st.session_state.keys()):
+                    if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
+                        del st.session_state[key]
+                
                     st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
-                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
-                    
-                    # Force immediate rerun to refresh the UI
-                    st.rerun()
-                else:
-                    st.warning("⚠️ No valid tickers found in input.")
+                st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                
+                # Force immediate rerun to refresh the UI
+                st.rerun()
             else:
                 st.warning("⚠️ No valid tickers found in input.")
     
     with col_add:
-        if st.button("➕ Add to Existing", key="alloc_add_tickers_btn", type="primary"):
+        if st.button("➕ Add to Existing", key="alloc_add_tickers_btn", type="secondary"):
             if bulk_tickers.strip():
                 # Parse tickers (split by comma or space)
                 ticker_list = []
@@ -5085,7 +5053,7 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                                 'include_dividends': True
                             })
                     
-                    # Update the portfolio with new stocks
+                    # Update the portfolio with combined stocks
                     st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = current_stocks
                     
                     # Update the active_portfolio reference to match session state
@@ -5103,8 +5071,6 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                     st.rerun()
                 else:
                     st.warning("⚠️ No valid tickers found in input.")
-            else:
-                st.warning("⚠️ No valid tickers found in input.")
     
     with col_fetch:
         if st.button("🔍 Fetch Tickers", key="alloc_fetch_tickers_btn", type="secondary"):
@@ -5837,6 +5803,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         st.toast("**Code is running!** Starting backtest...", icon="🚀")
         
         progress_bar.progress(0, text="Starting backtest...")
+        
+        # Check for kill request
+        check_kill_request()
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         all_tickers = sorted(list(set(s['ticker'] for cfg in portfolio_list for s in cfg['stocks'] if s['ticker']) | set(cfg.get('benchmark_ticker') for cfg in portfolio_list if 'benchmark_ticker' in cfg)))
@@ -5857,6 +5826,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         data = {}
         invalid_tickers = []
         for i, t in enumerate(all_tickers):
+            # Check for kill request during data download
+            check_kill_request()
+            
             try:
                 progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
                 progress_bar.progress((i + 1) / (len(all_tickers) + len(portfolio_list)), text=progress_text)
@@ -6925,6 +6897,7 @@ if st.session_state.get('alloc_backtest_run', False):
                         current_price = info.get('currentPrice', info.get('regularMarketPrice', None))
                         if current_price is None:
                             # Try to get from historical data
+                            stock = yf.Ticker(ticker)
                             hist = stock.history(period='1d')
                             if not hist.empty:
                                 current_price = hist['Close'].iloc[-1]
