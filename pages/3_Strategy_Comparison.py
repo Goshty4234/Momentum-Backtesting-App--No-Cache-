@@ -1,4 +1,4 @@
-# NO_CACHE VERSION - All @st.cache_data decorators removed for maximum reliability
+# CACHED VERSION - Optimized with @st.cache_data decorators for better performance
 import streamlit as st
 from datetime import datetime, timedelta, time, date
 import numpy as np
@@ -594,37 +594,22 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
     except Exception as e:
         raise
     
-    # Calculate leveraged prices by applying leverage to each day's price change
-    # Start with the first price
-    leveraged_prices = pd.Series(index=price_data.index, dtype=float)
-    first_price = price_data['Close'].iloc[0]
-    if isinstance(first_price, pd.Series):
-        first_price = first_price.iloc[0]
-    leveraged_prices.iloc[0] = first_price
+    # VECTORIZED APPROACH - 100-1000x faster than for loop!
+    # Calculate daily returns using vectorized operations
+    prices = price_data['Close'].values  # Convert to NumPy array for speed
+    daily_returns = np.zeros(len(prices))
+    daily_returns[1:] = prices[1:] / prices[:-1] - 1  # Vectorized returns calculation
     
-    # Apply leverage to each day's price change (correct approach - no double compounding)
-    for i in range(1, len(price_data)):
-        # Get scalar values from the Close column
-        current_price = price_data['Close'].iloc[i]
-        previous_price = price_data['Close'].iloc[i-1]
-        
-        # Handle MultiIndex case
-        if isinstance(current_price, pd.Series):
-            current_price = current_price.iloc[0]
-        if isinstance(previous_price, pd.Series):
-            previous_price = previous_price.iloc[0]
-        
-        if pd.notna(current_price) and pd.notna(previous_price):
-            # Calculate the actual price change
-            price_change = current_price / previous_price - 1
-            
-            # Apply leverage to the price change and subtract cost drag
-            leveraged_price_change = (price_change * leverage) - daily_cost_drag.iloc[i]
-            
-            # Apply the leveraged price change to the previous leveraged price
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1] * (1 + leveraged_price_change)
-        else:
-            leveraged_prices.iloc[i] = leveraged_prices.iloc[i-1]
+    # Apply leverage to returns and subtract cost drag
+    leveraged_returns = (daily_returns * leverage) - daily_cost_drag.values
+    leveraged_returns[0] = 0  # First day has no return
+    
+    # Compound the leveraged returns to get prices (cumulative product)
+    # Using np.cumprod for vectorized compounding
+    leveraged_prices = prices[0] * np.cumprod(1 + leveraged_returns)
+    
+    # Convert back to pandas Series with proper index
+    leveraged_prices = pd.Series(leveraged_prices, index=price_data.index)
     
     # Update the Close price with leveraged prices
     leveraged_data['Close'] = leveraged_prices
@@ -638,6 +623,7 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float) -> pd.DataFr
     
     return leveraged_data
 
+@st.cache_data(show_spinner=False)
 def get_gold_complete_data(period="max"):
     """Get complete gold data from our custom gold ticker"""
     try:
@@ -934,8 +920,9 @@ def resolve_ticker_alias(ticker):
     return aliases.get(upper_ticker, upper_ticker)
 
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", auto_adjust=False):
-    """Get ticker data with proper cache keys including all parameters (NO_CACHE version)"""
+    """Cache ticker data with proper cache keys including all parameters"""
     # Resolve ticker alias if it exists
     resolved_ticker = resolve_ticker_alias(base_ticker)
     
@@ -977,8 +964,103 @@ def get_ticker_data_cached(base_ticker, leverage, expense_ratio, period="max", a
         
     return hist
 
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
+    """
+    Smart batch download with fallback to individual downloads.
+    
+    Strategy:
+    1. Try batch download (fast - 1 API call for all tickers)
+    2. If batch fails → fallback to individual downloads (reliable)
+    3. Invalid tickers are skipped, others continue
+    """
+    if not ticker_list:
+        return {}
+    
+    results = {}
+    yahoo_tickers = []
+    
+    for ticker_symbol in ticker_list:
+        # Parse ticker parameters
+        base_ticker = ticker_symbol
+        leverage = 1.0
+        expense_ratio = 0.0
+        
+        if '?L=' in ticker_symbol or '?E=' in ticker_symbol:
+            parts = ticker_symbol.split('?')
+            base_ticker = parts[0]
+            for part in parts[1:]:
+                if part.startswith('L='):
+                    try:
+                        leverage = float(part[2:])
+                    except:
+                        pass
+                elif part.startswith('E='):
+                    try:
+                        expense_ratio = float(part[2:])
+                    except:
+                        pass
+        
+        resolved = resolve_ticker_alias(base_ticker)
+        yahoo_tickers.append((ticker_symbol, resolved, leverage, expense_ratio))
+    
+    # Extract unique resolved tickers
+    resolved_list = list(set([resolved for _, resolved, _, _ in yahoo_tickers]))
+    
+    try:
+        # BATCH DOWNLOAD
+        if len(resolved_list) > 1:
+            batch_data = yf.download(
+                resolved_list,
+                period=period,
+                auto_adjust=auto_adjust,
+                progress=False,
+                show_errors=False,
+                group_by='ticker'
+            )
+            
+            if not batch_data.empty:
+                for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+                    try:
+                        if len(resolved_list) > 1:
+                            ticker_data = batch_data[resolved][['Close', 'Dividends']] if resolved in batch_data else pd.DataFrame()
+                        else:
+                            ticker_data = batch_data[['Close', 'Dividends']]
+                        
+                        if not ticker_data.empty:
+                            if leverage != 1.0 or expense_ratio != 0.0:
+                                ticker_data = apply_daily_leverage(ticker_data, leverage, expense_ratio)
+                            results[ticker_symbol] = ticker_data
+                        else:
+                            results[ticker_symbol] = pd.DataFrame()
+                    except:
+                        pass
+            else:
+                raise Exception("Batch download returned empty")
+    except Exception:
+        pass
+    
+    # FALLBACK - Individual downloads
+    for ticker_symbol, resolved, leverage, expense_ratio in yahoo_tickers:
+        if ticker_symbol not in results or results[ticker_symbol].empty:
+            try:
+                ticker = yf.Ticker(resolved)
+                hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
+                
+                if not hist.empty:
+                    if leverage != 1.0 or expense_ratio != 0.0:
+                        hist = apply_daily_leverage(hist, leverage, expense_ratio)
+                    results[ticker_symbol] = hist
+                else:
+                    results[ticker_symbol] = pd.DataFrame()
+            except:
+                results[ticker_symbol] = pd.DataFrame()
+    
+    return results
+
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data (NO_CACHE version)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage and expense ratio format like SPY?L=3?E=0.84)
@@ -3290,7 +3372,7 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Strategy Performance Comparison")
 
-st.title("Strategy Comparison (NO_CACHE)")
+st.title("Strategy Comparison")
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
 # Simple performance toggle
@@ -5022,6 +5104,12 @@ def update_global_stock_ticker(index):
                 # Convert the input value to uppercase
                 upper_val = converted_val.upper()
                 
+                # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                if upper_val == 'BRK.B':
+                    upper_val = 'BRK-B'
+                elif upper_val == 'BRK.A':
+                    upper_val = 'BRK-A'
+                
                 # Resolve alias if it exists
                 resolved_ticker = resolve_ticker_alias(upper_val)
                 
@@ -6513,7 +6601,6 @@ with col_stock_buttons2[1]:
     if st.sidebar.button("Add Ticker", on_click=add_stock_callback, use_container_width=True):
         pass
 
-
 # Calculate live total ticker allocation for global tickers
 valid_stocks = [s for s in st.session_state.strategy_comparison_global_tickers if s['ticker']]
 total_stock_allocation = sum(s['allocation'] for s in valid_stocks)
@@ -6568,7 +6655,7 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
             
             # Check if any tickers are selected
             if not selected_tickers:
-                st.warning("⚠️ Please select at least one ticker to apply leverage to.")
+                st.toast("⚠️ Please select at least one ticker to apply leverage to.")
                 return
             
             applied_count = 0
@@ -6578,6 +6665,9 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
                 # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
                 if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Parse current ticker to get base ticker
+                    base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                    
                     # Create new ticker with leverage and expense ratio
                     new_ticker = base_ticker
                     if leverage_value != 1.0:
@@ -6587,7 +6677,7 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
                     
                     # Update the ticker in the global tickers
                     st.session_state.strategy_comparison_global_tickers[i]['ticker'] = new_ticker
-                
+                    
                     # Update the session state for the text input
                     ticker_key = f"strategy_comparison_global_ticker_{i}"
                     st.session_state[ticker_key] = new_ticker
@@ -6609,7 +6699,7 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
             
             # Check if any tickers are selected
             if not selected_tickers:
-                st.warning("⚠️ Please select at least one ticker to remove leverage from.")
+                st.toast("⚠️ Please select at least one ticker to remove leverage from.")
                 return
             
             removed_count = 0
@@ -6619,6 +6709,9 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
                 # Check if this ticker should be modified
                 base_ticker, _, _ = parse_ticker_parameters(current_ticker)
                 if base_ticker in selected_tickers or current_ticker in selected_tickers:
+                    # Parse current ticker to get base ticker
+                    base_ticker, _, _ = parse_ticker_parameters(current_ticker)
+                    
                     # Update the ticker to base ticker (no leverage, no expense ratio)
                     st.session_state.strategy_comparison_global_tickers[i]['ticker'] = base_ticker
                     
@@ -6650,12 +6743,12 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
     col_quick1, col_quick2 = st.columns([1, 1])
     
     with col_quick1:
-        if st.button("Select All", key="page6_select_all_tickers", use_container_width=True):
+        if st.button("Select All", key="page3_select_all_tickers", use_container_width=True):
             st.session_state.bulk_selected_tickers = available_tickers.copy()
             st.rerun()
     
     with col_quick2:
-        if st.button("Clear", key="page6_clear_all_tickers", use_container_width=True):
+        if st.button("Clear", key="page3_clear_all_tickers", use_container_width=True):
             st.session_state.bulk_selected_tickers = []
             st.rerun()
     
@@ -6669,7 +6762,7 @@ with st.sidebar.expander("🔧 Bulk Leverage Controls", expanded=False):
                 display_text += f" (L:{leverage}x, E:{expense}%)"
             
             # Use checkbox state directly
-            checkbox_key = f"page6_bulk_ticker_select_{i}"
+            checkbox_key = f"page3_bulk_ticker_select_{i}"
             is_checked = st.checkbox(
                 display_text, 
                 value=ticker in st.session_state.bulk_selected_tickers,
@@ -6757,54 +6850,54 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
             if bulk_tickers.strip():
                 # Parse tickers (split by comma or space)
                 ticker_list = []
-            for ticker in bulk_tickers.replace(',', ' ').split():
-                ticker = ticker.strip().upper()
-                if ticker:
-                    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-                    if ticker == 'BRK.B':
-                        ticker = 'BRK-B'
-                    elif ticker == 'BRK.A':
-                        ticker = 'BRK-A'
-                    ticker_list.append(ticker)
-            
-            if ticker_list:
-                current_stocks = st.session_state.strategy_comparison_global_tickers.copy()
+                for ticker in bulk_tickers.replace(',', ' ').split():
+                    ticker = ticker.strip().upper()
+                    if ticker:
+                        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+                        if ticker == 'BRK.B':
+                            ticker = 'BRK-B'
+                        elif ticker == 'BRK.A':
+                            ticker = 'BRK-A'
+                        ticker_list.append(ticker)
                 
-                # Replace tickers - new ones get 0% allocation
-                new_stocks = []
-                
-                for i, ticker in enumerate(ticker_list):
-                    if i < len(current_stocks):
-                        # Use existing allocation if available
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': current_stocks[i]['allocation'],
-                            'include_dividends': current_stocks[i]['include_dividends']
-                        })
-                    else:
-                        # New tickers get 0% allocation
-                        new_stocks.append({
-                            'ticker': ticker,
-                            'allocation': 0.0,
-                            'include_dividends': True
-                        })
-                
-                # Update the global tickers
-                st.session_state.strategy_comparison_global_tickers = new_stocks
-                
-                # Clear any existing session state keys for individual ticker inputs to force refresh
-                for key in list(st.session_state.keys()):
-                    if key.startswith("strategy_comparison_global_ticker_") or key.startswith("strategy_comparison_global_alloc_"):
-                        del st.session_state[key]
-                
+                if ticker_list:
+                    current_stocks = st.session_state.strategy_comparison_global_tickers.copy()
+                    
+                    # Replace tickers - new ones get 0% allocation
+                    new_stocks = []
+                    
+                    for i, ticker in enumerate(ticker_list):
+                        if i < len(current_stocks):
+                            # Use existing allocation if available
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': current_stocks[i]['allocation'],
+                                'include_dividends': current_stocks[i]['include_dividends']
+                            })
+                        else:
+                            # New tickers get 0% allocation
+                            new_stocks.append({
+                                'ticker': ticker,
+                                'allocation': 0.0,
+                                'include_dividends': True
+                            })
+                    
+                    # Update the global tickers
+                    st.session_state.strategy_comparison_global_tickers = new_stocks
+                    
+                    # Clear any existing session state keys for individual ticker inputs to force refresh
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("strategy_comparison_global_ticker_") or key.startswith("strategy_comparison_global_alloc_"):
+                            del st.session_state[key]
+                    
                     st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
-                st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
-                
-                # Force immediate rerun to refresh the UI
-                st.rerun()
-            else:
+                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                    
+                    # Force immediate rerun to refresh the UI
+                    st.rerun()
+                else:
                     st.warning("⚠️ No valid tickers found in input.")
-        else:
+            else:
                 st.warning("⚠️ No valid tickers found in input.")
     
     with col_add:
@@ -8713,28 +8806,35 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
         for base_ticker in base_tickers_to_add:
             if base_ticker not in all_tickers:
                 all_tickers.append(base_ticker)
-        # Downloading data for all tickers
+        # OPTIMIZED: Batch download with smart fallback
         data = {}
         invalid_tickers = []
+        
+        progress_text = f"Downloading data for {len(all_tickers)} tickers (batch mode)..."
+        progress_bar.progress(0.1, text=progress_text)
+        
+        # Use batch download for all tickers (much faster!)
+        batch_results = get_multiple_tickers_batch(list(all_tickers), period="max", auto_adjust=False)
+        
+        # Process batch results
         for i, t in enumerate(all_tickers):
+            progress_text = f"Processing {t} ({i+1}/{len(all_tickers)})..."
+            progress_bar.progress((i + 1) / (len(all_tickers) + 1), text=progress_text)
+            
+            hist = batch_results.get(t, pd.DataFrame())
+            
+            if hist.empty:
+                invalid_tickers.append(t)
+                continue
+            
             try:
-                progress_text = f"Downloading data for {t} ({i+1}/{len(all_tickers)})..."
-                progress_bar.progress((i + 1) / (len(all_tickers) + 1), text=progress_text)
-                hist = get_ticker_data(t, period="max", auto_adjust=False)
-                if hist.empty:
-                    # No data available for ticker
-                    invalid_tickers.append(t)
-                    continue
-                
                 # Force tz-naive for hist (like Backtest_Engine.py)
                 hist = hist.copy()
                 hist.index = hist.index.tz_localize(None)
                 
                 hist["Price_change"] = hist["Close"].pct_change(fill_method=None).fillna(0)
                 data[t] = hist
-                # Data loaded successfully
             except Exception as e:
-                # Error loading ticker data
                 invalid_tickers.append(t)
         # Display invalid ticker warnings in Streamlit UI
         if invalid_tickers:
@@ -8847,7 +8947,7 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
             successful_strategies = 0
             failed_strategies = []
             
-            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability (NO_CACHE)...**")
+            st.info(f"🚀 **Processing {len(st.session_state.strategy_comparison_portfolio_configs)} strategies with enhanced reliability (CACHED)...**")
             
             # Process strategies one by one with robust error handling
             for i, cfg in enumerate(st.session_state.strategy_comparison_portfolio_configs, start=1):
