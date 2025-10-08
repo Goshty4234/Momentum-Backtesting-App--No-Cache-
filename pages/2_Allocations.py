@@ -79,7 +79,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
+        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -117,6 +117,19 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases)
+        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
+        'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends)
+        'SHTR': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^IXIC?L=-1?E=0.95',    # -1x NASDAQ Composite (price only, no dividends) - 1971+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
         
         # Synthetic Complete Tickers
         'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
@@ -294,9 +307,7 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             else:
                 leverage = float(leverage_part)
                 
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+            # Leverage validation removed - allow any leverage value for testing
         except (ValueError, IndexError) as e:
             leverage = 1.0
     
@@ -434,7 +445,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
+        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -472,6 +483,19 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases)
+        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
+        'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends)
+        'SHTR': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^IXIC?L=-1?E=0.95',    # -1x NASDAQ Composite (price only, no dividends) - 1971+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
         
         # Synthetic Complete Tickers
         'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
@@ -4488,14 +4512,21 @@ def update_stock_ticker(index):
         elif upper_val == 'BRK.A':
             upper_val = 'BRK-A'
         
-        # Keep original ticker in UI (NO conversion here)
-        resolved_ticker = upper_val
+        # CRITICAL: Resolve ticker alias BEFORE storing in portfolio config
+        resolved_ticker = resolve_ticker_alias(upper_val)
 
-        # Update the portfolio configuration with the original ticker
+        # Update the portfolio configuration with the resolved ticker (with leverage/expense)
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][index]['ticker'] = resolved_ticker
         
-        # Update the text box's state to show the resolved ticker
+        # Update the text box's state to show the resolved ticker (with leverage/expense visible)
         st.session_state[key] = resolved_ticker
+        
+        # Auto-disable dividends for negative leverage (inverse ETFs)
+        if '?L=-' in resolved_ticker:
+            st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][index]['include_dividends'] = False
+            # Also update the checkbox UI state
+            div_key = f"alloc_div_{st.session_state.alloc_active_portfolio_index}_{index}"
+            st.session_state[div_key] = False
 
     except Exception:
         # Defensive: if portfolio index or structure changed, skip silently
@@ -4848,18 +4879,42 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     
     with col4:
         st.markdown("**🔬 Synthetic Tickers**")
-        synthetic_aliases = {alias: ticker for alias, ticker in aliases.items() 
-                           if ticker in ['SPYSIM_COMPLETE', 'GOLDSIM_COMPLETE', 'GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE', 'BTC_COMPLETE', 'KMLM_COMPLETE', 'IEF_COMPLETE', 'DBMF_COMPLETE', 'TBILL_COMPLETE']}
+        synthetic_tickers = {
+            'Complete SPY Dataset (1927+)': 'SPYSIM_COMPLETE',
+            'Complete Gold Dataset (1970+)': 'GOLDSIM_COMPLETE',
+            'Complete ZROZ Dataset (1952+)': 'ZROZ_COMPLETE',
+            'Complete TLT Dataset (1952+)': 'TLT_COMPLETE',
+            'Complete IEF Dataset (1952+)': 'IEF_COMPLETE',
+            'Complete T-Bill Dataset (1952+)': 'TBILL_COMPLETE',
+            'Complete KMLM Dataset (1992+)': 'KMLM_COMPLETE',
+            'Complete DBMF Dataset (2000+)': 'DBMF_COMPLETE',
+            'Complete Bitcoin Dataset (2010+)': 'BTC_COMPLETE',
+            
+            # Leveraged & Inverse ETFs (Synthetic)
+            'Simulated TQQQ (3x QQQ)': '^IXIC?L=3?E=0.95',
+            'Simulated SPXL (3x SPY)': '^SP500TR?L=3?E=1.00',
+            'Simulated UPRO (3x SPY)': '^SP500TR?L=3?E=0.91',
+            'Simulated QLD (2x QQQ)': '^IXIC?L=2?E=0.95',
+            'Simulated SSO (2x SPY)': '^SP500TR?L=2?E=0.91',
+            'Simulated SH (-1x SPY)': '^GSPC?L=-1?E=0.89',
+            'Simulated PSQ (-1x QQQ)': '^IXIC?L=-1?E=0.95',
+            'Simulated SDS (-2x SPY)': '^GSPC?L=-2?E=0.91',
+            'Simulated QID (-2x QQQ)': '^IXIC?L=-2?E=0.95',
+            'Simulated SPXU (-3x SPY)': '^GSPC?L=-3?E=1.00',
+            'Simulated SQQQ (-3x QQQ)': '^IXIC?L=-3?E=0.95'
+        }
         
-        for alias, ticker in synthetic_aliases.items():
-            if st.button(f"➕ {alias}", key=f"add_alias_{alias}", help=f"Add {alias} → {ticker}"):
+        for name, ticker in synthetic_tickers.items():
+            if st.button(f"➕ {name}", key=f"add_synthetic_{ticker}", help=f"Add {ticker}"):
                 portfolio_index = st.session_state.alloc_active_portfolio_index
+                # Auto-disable dividends for negative leverage (inverse ETFs)
+                include_divs = False if '?L=-' in ticker else True
                 st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].append({
-                    'ticker': alias,
+                    'ticker': ticker,
                     'allocation': 0.0, 
-                    'include_dividends': True
+                    'include_dividends': include_divs
                 })
-                st.session_state.alloc_rerun_flag = True
+                st.rerun()
     
     st.markdown("---")
     
@@ -6037,7 +6092,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     v = scale_pct(val)
                     # Clamp ranges for each stat type
                     if stat_type in ["CAGR", "Volatility", "MWRR"]:
-                        if v < 0 or v > 100:
+                        if v > 100:
                             return "N/A"
                     if stat_type == "MaxDrawdown":
                         if v < -100 or v > 0:
