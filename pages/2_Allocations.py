@@ -5005,25 +5005,21 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     with col1:
         st.number_input(
             "Leverage",
-            min_value=0.1,
-            max_value=10.0,
             value=2.0,
             step=0.1,
             format="%.1f",
             key="bulk_leverage_value",
-            help="Leverage multiplier (e.g., 2.0 for 2x leverage)"
+            help="Leverage multiplier (e.g., 2.0 for 2x leverage, -3.0 for -3x inverse)"
         )
 
     with col2:
         st.number_input(
             "Expense Ratio (%)",
-            min_value=0.0,
-            max_value=10.0,
             value=1.0,
             step=0.01,
             format="%.2f",
             key="bulk_expense_ratio_value",
-            help="Annual expense ratio in percentage (e.g., 0.84 for 0.84%)"
+            help="Annual expense ratio in percentage (e.g., 0.84 for 0.84%, can be negative)"
         )
 
     with col3:
