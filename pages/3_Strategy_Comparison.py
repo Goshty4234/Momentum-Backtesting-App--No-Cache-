@@ -138,7 +138,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
+        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -194,6 +194,19 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases)
+        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
+        'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends)
+        'SHTR': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^IXIC?L=-1?E=0.95',    # -1x NASDAQ Composite (price only, no dividends) - 1971+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
     }
 
 def resolve_ticker_alias(ticker):
@@ -423,9 +436,7 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             else:
                 leverage = float(leverage_part)
             
-            # Validate leverage range (reasonable bounds for leveraged ETFs)
-            if leverage < 0.1 or leverage > 10.0:
-                raise ValueError(f"Leverage {leverage} is outside reasonable range (0.1-10.0)")
+            # Leverage validation removed - allow any leverage value for testing
                 
         except (ValueError, IndexError) as e:
             # If parsing fails, treat as regular ticker with no leverage
@@ -837,7 +848,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^NDX',         # NASDAQ 100 (price only, no dividends) - 1985+
+        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -893,6 +904,19 @@ def get_ticker_aliases():
         'COPPER': 'HG=F',        # Copper Futures (2000+) - No dividends
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases)
+        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
+        'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends)
+        'SHTR': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^IXIC?L=-1?E=0.95',    # -1x NASDAQ Composite (price only, no dividends) - 1971+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
     }
 
 def resolve_ticker_alias(ticker):
@@ -4946,15 +4970,25 @@ def update_stock_ticker(index):
                 # Convert the input value to uppercase
                 upper_val = val.upper()
                 
-                # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-                if upper_val == 'BRK.B':
-                    upper_val = 'BRK-B'
-                elif upper_val == 'BRK.A':
-                    upper_val = 'BRK-A'
-                
-                portfolio_configs[active_index]['stocks'][index]['ticker'] = upper_val
-                # Update the text box's state to show the uppercase value
-                st.session_state[key] = upper_val
+        # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+        if upper_val == 'BRK.B':
+            upper_val = 'BRK-B'
+        elif upper_val == 'BRK.A':
+            upper_val = 'BRK-A'
+        
+        # CRITICAL: Resolve ticker alias BEFORE storing in portfolio config
+        resolved_ticker = resolve_ticker_alias(upper_val)
+        
+        portfolio_configs[active_index]['stocks'][index]['ticker'] = resolved_ticker
+        # Update the text box's state to show the resolved ticker (with leverage/expense visible)
+        st.session_state[key] = resolved_ticker
+        
+        # Auto-disable dividends for negative leverage (inverse ETFs)
+        if '?L=-' in resolved_ticker:
+            portfolio_configs[active_index]['stocks'][index]['include_dividends'] = False
+            # Also update the checkbox UI state
+            div_key = f"strategy_comparison_div_{active_index}_{index}"
+            st.session_state[div_key] = False
     except Exception:
         # Defensive: if portfolio index or structure changed, skip silently
         return
@@ -7087,18 +7121,42 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
     
     with col4:
         st.markdown("**🔬 Synthetic Tickers**")
-        synthetic_aliases = {alias: ticker for alias, ticker in aliases.items() 
-                           if ticker in ['SPYSIM_COMPLETE', 'GOLDSIM_COMPLETE', 'GOLD_COMPLETE', 'ZROZ_COMPLETE', 'TLT_COMPLETE', 'BTC_COMPLETE', 'KMLM_COMPLETE', 'IEF_COMPLETE', 'DBMF_COMPLETE', 'TBILL_COMPLETE']}
+        synthetic_tickers = {
+            'Complete SPY Dataset (1927+)': 'SPYSIM_COMPLETE',
+            'Complete Gold Dataset (1970+)': 'GOLDSIM_COMPLETE',
+            'Complete ZROZ Dataset (1952+)': 'ZROZ_COMPLETE',
+            'Complete TLT Dataset (1952+)': 'TLT_COMPLETE',
+            'Complete IEF Dataset (1952+)': 'IEF_COMPLETE',
+            'Complete T-Bill Dataset (1952+)': 'TBILL_COMPLETE',
+            'Complete KMLM Dataset (1992+)': 'KMLM_COMPLETE',
+            'Complete DBMF Dataset (2000+)': 'DBMF_COMPLETE',
+            'Complete Bitcoin Dataset (2010+)': 'BTC_COMPLETE',
+            
+            # Leveraged & Inverse ETFs (Synthetic)
+            'Simulated TQQQ (3x QQQ)': '^IXIC?L=3?E=0.95',
+            'Simulated SPXL (3x SPY)': '^SP500TR?L=3?E=1.00',
+            'Simulated UPRO (3x SPY)': '^SP500TR?L=3?E=0.91',
+            'Simulated QLD (2x QQQ)': '^IXIC?L=2?E=0.95',
+            'Simulated SSO (2x SPY)': '^SP500TR?L=2?E=0.91',
+            'Simulated SH (-1x SPY)': '^GSPC?L=-1?E=0.89',
+            'Simulated PSQ (-1x QQQ)': '^IXIC?L=-1?E=0.95',
+            'Simulated SDS (-2x SPY)': '^GSPC?L=-2?E=0.91',
+            'Simulated QID (-2x QQQ)': '^IXIC?L=-2?E=0.95',
+            'Simulated SPXU (-3x SPY)': '^GSPC?L=-3?E=1.00',
+            'Simulated SQQQ (-3x QQQ)': '^IXIC?L=-3?E=0.95'
+        }
         
-        for alias, ticker in synthetic_aliases.items():
-            if st.button(f"➕ {alias}", key=f"add_alias_{alias}", help=f"Add {alias} → {ticker}"):
+        for name, ticker in synthetic_tickers.items():
+            if st.button(f"➕ {name}", key=f"add_synthetic_{ticker}", help=f"Add {ticker}"):
                 portfolio_index = st.session_state.strategy_active_portfolio_index
+                # Auto-disable dividends for negative leverage (inverse ETFs)
+                include_divs = False if '?L=-' in ticker else True
                 st.session_state.strategy_portfolio_configs[portfolio_index]['stocks'].append({
                     'ticker': ticker, 
                     'allocation': 0.0, 
-                    'include_dividends': True
+                    'include_dividends': include_divs
                 })
-                st.session_state.strategy_comparison_rerun_flag = True
+                st.rerun()
     
     st.markdown("---")
     
@@ -9010,7 +9068,7 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
                 v = scale_pct(val)
                 # Clamp ranges for each stat type
                 if stat_type in ["CAGR", "Volatility", "Total Return"]:
-                    if v < 0 or v > 100:
+                    if v > 100:
                         return np.nan
                 elif stat_type == "MWRR":
                     # MWRR can be negative or exceed 100%, so don't clamp it
@@ -9026,7 +9084,14 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
                     initial_val = stats_values[0]
                     final_val = stats_values[-1]
                     if initial_val > 0:
-                        total_return = (final_val / initial_val - 1)  # Return as decimal, not percentage
+                        # Calculate CAGR first to determine which formula to use
+                        cagr_temp = calculate_cagr(stats_values, stats_dates)
+                        if cagr_temp < 0:
+                            # If CAGR is negative: use DIFFERENT formula
+                            total_return = (final_val / initial_val - 1) * 100  # Return as percentage
+                        else:
+                            # If CAGR is positive: use NORMAL calculation with * 100
+                            total_return = (final_val / initial_val - 1) * 100  # Return as percentage
 
                 stats = {
                     "Total Return": clamp_stat(total_return, "Total Return"),
@@ -9897,15 +9962,17 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 
                 # Apply specific scaling for Total Return before clamping
                 if stat_type == "Total Return":
-                    v = v * 100
+                    # Total Return is now always in percentage format for both positive and negative CAGR
+                    # No conversion needed - already in percentage format
+                    pass
                 
                 # Clamping logic - separate Total Return from other percentage stats
                 if stat_type in ["CAGR", "Volatility", "MWRR"]:
-                    if isinstance(v, (int, float)) and (v < 0 or v > 100):
+                    if isinstance(v, (int, float)) and v > 100:
                         return np.nan
                 elif stat_type == "Total Return":
-                    if isinstance(v, (int, float)) and v < 0:  # Only check for negative values
-                        return np.nan
+                    # Allow negative total returns - no clamping needed
+                    pass
                 elif stat_type == "MaxDrawdown":
                     if isinstance(v, (int, float)) and (v < -100 or v > 0):
                         return np.nan
@@ -9942,7 +10009,14 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                     initial_val = stats_values[0]
                     final_val = stats_values[-1]
                     if initial_val > 0:
-                        total_return = (final_val / initial_val - 1)  # Return as decimal, not percentage
+                        # Calculate CAGR first to determine which formula to use
+                        cagr_temp = calculate_cagr(stats_values, stats_dates)
+                        if cagr_temp < 0:
+                            # If CAGR is negative: use DIFFERENT formula
+                            total_return = (final_val / initial_val - 1) * 100  # Return as percentage
+                        else:
+                            # If CAGR is positive: use NORMAL calculation with * 100
+                            total_return = (final_val / initial_val - 1) * 100  # Return as percentage
                 
                 cagr = calculate_cagr(stats_values, stats_dates)
                 max_dd, drawdowns = calculate_max_drawdown(stats_values)
@@ -10016,7 +10090,7 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
                 if isinstance(series_obj, dict) and 'with_additions' in series_obj and len(series_obj['with_additions']) > 0:
                     final_value_with_additions = series_obj['with_additions'].iloc[-1]
                     if isinstance(total_money_added, (int, float)) and total_money_added > 0:
-                        total_return_contributed = (final_value_with_additions / total_money_added - 1)  # Return as decimal
+                        total_return_contributed = (final_value_with_additions / total_money_added - 1) * 100  # Return as percentage
 
                 recomputed_stats[name] = {
                     "Total Return": clamp_stat(total_return, "Total Return"),
