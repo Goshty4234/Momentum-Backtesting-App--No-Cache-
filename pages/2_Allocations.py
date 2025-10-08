@@ -1,4 +1,4 @@
-# NO_CACHE VERSION - All data loading @st.cache_data decorators removed for maximum data freshness
+# CACHED VERSION - Optimized with @st.cache_data decorators for better performance
 import streamlit as st
 import datetime
 from datetime import timedelta, time
@@ -398,9 +398,7 @@ def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
             else:
                 expense_ratio = float(expense_part)
                 
-            # Validate expense ratio range (reasonable bounds for ETFs)
-            if expense_ratio < 0.0 or expense_ratio > 10.0:
-                raise ValueError(f"Expense ratio {expense_ratio} is outside reasonable range (0.0-10.0)")
+            # Expense ratio validation removed - allow any expense ratio value for testing
         except (ValueError, IndexError) as e:
             expense_ratio = 0.0
             
@@ -510,6 +508,7 @@ def apply_leverage_to_hist_data(hist_data, leverage):
     
     return leveraged_data
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False):
     """Get ticker data specifically for valuation tables
     
@@ -575,6 +574,7 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
         st.error(f"Error fetching data for {ticker_symbol}: {str(e)}")
         return None
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
     Smart batch download with fallback to individual downloads.
@@ -716,13 +716,14 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     
     return results
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data (NO CACHE for maximum freshness)
+    """Cache ticker data to improve performance across multiple tabs
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period
-        auto_adjust: Auto-adjust setting
+        period: Data period (used in cache key to prevent conflicts)
+        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
     """
     try:
         # Parse leverage from ticker symbol
@@ -971,8 +972,9 @@ def get_tbill_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_ticker_info(ticker_symbol):
-    """Get ticker info (NO CACHE for maximum freshness)
+    """Cache ticker info to improve performance across multiple tabs
     
     This function handles two special cases:
     1. Canadian tickers: Converts USD OTC to Canadian exchange (CNSWF → CSU.TO)
@@ -997,13 +999,14 @@ def get_ticker_info(ticker_symbol):
     except Exception:
         return {}
 
+@st.cache_data(ttl=7200, show_spinner=False)
 def get_multiple_tickers_info_batch(ticker_list):
     """
     Batch download ticker info for multiple tickers to improve performance.
-    NO CACHE version for maximum data freshness.
     
     This is much faster than calling get_ticker_info() one by one.
-    Uses threading to fetch info for all tickers in parallel.
+    Uses yf.download() to get basic price data in one call, then fetches
+    individual info only for tickers that need detailed stats.
     
     Args:
         ticker_list: List of ticker symbols
@@ -1235,7 +1238,7 @@ if 'alloc_portfolio_configs' not in st.session_state:
               'start_date_user': None,
               'end_date_user': None,
               'start_with': 'oldest',
-              'use_momentum': True,
+            'use_momentum': True,
             'momentum_strategy': 'Classic',
             'negative_momentum_strategy': 'Cash',
             'momentum_windows': [
@@ -1436,8 +1439,8 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Portfolio Allocation Analysis")
 
-st.title("Portfolio Allocations (NO_CACHE)")
-st.markdown("**NO_CACHE VERSION** - All data is fetched fresh (no caching). Use the forms below to configure and run backtests to obtain allocation insights.")
+st.title("Portfolio Allocations")
+st.markdown("Use the forms below to configure and run backtests to obtain allocation insights.")
 
 # Portfolio Name
 if 'alloc_portfolio_name' not in st.session_state:
@@ -3285,8 +3288,8 @@ def single_backtest(config, sim_index, reindexed_data):
     vol_window_days = config.get('vol_window_days', 365)
     exclude_days_vol = config.get('exclude_days_vol', 30)
     current_data = {t: reindexed_data[t] for t in tickers + [benchmark_ticker] if t in reindexed_data}
-    # Respect start_with setting: 'all' (default) or 'oldest' (add assets over time)
-    start_with = config.get('start_with', 'all')
+    # Respect start_with setting: 'oldest' (default) or 'all' (wait for all assets)
+    start_with = config.get('start_with', 'oldest')
     # Precompute first-valid dates for each ticker to decide availability
     start_dates_config = {}
     for t in tickers:
@@ -3770,13 +3773,8 @@ def single_backtest(config, sim_index, reindexed_data):
                                 div = df.loc[future_dates[0], "Dividends"]
                 var = df.loc[date, "Price_change"] if date in df.index else 0.0
                 
-                # Apply expense ratio drag if ticker has expense ratio parameter
-                if "?E=" in t:
-                    base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                    if expense_ratio > 0.0:
-                        # Apply daily expense drag: subtract daily expense ratio
-                        daily_expense_drag = expense_ratio / 100.0 / 365.25
-                        var = var - daily_expense_drag
+                # Expense ratio is already applied in apply_daily_leverage() when data is fetched
+                # No need to re-apply it here (would be double application + slow loop)
                 
                 if include_dividends.get(t, False):
                     # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
@@ -3835,13 +3833,8 @@ def single_backtest(config, sim_index, reindexed_data):
                             div = df.loc[future_dates[0], "Dividends"]
             var = df.loc[date, "Price_change"] if date in df.index else 0.0
             
-            # Apply expense ratio drag if ticker has expense ratio parameter
-            if "?E=" in t:
-                base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                if expense_ratio > 0.0:
-                    # Apply daily expense drag: subtract daily expense ratio
-                    daily_expense_drag = expense_ratio / 100.0 / 365.25
-                    var = var - daily_expense_drag
+            # Expense ratio is already applied in apply_daily_leverage() when data is fetched
+            # No need to re-apply it here (would be double application + slow loop)
             
             if include_dividends.get(t, False):
                 # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
@@ -4863,7 +4856,7 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
                     new_ticker = base_ticker
                     if leverage_value != 1.0:
                         new_ticker += f"?L={leverage_value}"
-                    if expense_ratio_value > 0.0:
+                    if expense_ratio_value != 0.0:
                         new_ticker += f"?E={expense_ratio_value}"
                     
                     # Update the ticker in the portfolio
@@ -4872,6 +4865,13 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
                     # Update the session state for the text input
                     ticker_key = f"alloc_ticker_{portfolio_index}_{i}"
                     st.session_state[ticker_key] = new_ticker
+                    
+                    # If leverage is negative (short position), uncheck dividends checkbox
+                    # User can manually re-check it if desired
+                    if leverage_value < 0:
+                        st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'][i]['include_dividends'] = False
+                        div_key = f"alloc_div_{portfolio_index}_{i}"
+                        st.session_state[div_key] = False
                     
                     applied_count += 1
             
@@ -5253,55 +5253,55 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
             if bulk_tickers.strip():
                 # Parse tickers (split by comma or space)
                 ticker_list = []
-                for ticker in bulk_tickers.replace(',', ' ').split():
-                    ticker = ticker.strip().upper()
-                    if ticker:
+            for ticker in bulk_tickers.replace(',', ' ').split():
+                ticker = ticker.strip().upper()
+                if ticker:
                         # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
                         if ticker == 'BRK.B':
                             ticker = 'BRK-B'
                         elif ticker == 'BRK.A':
                             ticker = 'BRK-A'
                         ticker_list.append(ticker)
+            
+            if ticker_list:
+                portfolio_index = st.session_state.alloc_active_portfolio_index
+                current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
                 
-                if ticker_list:
-                    portfolio_index = st.session_state.alloc_active_portfolio_index
-                    current_stocks = st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].copy()
-                    
-                    # Replace tickers - new ones get 0% allocation
-                    new_stocks = []
-                    
-                    for i, ticker in enumerate(ticker_list):
-                        if i < len(current_stocks):
-                            # Use existing allocation if available
-                            new_stocks.append({
-                                'ticker': ticker,
-                                'allocation': current_stocks[i]['allocation'],
-                                'include_dividends': current_stocks[i]['include_dividends']
-                            })
-                        else:
-                            # New tickers get 0% allocation
-                            new_stocks.append({
-                                'ticker': ticker,
-                                'allocation': 0.0,
-                                'include_dividends': True
-                            })
-                    
-                    # Update the portfolio with new stocks
-                    st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
-                    
-                    # Update the active_portfolio reference to match session state
-                    active_portfolio['stocks'] = new_stocks
-                    
-                    # Clear any existing session state keys for individual ticker inputs to force refresh
-                    for key in list(st.session_state.keys()):
-                        if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
-                            del st.session_state[key]
-                    
+                # Replace tickers - new ones get 0% allocation
+                new_stocks = []
+                
+                for i, ticker in enumerate(ticker_list):
+                    if i < len(current_stocks):
+                        # Use existing allocation if available
+                        new_stocks.append({
+                            'ticker': ticker,
+                            'allocation': current_stocks[i]['allocation'],
+                            'include_dividends': current_stocks[i]['include_dividends']
+                        })
+                    else:
+                        # New tickers get 0% allocation
+                        new_stocks.append({
+                            'ticker': ticker,
+                            'allocation': 0.0,
+                            'include_dividends': True
+                        })
+                
+                # Update the portfolio with new stocks
+                st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'] = new_stocks
+                
+                # Update the active_portfolio reference to match session state
+                active_portfolio['stocks'] = new_stocks
+                
+                # Clear any existing session state keys for individual ticker inputs to force refresh
+                for key in list(st.session_state.keys()):
+                    if key.startswith(f"alloc_ticker_{portfolio_index}_") or key.startswith(f"alloc_input_alloc_{portfolio_index}_"):
+                        del st.session_state[key]
+                
                     st.success(f"✅ Replaced all tickers with: {', '.join(ticker_list)}")
-                    st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
-                    
-                    # Force immediate rerun to refresh the UI
-                    st.rerun()
+                st.info("💡 **Note:** Existing allocations preserved. Adjust allocations manually if needed.")
+                
+                # Force immediate rerun to refresh the UI
+                st.rerun()
             else:
                 st.warning("⚠️ No valid tickers found in input.")
     
@@ -5351,8 +5351,8 @@ with st.expander("📝 Bulk Ticker Input", expanded=False):
                     
                     # Force immediate rerun to refresh the UI
                     st.rerun()
-            else:
-                st.warning("⚠️ No valid tickers found in input.")
+                else:
+                    st.warning("⚠️ No valid tickers found in input.")
     
     with col_fetch:
         if st.button("🔍 Fetch Tickers", key="alloc_fetch_tickers_btn", type="secondary"):
@@ -7738,21 +7738,41 @@ if st.session_state.get('alloc_backtest_run', False):
                                 'Allocation (%)': sector_data.values
                             }).round(2)
                             
-                            # Display table with fixed height container
-                            with st.container():
-                                st.dataframe(sector_df, use_container_width=True, hide_index=True, height=300)
+                            # Display table
+                            st.dataframe(sector_df, use_container_width=True, hide_index=True)
                             
-                            # Create pie chart for sectors with fixed height container
+                            # Create pie chart for sectors (filter out 0% allocations)
                             if len(sector_data) > 0:
-                                with st.container():
+                                # Filter out sectors with 0% allocation
+                                sector_data_filtered = sector_data[sector_data > 0]
+                                
+                                if len(sector_data_filtered) > 0:
                                     fig_sector = px.pie(
-                                        values=sector_data.values,
-                                        names=sector_data.index,
+                                        values=sector_data_filtered.values,
+                                        names=sector_data_filtered.index,
                                         title="Sector Distribution",
-                                        color_discrete_sequence=px.colors.qualitative.Set3
+                                        color_discrete_sequence=px.colors.sequential.Viridis,
+                                        hole=0.4  # Donut chart for modern look
                                     )
-                                    fig_sector.update_traces(textposition='inside', textinfo='percent+label')
-                                    fig_sector.update_layout(height=400, showlegend=True, margin=dict(t=50, b=50))
+                                    fig_sector.update_traces(
+                                        textposition='outside',
+                                        textinfo='percent+label',
+                                        textfont_size=12,
+                                        marker=dict(line=dict(color='white', width=2))
+                                    )
+                                    fig_sector.update_layout(
+                                        height=500,
+                                        showlegend=True,
+                                        legend=dict(
+                                            orientation="v",
+                                            yanchor="middle",
+                                            y=0.5,
+                                            xanchor="left",
+                                            x=1.05
+                                        ),
+                                        font=dict(size=12),
+                                        title_font_size=16
+                                    )
                                     st.plotly_chart(fig_sector, use_container_width=True)
                     
                     with col2:
@@ -7766,21 +7786,41 @@ if st.session_state.get('alloc_backtest_run', False):
                                 'Allocation (%)': industry_data.values
                             }).round(2)
                             
-                            # Display table with fixed height container
-                            with st.container():
-                                st.dataframe(industry_df, use_container_width=True, hide_index=True, height=300)
+                            # Display table
+                            st.dataframe(industry_df, use_container_width=True, hide_index=True)
                             
-                            # Create pie chart for industries with fixed height container
+                            # Create pie chart for industries (filter out 0% allocations)
                             if len(industry_data) > 0:
-                                with st.container():
+                                # Filter out industries with 0% allocation
+                                industry_data_filtered = industry_data[industry_data > 0]
+                                
+                                if len(industry_data_filtered) > 0:
                                     fig_industry = px.pie(
-                                        values=industry_data.values,
-                                        names=industry_data.index,
+                                        values=industry_data_filtered.values,
+                                        names=industry_data_filtered.index,
                                         title="Industry Distribution",
-                                        color_discrete_sequence=px.colors.qualitative.Pastel
+                                        color_discrete_sequence=px.colors.sequential.Plasma,
+                                        hole=0.4  # Donut chart for modern look
                                     )
-                                    fig_industry.update_traces(textposition='inside', textinfo='percent+label')
-                                    fig_industry.update_layout(height=400, showlegend=True, margin=dict(t=50, b=50))
+                                    fig_industry.update_traces(
+                                        textposition='outside',
+                                        textinfo='percent+label',
+                                        textfont_size=12,
+                                        marker=dict(line=dict(color='white', width=2))
+                                    )
+                                    fig_industry.update_layout(
+                                        height=500,
+                                        showlegend=True,
+                                        legend=dict(
+                                            orientation="v",
+                                            yanchor="middle",
+                                            y=0.5,
+                                            xanchor="left",
+                                            x=1.05
+                                        ),
+                                        font=dict(size=12),
+                                        title_font_size=16
+                                    )
                                     st.plotly_chart(fig_industry, use_container_width=True)
                     
                     # Portfolio risk metrics
