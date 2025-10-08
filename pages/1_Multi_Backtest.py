@@ -3467,6 +3467,10 @@ st.title("Multi-Portfolio Backtest (NO_CACHE)")
 
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
+# Performance tip
+if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_ran:
+    st.info("💡 **Performance Tip:** After viewing results, click **'Clear Output & Results'** in the sidebar for faster portfolio editing.")
+
 # Performance Settings
 col1, col2 = st.columns([3, 1])
 with col1:
@@ -8798,7 +8802,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 "exclude": 30
             })
             st.rerun()
-        
+            
         # Initialize beta window configs if not exists
         if f"beta_window_configs_{portfolio_index}" not in st.session_state:
             st.session_state[f"beta_window_configs_{portfolio_index}"] = [
@@ -8838,19 +8842,19 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             with col_beta1:
                 beta_lookback = st.number_input(f"Beta Lookback {config_idx + 1}", min_value=1, value=beta_config["lookback"], key=f"beta_lookback_{portfolio_index}_{config_idx}", label_visibility="collapsed")
                 beta_config["lookback"] = beta_lookback
-            with col_beta2:
-                beta_exclude = st.number_input(f"Beta Exclude {config_idx + 1}", min_value=0, value=beta_config["exclude"], key=f"beta_exclude_{portfolio_index}_{config_idx}", label_visibility="collapsed")
-                beta_config["exclude"] = beta_exclude
+        with col_beta2:
+            beta_exclude = st.number_input(f"Beta Exclude {config_idx + 1}", min_value=0, value=beta_config["exclude"], key=f"beta_exclude_{portfolio_index}_{config_idx}", label_visibility="collapsed")
+            beta_config["exclude"] = beta_exclude
             
-            # Custom text input for this beta configuration
-            beta_custom_text = st.text_input(
-                f"Custom Text for Beta Config {config_idx + 1} (optional)", 
-                key=f"beta_custom_text_{portfolio_index}_{config_idx}",
-                placeholder="e.g., MyBeta, Risk1, etc.",
-                help="This text will be added to the end of portfolio names for this beta configuration"
-            )
-            
-            st.markdown("---")
+        # Custom text input for this beta configuration
+        beta_custom_text = st.text_input(
+            f"Custom Text for Beta Config {config_idx + 1} (optional)", 
+            key=f"beta_custom_text_{portfolio_index}_{config_idx}",
+            placeholder="e.g., MyBeta, Risk1, etc.",
+            help="This text will be added to the end of portfolio names for this beta configuration"
+        )
+        
+        st.markdown("---")
         
         # Collect custom texts for beta configurations
         beta_custom_texts = []
@@ -8877,7 +8881,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 "exclude": 30
             })
             st.rerun()
-        
+            
         # Initialize volatility window configs if not exists
         if f"volatility_window_configs_{portfolio_index}" not in st.session_state:
             st.session_state[f"volatility_window_configs_{portfolio_index}"] = [
@@ -9199,19 +9203,19 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         elif variant.get('momentum_strategy') == 'Relative Momentum':
                             clear_name_parts.append("Relative")
                         
-                        # Negative strategy with "and" connector
-                        if variant.get('negative_momentum_strategy') == 'Cash':
-                            clear_name_parts.append("and Cash")
-                        elif variant.get('negative_momentum_strategy') == 'Equal weight':
-                            clear_name_parts.append("and Equal Weight")
-                        elif variant.get('negative_momentum_strategy') == 'Relative momentum':
-                            clear_name_parts.append("and Relative")
-                        
-                        # Beta and Volatility (only show when True, omit when False)
-                        if variant.get('calc_beta', False):
-                            clear_name_parts.append("- Beta")
-                        if variant.get('calc_volatility', False):
-                            clear_name_parts.append("- Volatility")
+                            # Negative strategy with "and" connector
+                            if variant.get('negative_momentum_strategy') == 'Cash':
+                                clear_name_parts.append("and Cash")
+                            elif variant.get('negative_momentum_strategy') == 'Equal weight':
+                                clear_name_parts.append("and Equal Weight")
+                            elif variant.get('negative_momentum_strategy') == 'Relative momentum':
+                                clear_name_parts.append("and Relative")
+                            
+                            # Beta and Volatility (only show when True, omit when False)
+                            if variant.get('calc_beta', False):
+                                clear_name_parts.append("- Beta")
+                            if variant.get('calc_volatility', False):
+                                clear_name_parts.append("- Volatility")
                     else:
                         clear_name_parts.append("No Momentum")
                         # Stop here - no beta/volatility for non-momentum portfolios
@@ -9712,25 +9716,21 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     with col1:
         st.number_input(
             "Leverage",
-            min_value=0.1,
-            max_value=10.0,
             value=2.0,
             step=0.1,
             format="%.1f",
             key="bulk_leverage_value",
-            help="Leverage multiplier (e.g., 2.0 for 2x leverage)"
+            help="Leverage multiplier (e.g., 2.0 for 2x leverage, -3.0 for -3x inverse)"
         )
 
     with col2:
         st.number_input(
             "Expense Ratio (%)",
-            min_value=0.0,
-            max_value=10.0,
             value=1.0,
             step=0.01,
             format="%.2f",
             key="bulk_expense_ratio_value",
-            help="Annual expense ratio in percentage (e.g., 0.84 for 0.84%)"
+            help="Annual expense ratio in percentage (e.g., 0.84 for 0.84%, can be negative)"
         )
 
     with col3:
