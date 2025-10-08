@@ -1,8 +1,4 @@
-# CACHED VERSION - Optimized with @st.cache_data decorators for better performance
-# Performance Enhancements:
-# - @st.cache_data on ticker data functions (24h TTL) → Reduced API calls
-# - Parallel processing enabled by default for 3+ portfolios → 2-3x speedup
-# - TOTAL EXPECTED SPEEDUP: 2-3x faster
+# NO_CACHE VERSION - All @st.cache_data decorators have been removed for reliability
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -615,7 +611,6 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
     return base_ticker, leverage
 
-@st.cache_data(show_spinner=False)
 def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_ratio: float = 0.0) -> pd.DataFrame:
     """
     Apply daily leverage multiplier and expense ratio to price data, simulating leveraged ETF behavior.
@@ -785,7 +780,7 @@ def resolve_ticker_alias(ticker):
     
     return aliases.get(upper_ticker, upper_ticker)
 
-@st.cache_data(show_spinner=False)
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def generate_zero_return_data(period="max"):
     """Generate synthetic zero return data for ZEROX ticker"""
     try:
@@ -812,7 +807,7 @@ def generate_zero_return_data(period="max"):
         }, index=dates)
         return zero_data
 
-@st.cache_data(show_spinner=False)
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def get_gold_complete_data(period="max"):
     """Get complete gold data from historical CSV and GLD"""
     try:
@@ -1102,7 +1097,6 @@ def get_goldsim_complete_data(period="max"):
         except:
             return pd.DataFrame()
 
-@st.cache_data(ttl=7200, show_spinner=False)
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
     Smart batch download with fallback to individual downloads.
@@ -1167,7 +1161,6 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                 period=period,
                 auto_adjust=auto_adjust,
                 progress=False,
-                show_errors=False,
                 group_by='ticker'
             )
             
@@ -1218,9 +1211,8 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     
     return results
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
-    """Get ticker data (CACHED version - 24 hours TTL - Optimized for backtesting)
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -1292,9 +1284,9 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=86400, show_spinner=False)
+# @st.cache_data(ttl=300)  # Cache for 5 minutes - DISABLED for parallel processing
 def get_ticker_info(ticker_symbol):
-    """Cache ticker info to improve performance across multiple tabs - 24 hours TTL"""
+    """Cache ticker info to improve performance across multiple tabs"""
     try:
         # Parse leverage from ticker symbol
         base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
@@ -3568,17 +3560,21 @@ st.markdown("""
 
 st.set_page_config(layout="wide", page_title="Multi-Portfolio Analysis")
 
-st.title("Multi-Portfolio Backtest")
+st.title("Multi-Portfolio Backtest (NO_CACHE)")
 
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
+
+# Performance tip
+if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_ran:
+    st.info("💡 **Performance Tip:** After viewing results, click **'Clear Output & Results'** in the sidebar for faster portfolio editing.")
 
 # Performance Settings
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("### Performance Settings")
 with col2:
-    use_parallel = st.checkbox("Parallel Processing", value=True,
-                              help="✅ Process multiple portfolios simultaneously using threading. Automatically enabled for 3+ portfolios for better performance.")
+    use_parallel = st.checkbox("Parallel Processing", value=False,
+                              help="⚠️ Process multiple portfolios simultaneously using threading. May help with 3+ portfolios but can be slower due to Streamlit overhead. Try both modes to see what's faster for your setup.")
     st.session_state.use_parallel_processing = use_parallel
 
 # Portfolio name is handled in the main UI below
@@ -3699,9 +3695,8 @@ def get_portfolio_value(portfolio_name):
                     portfolio_value = float(latest_value)
     return portfolio_value
 
-@st.cache_data(show_spinner=False)
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio (CACHED version)"""
+    """Create allocation evolution chart for a portfolio (NO_CACHE for reliability)"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3776,9 +3771,8 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
         st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
         return None
 
-@st.cache_data(show_spinner=False)
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame (CACHED version)"""
+    """Process allocation data into a clean DataFrame (NO_CACHE for reliability)"""
     try:
         # Ensure all tickers (including CASH) are present in all dates for proper DataFrame creation
         all_tickers = set()
@@ -3817,7 +3811,7 @@ def process_allocation_dataframe(portfolio_name, allocation_data):
         return None, []
 
 def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
-    """Create pie chart for portfolio allocation (CACHED version)"""
+    """Create pie chart for portfolio allocation (NO_CACHE version)"""
     try:
         if not allocation_data:
             return None
@@ -4379,82 +4373,11 @@ def fast_momentum_calculation(returns, window):
         momentum[i] = np.sum(returns[i-window+1:i+1])
     return momentum
 
-def make_config_hashable(config):
-    """Convert config dict to hashable tuple for caching"""
-    import json
-    try:
-        # Convert config to JSON string (hashable)
-        # Remove non-hashable items and convert to tuple
-        config_copy = {}
-        for key, value in config.items():
-            if key == 'stocks':
-                # Convert stocks list to tuple of tuples
-                config_copy[key] = tuple(tuple(sorted(s.items())) for s in value)
-            elif isinstance(value, list):
-                # Convert lists to tuples
-                if value and isinstance(value[0], dict):
-                    config_copy[key] = tuple(tuple(sorted(d.items())) for d in value)
-                else:
-                    config_copy[key] = tuple(value)
-            elif isinstance(value, dict):
-                config_copy[key] = tuple(sorted(value.items()))
-            else:
-                config_copy[key] = value
-        return tuple(sorted(config_copy.items()))
-    except:
-        # Fallback: use JSON string
-        return json.dumps(config, sort_keys=True, default=str)
-
-def make_data_hash(reindexed_data):
-    """Create a hash of reindexed_data for caching"""
-    try:
-        # Create hash based on tickers and data shapes
-        hash_parts = []
-        for ticker in sorted(reindexed_data.keys()):
-            df = reindexed_data[ticker]
-            if hasattr(df, 'shape'):
-                hash_parts.append(f"{ticker}_{df.shape[0]}_{df.shape[1]}")
-        return "_".join(hash_parts)
-    except:
-        return str(len(reindexed_data))
-
 @lru_cache(maxsize=128)
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=1000)
-def cached_momentum_calculation(ticker, start_date_str, end_date_str, lookback_days, exclude_days, reindexed_data_hash):
-    """
-    Cache momentum calculations to avoid recomputation.
-    Uses string dates and hash for caching.
-    Returns momentum return value.
-    """
-    try:
-        # This would need the actual data passed in or accessed globally
-        # For now, this is a placeholder that returns None
-        # The actual calculation happens inline in single_backtest
-        return None
-    except:
-        return None
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=500)
-def cached_beta_calculation(ticker, benchmark, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
-    """
-    Cache beta calculations to avoid recomputation.
-    Returns beta value.
-    """
-    try:
-        return None  # Placeholder
-    except:
-        return None
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=500)
-def cached_volatility_calculation(ticker, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
-    """
-    Cache volatility calculations to avoid recomputation.
-    Returns volatility value (annualized).
-    """
-    try:
-        return None  # Placeholder
-    except:
-        return None
+def cached_momentum_calculation(ticker_data_hash, window):
+    """Cache momentum calculations to avoid recomputation"""
+    # This is a placeholder - actual implementation would hash the data
+    return None
 
 # -----------------------
 # Single-backtest core (adapted from your code, robust)
@@ -8998,7 +8921,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 "exclude": 30
             })
             st.rerun()
-        
+            
         # Initialize beta window configs if not exists
         if f"beta_window_configs_{portfolio_index}" not in st.session_state:
             st.session_state[f"beta_window_configs_{portfolio_index}"] = [
@@ -9038,19 +8961,19 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             with col_beta1:
                 beta_lookback = st.number_input(f"Beta Lookback {config_idx + 1}", min_value=1, value=beta_config["lookback"], key=f"beta_lookback_{portfolio_index}_{config_idx}", label_visibility="collapsed")
                 beta_config["lookback"] = beta_lookback
-            with col_beta2:
-                beta_exclude = st.number_input(f"Beta Exclude {config_idx + 1}", min_value=0, value=beta_config["exclude"], key=f"beta_exclude_{portfolio_index}_{config_idx}", label_visibility="collapsed")
-                beta_config["exclude"] = beta_exclude
+        with col_beta2:
+            beta_exclude = st.number_input(f"Beta Exclude {config_idx + 1}", min_value=0, value=beta_config["exclude"], key=f"beta_exclude_{portfolio_index}_{config_idx}", label_visibility="collapsed")
+            beta_config["exclude"] = beta_exclude
             
-            # Custom text input for this beta configuration
-            beta_custom_text = st.text_input(
-                f"Custom Text for Beta Config {config_idx + 1} (optional)", 
-                key=f"beta_custom_text_{portfolio_index}_{config_idx}",
-                placeholder="e.g., MyBeta, Risk1, etc.",
-                help="This text will be added to the end of portfolio names for this beta configuration"
-            )
-            
-            st.markdown("---")
+        # Custom text input for this beta configuration
+        beta_custom_text = st.text_input(
+            f"Custom Text for Beta Config {config_idx + 1} (optional)", 
+            key=f"beta_custom_text_{portfolio_index}_{config_idx}",
+            placeholder="e.g., MyBeta, Risk1, etc.",
+            help="This text will be added to the end of portfolio names for this beta configuration"
+        )
+        
+        st.markdown("---")
         
         # Collect custom texts for beta configurations
         beta_custom_texts = []
@@ -9077,7 +9000,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 "exclude": 30
             })
             st.rerun()
-        
+            
         # Initialize volatility window configs if not exists
         if f"volatility_window_configs_{portfolio_index}" not in st.session_state:
             st.session_state[f"volatility_window_configs_{portfolio_index}"] = [
@@ -9473,6 +9396,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     st.session_state[f"info_message_{portfolio_index}"] = f"📊 Total portfolios: {len(st.session_state.multi_backtest_portfolio_configs)}"
                 
                 st.rerun()
+    else:
+        st.warning("⚠️ Select at least one parameter to vary")
     
     # NUCLEAR OPTION: Display success messages - FORCE display no matter what
     if f"variant_generation_success_{portfolio_index}" in st.session_state:
@@ -11066,18 +10991,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             total_downloads = len(all_tickers_to_download) + len(special_tickers)
             download_count = 0
             
-            # OPTIMIZED: Batch download with smart fallback
-            progress_text = f"Downloading data for {len(all_tickers_to_download)} tickers (batch mode)..."
-            progress_bar.progress(0.1, text=progress_text)
+            # BATCH DOWNLOAD - Much faster! (1 API call instead of N calls)
+            progress_text = f"Batch downloading data for {len(all_tickers_to_download)} tickers..."
+            progress_bar.progress(0.5, text=progress_text)
             
-            # Check for kill request before batch
-            check_kill_request()
-            
-            # Use batch download for all regular tickers (much faster!)
-            batch_results = get_multiple_tickers_batch(list(all_tickers_to_download), period="max", auto_adjust=False)
+            # Use batch download function
+            batch_results = get_multiple_tickers_batch(all_tickers_to_download, period="max", auto_adjust=False)
             
             # Process batch results
-            for t in all_tickers_to_download:
+            for i, t in enumerate(all_tickers_to_download):
+                # Check for kill request during processing
+                check_kill_request()
+                
                 download_count += 1
                 progress_text = f"Processing {t} ({download_count}/{total_downloads})..."
                 progress_bar.progress(download_count / total_downloads, text=progress_text)
@@ -11087,7 +11012,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 if hist.empty:
                     invalid_tickers.append(t)
                     continue
-                
+                    
                 try:
                     # Force tz-naive for hist (like Backtest_Engine.py)
                     hist = hist.copy()
@@ -11245,7 +11170,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO_CACHE VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -11258,7 +11183,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability & caching...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO_CACHE)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -11732,7 +11657,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
                 else:
                     st.error("❌ **No portfolios were processed successfully!** Please check your configuration.")
-                    # Don't stop - let the rest of the page render (including JSON section)
+                    st.stop()
                 
                 # Memory cleanup
                 import gc
