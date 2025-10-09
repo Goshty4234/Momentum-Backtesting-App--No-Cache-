@@ -7220,6 +7220,9 @@ if st.session_state.get('alloc_backtest_run', False):
             # Add Portfolio Weighted Returns before comprehensive table
             st.markdown("### 📈 **Portfolio Weighted Returns**")
             
+            # Warning about PE reliability
+            st.warning("⚠️ **ATTENTION:** Le P/E affiché n'est PAS fiable et peut être incorrect. Pour avoir le bon P/E, vous devez rafraîchir la page complètement.")
+            
             def calculate_portfolio_weighted_returns(available_data=None):
                 """Calculate weighted portfolio returns for different periods"""
                 try:
@@ -7535,6 +7538,9 @@ if st.session_state.get('alloc_backtest_run', False):
             
             # Add Benchmark Comparison Table
             st.markdown("### 📊 **Benchmark Comparison**")
+            
+            # Warning about PE reliability
+            st.warning("⚠️ **ATTENTION:** Le P/E affiché n'est PAS fiable et peut être incorrect. Pour avoir le bon P/E, vous devez rafraîchir la page complètement.")
             
             def calculate_benchmark_returns(available_data=None, preloaded_info=None):
                 """Calculate returns for benchmark tickers"""
