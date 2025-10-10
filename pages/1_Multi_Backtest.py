@@ -160,6 +160,55 @@ def get_ticker_aliases():
         
         # Special Dynamic Portfolio Tickers
         'SP500TOP20': 'SP500TOP20',  # Dynamic S&P 500 Top 20 (rebalances yearly based on historical data)
+        
+        # Additional mappings for new aliases
+        'SPYND': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
+        'QQQND': '^IXIC',         # NASDAQ Composite (price only, no dividends) - 1971+
+        
+        # Sector Indices (No Dividends) - Using GICS codes
+        'XLKND': '^SP500-45',    # S&P 500 Information Technology (1990+)
+        'XLVND': '^SP500-35',    # S&P 500 Health Care (1990+)
+        'XLPND': '^SP500-30',    # S&P 500 Consumer Staples (1990+)
+        'XLFND': '^SP500-40',    # S&P 500 Financials (1990+)
+        'XLEND': '^SP500-10',    # S&P 500 Energy (1990+)
+        'XLIND': '^SP500-20',    # S&P 500 Industrials (1990+)
+        'XLYND': '^SP500-25',    # S&P 500 Consumer Discretionary (1990+)
+        'XLBND': '^SP500-15',    # S&P 500 Materials (1990+)
+        'XLUND': '^SP500-55',    # S&P 500 Utilities (1990+)
+        'XLREND': '^SP500-60',   # S&P 500 Real Estate (1990+)
+        'XLCND': '^SP500-50',    # S&P 500 Communication Services (1990+)
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases) - NASDAQ-100 versions
+        'TQQQND': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
+        'QLDND': '^NDX?L=2?E=0.95',      # 2x NASDAQ-100 (price only) - 1985+
+        'PSQND': '^NDX?L=-1?E=0.95',     # -1x NASDAQ-100 (price only, no dividends) - 1985+
+        'QIDND': '^NDX?L=-2?E=0.95',     # -2x NASDAQ-100 (price only, no dividends) - 1985+
+        'SQQQND': '^NDX?L=-3?E=0.95',    # -3x NASDAQ-100 (price only, no dividends) - 1985+
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases) - NASDAQ Composite versions (longer history)
+        'TQQQIXIC': '^IXIC?L=3?E=0.95',  # 3x NASDAQ Composite (price only) - 1971+ ⚠️ Different from real TQQQ
+        'QLDIXIC': '^IXIC?L=2?E=0.95',   # 2x NASDAQ Composite (price only) - 1971+ ⚠️ Different from real QLD
+        'PSQIXIC': '^IXIC?L=-1?E=0.95',  # -1x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real PSQ
+        'QIDIXIC': '^IXIC?L=-2?E=0.95',  # -2x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real QID
+        'SQQQIXIC': '^IXIC?L=-3?E=0.95', # -3x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real SQQQ
+        
+        # S&P 500 leveraged/inverse (unchanged)
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends) - 1988+
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends) - 1988+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends) - 1988+
+        'SHND': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'SDSND': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'SPXUND': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        
+        # Legacy aliases (kept for backward compatibility)
+        'TQQQTR': '^NDX?L=3?E=0.95',     # Legacy - 3x NASDAQ-100 (price only) - 1985+
+        'QLDTR': '^NDX?L=2?E=0.95',      # Legacy - 2x NASDAQ-100 (price only) - 1985+
+        'SHTR': '^GSPC?L=-1?E=0.89',     # Legacy - -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^NDX?L=-1?E=0.95',     # Legacy - -1x NASDAQ-100 (price only, no dividends) - 1985+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # Legacy - -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^NDX?L=-2?E=0.95',     # Legacy - -2x NASDAQ-100 (price only, no dividends) - 1985+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # Legacy - -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^NDX?L=-3?E=0.95',    # Legacy - -3x NASDAQ-100 (price only, no dividends) - 1985+
     }
 
 def resolve_ticker_alias(ticker):
@@ -765,6 +814,55 @@ def get_ticker_aliases():
         
         # Special Dynamic Portfolio Tickers
         'SP500TOP20': 'SP500TOP20',  # Dynamic S&P 500 Top 20 (rebalances yearly based on historical data)
+        
+        # Additional mappings for new aliases
+        'SPYND': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
+        'QQQND': '^IXIC',         # NASDAQ Composite (price only, no dividends) - 1971+
+        
+        # Sector Indices (No Dividends) - Using GICS codes
+        'XLKND': '^SP500-45',    # S&P 500 Information Technology (1990+)
+        'XLVND': '^SP500-35',    # S&P 500 Health Care (1990+)
+        'XLPND': '^SP500-30',    # S&P 500 Consumer Staples (1990+)
+        'XLFND': '^SP500-40',    # S&P 500 Financials (1990+)
+        'XLEND': '^SP500-10',    # S&P 500 Energy (1990+)
+        'XLIND': '^SP500-20',    # S&P 500 Industrials (1990+)
+        'XLYND': '^SP500-25',    # S&P 500 Consumer Discretionary (1990+)
+        'XLBND': '^SP500-15',    # S&P 500 Materials (1990+)
+        'XLUND': '^SP500-55',    # S&P 500 Utilities (1990+)
+        'XLREND': '^SP500-60',   # S&P 500 Real Estate (1990+)
+        'XLCND': '^SP500-50',    # S&P 500 Communication Services (1990+)
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases) - NASDAQ-100 versions
+        'TQQQND': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
+        'QLDND': '^NDX?L=2?E=0.95',      # 2x NASDAQ-100 (price only) - 1985+
+        'PSQND': '^NDX?L=-1?E=0.95',     # -1x NASDAQ-100 (price only, no dividends) - 1985+
+        'QIDND': '^NDX?L=-2?E=0.95',     # -2x NASDAQ-100 (price only, no dividends) - 1985+
+        'SQQQND': '^NDX?L=-3?E=0.95',    # -3x NASDAQ-100 (price only, no dividends) - 1985+
+        
+        # Leveraged & Inverse ETFs (Synthetic Aliases) - NASDAQ Composite versions (longer history)
+        'TQQQIXIC': '^IXIC?L=3?E=0.95',  # 3x NASDAQ Composite (price only) - 1971+ ⚠️ Different from real TQQQ
+        'QLDIXIC': '^IXIC?L=2?E=0.95',   # 2x NASDAQ Composite (price only) - 1971+ ⚠️ Different from real QLD
+        'PSQIXIC': '^IXIC?L=-1?E=0.95',  # -1x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real PSQ
+        'QIDIXIC': '^IXIC?L=-2?E=0.95',  # -2x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real QID
+        'SQQQIXIC': '^IXIC?L=-3?E=0.95', # -3x NASDAQ Composite (price only, no dividends) - 1971+ ⚠️ Different from real SQQQ
+        
+        # S&P 500 leveraged/inverse (unchanged)
+        'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends) - 1988+
+        'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends) - 1988+
+        'SSOTR': '^SP500TR?L=2?E=0.91',  # 2x S&P 500 (with dividends) - 1988+
+        'SHND': '^GSPC?L=-1?E=0.89',     # -1x S&P 500 (price only, no dividends) - 1927+
+        'SDSND': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
+        'SPXUND': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
+        
+        # Legacy aliases (kept for backward compatibility)
+        'TQQQTR': '^NDX?L=3?E=0.95',     # Legacy - 3x NASDAQ-100 (price only) - 1985+
+        'QLDTR': '^NDX?L=2?E=0.95',      # Legacy - 2x NASDAQ-100 (price only) - 1985+
+        'SHTR': '^GSPC?L=-1?E=0.89',     # Legacy - -1x S&P 500 (price only, no dividends) - 1927+
+        'PSQTR': '^NDX?L=-1?E=0.95',     # Legacy - -1x NASDAQ-100 (price only, no dividends) - 1985+
+        'SDSTR': '^GSPC?L=-2?E=0.91',    # Legacy - -2x S&P 500 (price only, no dividends) - 1927+
+        'QIDTR': '^NDX?L=-2?E=0.95',     # Legacy - -2x NASDAQ-100 (price only, no dividends) - 1985+
+        'SPXUTR': '^GSPC?L=-3?E=1.00',   # Legacy - -3x S&P 500 (price only, no dividends) - 1927+
+        'SQQQTR': '^NDX?L=-3?E=0.95',    # Legacy - -3x NASDAQ-100 (price only, no dividends) - 1985+
     }
 
 def resolve_ticker_alias(ticker):
@@ -9906,117 +10004,133 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=False):
     # Get the actual ticker aliases from the function
     aliases = get_ticker_aliases()
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("**📈 Stock Indices**")
-        stock_tickers = {
-            'S&P 500 (Price) (1927+)': '^GSPC',
-            'S&P 500 (Total Return) (1988+)': '^SP500TR', 
-            'NASDAQ Composite (1971+)': '^IXIC',
-            'NASDAQ 100 (1985+)': '^NDX',
-            'Dow Jones (1992+)': '^DJI'
+        stock_mapping = {
+            'S&P 500 (No Dividend) (1927+)': ('SPYND', '^GSPC'),
+            'S&P 500 (Total Return) (1988+)': ('SPYTR', '^SP500TR'), 
+            'NASDAQ (No Dividend) (1971+)': ('QQQND', '^IXIC'),
+            'NASDAQ 100 (1985+)': ('NDX', '^NDX'),
+            'Dow Jones (1992+)': ('DOW', '^DJI')
         }
         
-        for name, ticker in stock_tickers.items():
-            if st.button(f"➕ {name}", key=f"add_stock_{ticker}", help=f"Add {ticker}"):
+        for name, (alias, ticker) in stock_mapping.items():
+            if st.button(f"➕ {name}", key=f"add_stock_{ticker}", help=f"Add {alias} → {ticker}"):
+                # Ensure portfolio configs exist
+                if 'multi_backtest_portfolio_configs' not in st.session_state:
+                    st.session_state.multi_backtest_portfolio_configs = default_configs
+                if 'multi_backtest_active_portfolio_index' not in st.session_state:
+                    st.session_state.multi_backtest_active_portfolio_index = 0
+                
                 portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+                # Resolve the alias to the actual Yahoo ticker before storing
+                resolved_ticker = resolve_ticker_alias(alias)
                 st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].append({
-                    'ticker': ticker, 
+                    'ticker': resolved_ticker,  # Add the resolved Yahoo ticker
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
     
     with col2:
-        st.markdown("**🏛️ Treasury Bonds & T-Bills**")
-        bond_tickers = {
-            '10Y Treasury Yield (1962+)': '^TNX',
-            '30Y Treasury Yield (1977+)': '^TYX',
-            '5Y Treasury Yield (1962+)': '^FVX',
-            '3M Treasury Yield (1960+)': '^IRX',
-            '20+ Year Treasury ETF (2002+)': 'TLT',
-            '7-10 Year Treasury ETF (2002+)': 'IEF',
-            '25+ Year Zero Coupon (2009+)': 'ZROZ',
-            '25+ Year Treasury STRIPS (2020+)': 'GOVZ',
-            'Extended Duration Treasury ETF (2008+)': 'EDV',
-            '1-3 Year Treasury ETF (2002+)': 'SHY',
-            '1-3 Month T-Bill ETF (2007+)': 'BIL',
-            '0-3 Month T-Bill ETF (2020+)': 'SGOV',
-            'Cash (Zero Return)': 'ZEROX'
+        st.markdown("**🏭 Sector Indices**")
+        sector_mapping = {
+            'Technology (XLK) (1990+)': ('XLKND', '^SP500-45'),
+            'Healthcare (XLV) (1990+)': ('XLVND', '^SP500-35'),
+            'Consumer Staples (XLP) (1990+)': ('XLPND', '^SP500-30'),
+            'Financials (XLF) (1990+)': ('XLFND', '^SP500-40'),
+            'Energy (XLE) (1990+)': ('XLEND', '^SP500-10'),
+            'Industrials (XLI) (1990+)': ('XLIND', '^SP500-20'),
+            'Consumer Discretionary (XLY) (1990+)': ('XLYND', '^SP500-25'),
+            'Materials (XLB) (1990+)': ('XLBND', '^SP500-15'),
+            'Utilities (XLU) (1990+)': ('XLUND', '^SP500-55'),
+            'Real Estate (XLRE) (1990+)': ('XLREND', '^SP500-60'),
+            'Communication Services (XLC) (1990+)': ('XLCND', '^SP500-50')
         }
         
-        for name, ticker in bond_tickers.items():
-            if st.button(f"➕ {name}", key=f"add_bond_{ticker}", help=f"Add {ticker}"):
+        for name, (alias, ticker) in sector_mapping.items():
+            if st.button(f"➕ {name}", key=f"add_sector_{ticker}", help=f"Add {alias} → {ticker}"):
+                # Ensure portfolio configs exist
+                if 'multi_backtest_portfolio_configs' not in st.session_state:
+                    st.session_state.multi_backtest_portfolio_configs = default_configs
+                if 'multi_backtest_active_portfolio_index' not in st.session_state:
+                    st.session_state.multi_backtest_active_portfolio_index = 0
+                
                 portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+                # Resolve the alias to the actual Yahoo ticker before storing
+                resolved_ticker = resolve_ticker_alias(alias)
                 st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].append({
-                    'ticker': ticker, 
+                    'ticker': resolved_ticker,  # Add the resolved Yahoo ticker
                     'allocation': 0.0, 
                     'include_dividends': True
                 })
-                st.session_state.multi_backtest_rerun_flag = True
+                st.rerun()
     
     with col3:
-        st.markdown("**🥇 Gold & Commodities**")
-        commodity_tickers = {
-            'Gold Futures (2000+)': 'GC=F',
-            'SPDR Gold ETF (2004+)': 'GLD',
-            'iShares Gold ETF (2005+)': 'IAU',
-            'Gold & Silver Index (1983+)': '^XAU'
-        }
-        
-        for name, ticker in commodity_tickers.items():
-            if st.button(f"➕ {name}", key=f"add_commodity_{ticker}", help=f"Add {ticker}"):
-                portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-                st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].append({
-                    'ticker': ticker, 
-                    'allocation': 0.0, 
-                    'include_dividends': True
-                })
-                st.session_state.multi_backtest_rerun_flag = True
-    
-    with col4:
         st.markdown("**🔬 Synthetic Tickers**")
         synthetic_tickers = {
             # Ordered by asset class: Stocks → Bonds → Gold → Managed Futures → Bitcoin
-            'Complete S&P 500 Simulation (1885+)': 'SPYSIM_COMPLETE',
-            'Dynamic S&P 500 Top 20 (Historical)': 'SP500TOP20',
-            'Complete TBILL Dataset (1948+)': 'TBILL_COMPLETE',
-            'Complete IEF Dataset (1962+)': 'IEF_COMPLETE',
-            'Complete TLT Dataset (1962+)': 'TLT_COMPLETE',
-            'Complete ZROZ Dataset (1962+)': 'ZROZ_COMPLETE',
-            'Complete Gold Simulation (1968+)': 'GOLDSIM_COMPLETE',
-            'Complete Gold Dataset (1975+)': 'GOLD_COMPLETE',
-            'Complete KMLM Dataset (1992+)': 'KMLM_COMPLETE',
-            'Complete DBMF Dataset (2000+)': 'DBMF_COMPLETE',
-            'Complete Bitcoin Dataset (2010+)': 'BTC_COMPLETE',
+            'Complete S&P 500 Simulation (1885+)': ('SPYSIM', 'SPYSIM_COMPLETE'),
+            'Dynamic S&P 500 Top 20 (Historical)': ('SP500TOP20', 'SP500TOP20'),
+            'Complete TBILL Dataset (1948+)': ('TBILL', 'TBILL_COMPLETE'),
+            'Complete IEF Dataset (1962+)': ('IEFTR', 'IEF_COMPLETE'),
+            'Complete TLT Dataset (1962+)': ('TLTTR', 'TLT_COMPLETE'),
+            'Complete ZROZ Dataset (1962+)': ('ZROZX', 'ZROZ_COMPLETE'),
+            'Complete Gold Simulation (1968+)': ('GOLDSIM', 'GOLDSIM_COMPLETE'),
+            'Complete Gold Dataset (1975+)': ('GOLDX', 'GOLD_COMPLETE'),
+            'Complete KMLM Dataset (1992+)': ('KMLMX', 'KMLM_COMPLETE'),
+            'Complete DBMF Dataset (2000+)': ('DBMFX', 'DBMF_COMPLETE'),
+            'Complete Bitcoin Dataset (2010+)': ('BITCOINX', 'BTC_COMPLETE'),
             
-            # Leveraged & Inverse ETFs (Synthetic)
-            'Simulated TQQQ (3x QQQ)': '^IXIC?L=3?E=0.95',
-            'Simulated SPXL (3x SPY)': '^SP500TR?L=3?E=1.00',
-            'Simulated UPRO (3x SPY)': '^SP500TR?L=3?E=0.91',
-            'Simulated QLD (2x QQQ)': '^IXIC?L=2?E=0.95',
-            'Simulated SSO (2x SPY)': '^SP500TR?L=2?E=0.91',
-            'Simulated SH (-1x SPY)': '^GSPC?L=-1?E=0.89',
-            'Simulated PSQ (-1x QQQ)': '^IXIC?L=-1?E=0.95',
-            'Simulated SDS (-2x SPY)': '^GSPC?L=-2?E=0.91',
-            'Simulated QID (-2x QQQ)': '^IXIC?L=-2?E=0.95',
-            'Simulated SPXU (-3x SPY)': '^GSPC?L=-3?E=1.00',
-            'Simulated SQQQ (-3x QQQ)': '^IXIC?L=-3?E=0.95'
+            # Leveraged & Inverse ETFs (Synthetic) - NASDAQ-100 versions
+            'Simulated TQQQ (3x QQQ) (1985+)': ('TQQQND', '^NDX?L=3?E=0.95'),
+            'Simulated QLD (2x QQQ) (1985+)': ('QLDND', '^NDX?L=2?E=0.95'),
+            'Simulated PSQ (-1x QQQ) (1985+)': ('PSQND', '^NDX?L=-1?E=0.95'),
+            'Simulated QID (-2x QQQ) (1985+)': ('QIDND', '^NDX?L=-2?E=0.95'),
+            'Simulated SQQQ (-3x QQQ) (1985+)': ('SQQQND', '^NDX?L=-3?E=0.95'),
+            
+            # Leveraged & Inverse ETFs (Synthetic) - NASDAQ Composite versions (longer history)
+            'Simulated TQQQ-IXIC (3x IXIC) (1971+)': ('TQQQIXIC', '^IXIC?L=3?E=0.95'),
+            'Simulated QLD-IXIC (2x IXIC) (1971+)': ('QLDIXIC', '^IXIC?L=2?E=0.95'),
+            'Simulated PSQ-IXIC (-1x IXIC) (1971+)': ('PSQIXIC', '^IXIC?L=-1?E=0.95'),
+            'Simulated QID-IXIC (-2x IXIC) (1971+)': ('QIDIXIC', '^IXIC?L=-2?E=0.95'),
+            'Simulated SQQQ-IXIC (-3x IXIC) (1971+)': ('SQQQIXIC', '^IXIC?L=-3?E=0.95'),
+            
+            # S&P 500 leveraged/inverse (unchanged)
+            'Simulated SPXL (3x SPY) (1988+)': ('SPXLTR', '^SP500TR?L=3?E=1.00'),
+            'Simulated UPRO (3x SPY) (1988+)': ('UPROTR', '^SP500TR?L=3?E=0.91'),
+            'Simulated SSO (2x SPY) (1988+)': ('SSOTR', '^SP500TR?L=2?E=0.91'),
+            'Simulated SH (-1x SPY) (1927+)': ('SHND', '^GSPC?L=-1?E=0.89'),
+            'Simulated SDS (-2x SPY) (1927+)': ('SDSND', '^GSPC?L=-2?E=0.91'),
+            'Simulated SPXU (-3x SPY) (1927+)': ('SPXUND', '^GSPC?L=-3?E=1.00')
         }
         
-        for name, ticker in synthetic_tickers.items():
-            # Custom help text for SP500TOP20
-            help_text = f"Add {ticker}"
-            if ticker == 'SP500TOP20':
-                help_text = "Add SP500TOP20 - BETA ticker: Dynamic portfolio of top 20 S&P 500 companies rebalanced annually based on historical market cap data"
+        for name, (alias, ticker) in synthetic_tickers.items():
+            # Custom help text for different ticker types
+            if alias == 'SP500TOP20':
+                help_text = "Add SP500TOP20 → SP500TOP20 - BETA ticker: Dynamic portfolio of top 20 S&P 500 companies rebalanced annually based on historical market cap data"
+            elif 'IXIC' in ticker:
+                # Special warning for IXIC versions
+                help_text = f"Add {alias} → {ticker} ⚠️ WARNING: This tracks NASDAQ Composite (broader index), NOT NASDAQ-100 like the real ETF!"
+            else:
+                help_text = f"Add {alias} → {ticker}"
             
             if st.button(f"➕ {name}", key=f"add_synthetic_{ticker}", help=help_text):
+                # Ensure portfolio configs exist
+                if 'multi_backtest_portfolio_configs' not in st.session_state:
+                    st.session_state.multi_backtest_portfolio_configs = default_configs
+                if 'multi_backtest_active_portfolio_index' not in st.session_state:
+                    st.session_state.multi_backtest_active_portfolio_index = 0
+                
                 portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+                # Resolve the alias to the actual ticker before storing
+                resolved_ticker = resolve_ticker_alias(alias)
                 # Auto-disable dividends for negative leverage (inverse ETFs)
-                include_divs = False if '?L=-' in ticker else True
+                include_divs = False if '?L=-' in resolved_ticker else True
                 st.session_state.multi_backtest_portfolio_configs[portfolio_index]['stocks'].append({
-                    'ticker': ticker, 
+                    'ticker': resolved_ticker,  # Add the resolved ticker
                     'allocation': 0.0, 
                     'include_dividends': include_divs
                 })
