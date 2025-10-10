@@ -3015,9 +3015,9 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
         # 2) Momentum-based portfolio with Volatility adjustments
         {
@@ -3052,9 +3052,9 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
         # 3) Pure momentum strategy (no beta/volatility adjustments)
         {
@@ -3089,9 +3089,9 @@ if 'strategy_comparison_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
     ]
     st.session_state.strategy_comparison_active_portfolio_index = 0
@@ -4954,9 +4954,9 @@ def add_portfolio_callback():
         'vol_window_days': 365,
         'exclude_days_vol': 30,
         'use_minimal_threshold': False,
-        'minimal_threshold_percent': 2.0,
+        'minimal_threshold_percent': 4.0,
         'use_max_allocation': False,
-        'max_allocation_percent': 10.0,
+        'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
         'start_date_user': None,
         'end_date_user': None,
@@ -6462,9 +6462,9 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="strategy_comparison_cl
         'vol_window_days': 365,
         'exclude_days_vol': 30,
         'use_minimal_threshold': False,
-        'minimal_threshold_percent': 2.0,
+        'minimal_threshold_percent': 4.0,
         'use_max_allocation': False,
-        'max_allocation_percent': 10.0,
+        'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
         'start_date_user': None,
         'end_date_user': None,
@@ -6697,9 +6697,8 @@ for i in range(len(st.session_state.strategy_comparison_global_tickers)):
     with col1:
         # Ticker input - always use current value from global tickers
         ticker_key = f"strategy_comparison_global_ticker_{i}"
-        # Only set initial value if key doesn't exist (first time)
-        if ticker_key not in st.session_state:
-            st.session_state[ticker_key] = stock['ticker']
+        # Always sync the session state with the portfolio config to show resolved ticker
+        st.session_state[ticker_key] = stock['ticker']
         ticker_val = st.text_input(f"Ticker {i+1}", key=ticker_key, on_change=update_global_stock_ticker, args=(i,))
     
     with col2:
