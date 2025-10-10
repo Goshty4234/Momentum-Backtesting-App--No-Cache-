@@ -342,6 +342,708 @@ def resolve_index_to_etf_for_stats(ticker):
     # If not an index or no mapping found, return original ticker
     return ticker
 
+def get_custom_sector_for_ticker(ticker):
+    """Get custom sector for ETFs and special tickers that don't have traditional sectors
+    
+    Returns custom sector name for special tickers, or None to use Yahoo Finance sector.
+    """
+    # Check if ticker has leverage parameter (?L=)
+    has_leverage = '?L=' in ticker.upper()
+    
+    # Extract base ticker (remove leverage parameters)
+    base_ticker = ticker.split('?')[0].upper()
+    
+    # List of tickers that are indices/ETFs (not individual stocks)
+    index_etf_tickers = {
+        'SPY', 'VOO', 'IVV', 'VTI', 'ITOT', 'SCHB', 'VT', 'VXUS', 'IXUS', 'QQQ', 'QQQM', 'DIA',
+        '^GSPC', '^SP500TR', '^IXIC', '^NDX', '^DJI', 'SPYSIM', 'SPYSIM_COMPLETE',
+        'MTUM', 'SPMO', 'VFMO', 'QMOM', 'IMOM', 'JMOM', 'SEIM', 'FDMO', 'FPMO', 'IWMO', 'UMMT', 'LRGF', 'MOM', 'USMC', 'PDP', 'DWAQ', 'DWAS',
+        'VIG', 'SCHD', 'DGRO', 'HDV', 'SPYD', 'DVY', 'SDY', 'VYM', 'RDVY', 'FDL', 'FVD', 'NOBL', 'DHS', 'FDVV', 'DGRW', 'DIVO', 'LVHD', 'SPHD', 'OUSA', 'PID', 'PEY', 'DON', 'FQAL', 'RDIV', 'VYMI', 'IDV', 'DGT', 'DWX',
+        'VUG', 'MGK', 'IWF', 'RPG', 'SCHG', 'QGRO', 'JKE', 'IVW', 'TGRW', 'SPYG', 'SYG', 'GFG', 'GXG', 'GGRO', 'XLG',
+        'SSO', 'QLD', 'SPXL', 'UPRO', 'TQQQ', 'TMF', 'SOXL', 'TNA', 'CURE', 'FAS', 'LABU', 'TECL',
+        'TQQQTR', 'SPXLTR', 'UPROTR', 'QLDTR', 'SSOTR', 'SHTR', 'PSQTR', 'SDSTR', 'QIDTR', 'SPXUTR', 'SQQQTR',
+        'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
+        'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
+        '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
+        'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
+        'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
+        'BTC-USD', 'ETH-USD', 'BITO', 'GBTC', 'ETHE', 'BITCOINX', 'BTC_COMPLETE',
+        'XLK', 'VGT', 'FTEC', 'IGM', 'SMH', 'SOXX', 'SOXS', 'USD',
+        '^SP500-45', '^SP500-35', '^SP500-30', '^SP500-40', '^SP500-10', '^SP500-20', '^SP500-25', '^SP500-15', '^SP500-55', '^SP500-60', '^SP500-50',
+        'XLF', 'XLV', 'XLP', 'XLE', 'XLI', 'XLY', 'XLB', 'XLU', 'XLC',
+        'VNQ', 'IYR', 'SCHH', 'RWR', 'XLRE',
+        'VXX', 'UVXY', 'SVXY',
+        'CASH', 'SGOV', 'USFR', 'ZEROX'
+    }
+    
+    # If ticker has leverage parameter AND is in our index/ETF list, return appropriate leveraged sector
+    if has_leverage and base_ticker in index_etf_tickers:
+        # Check for gold/precious metals tickers
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF', 'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
+            return 'LEVERAGED PRECIOUS METALS'
+        
+        # Check for treasury/bond tickers
+        if base_ticker in ['TLT', 'ZROZ', 'VGLT', 'SPTL', 'TLH', 'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEF', 'VGIT', 'SPTI', 'IEI', 'IEFTR', 'IEF_COMPLETE', 'SHY', 'BIL', 'VGSH', 'SPTS', 'SHV', 'TBILL', 'TBILL_COMPLETE', '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP', 'GOVT']:
+            return 'LEVERAGED TREASURIES'
+        
+        # Check for cryptocurrency
+        if base_ticker in ['BTC-USD', 'ETH-USD', 'BITO', 'GBTC', 'ETHE', 'BITCOINX', 'BTC_COMPLETE']:
+            return 'LEVERAGED CRYPTOCURRENCY'
+        
+        # Check for commodities (excluding precious metals)
+        if base_ticker in ['USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON', 'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE']:
+            return 'LEVERAGED COMMODITIES'
+        
+        # Check for real estate
+        if base_ticker in ['VNQ', 'IYR', 'SCHH', 'RWR', 'XLRE']:
+            return 'LEVERAGED REAL ESTATE'
+        
+        # Check for volatility
+        if base_ticker in ['VXX', 'UVXY', 'SVXY']:
+            return 'LEVERAGED VOLATILITY'
+        
+        # Default to LEVERAGED ETF for all other index/ETF tickers
+        return 'LEVERAGED ETF'
+    
+    # Custom sector mappings for ETFs and special tickers
+    custom_sectors = {
+        # Broad Market Index ETFs
+        'SPY': 'INDEX FUND',
+        'VOO': 'INDEX FUND',
+        'IVV': 'INDEX FUND',
+        'VTI': 'INDEX FUND',
+        'ITOT': 'INDEX FUND',
+        'SCHB': 'INDEX FUND',
+        'VT': 'INDEX FUND',
+        'VXUS': 'INDEX FUND',
+        'IXUS': 'INDEX FUND',
+        'QQQ': 'INDEX FUND',
+        'QQQM': 'INDEX FUND',
+        'DIA': 'INDEX FUND',
+        '^GSPC': 'INDEX FUND',
+        '^SP500TR': 'INDEX FUND',
+        '^IXIC': 'INDEX FUND',
+        '^NDX': 'INDEX FUND',
+        '^DJI': 'INDEX FUND',
+        'SPYSIM': 'INDEX FUND',
+        'SPYSIM_COMPLETE': 'INDEX FUND',
+        
+        # Momentum Index ETFs
+        'MTUM': 'INDEX FUND',
+        'SPMO': 'INDEX FUND',
+        'VFMO': 'INDEX FUND',
+        'QMOM': 'INDEX FUND',
+        'IMOM': 'INDEX FUND',
+        'JMOM': 'INDEX FUND',
+        'SEIM': 'INDEX FUND',
+        'FDMO': 'INDEX FUND',
+        'FPMO': 'INDEX FUND',
+        'IWMO': 'INDEX FUND',
+        'UMMT': 'INDEX FUND',
+        'LRGF': 'INDEX FUND',
+        'MOM': 'INDEX FUND',
+        'USMC': 'INDEX FUND',
+        'PDP': 'INDEX FUND',
+        'DWAQ': 'INDEX FUND',
+        'DWAS': 'INDEX FUND',
+        
+        # Dividend Index ETFs
+        'VIG': 'INDEX FUND',
+        'SCHD': 'INDEX FUND',
+        'DGRO': 'INDEX FUND',
+        'HDV': 'INDEX FUND',
+        'SPYD': 'INDEX FUND',
+        'DVY': 'INDEX FUND',
+        'SDY': 'INDEX FUND',
+        'VYM': 'INDEX FUND',
+        'RDVY': 'INDEX FUND',
+        'FDL': 'INDEX FUND',
+        'FVD': 'INDEX FUND',
+        'NOBL': 'INDEX FUND',
+        'DHS': 'INDEX FUND',
+        'FDVV': 'INDEX FUND',
+        'DGRW': 'INDEX FUND',
+        'DIVO': 'INDEX FUND',
+        'LVHD': 'INDEX FUND',
+        'SPHD': 'INDEX FUND',
+        'OUSA': 'INDEX FUND',
+        'PID': 'INDEX FUND',
+        'PEY': 'INDEX FUND',
+        'DON': 'INDEX FUND',
+        'FQAL': 'INDEX FUND',
+        'RDIV': 'INDEX FUND',
+        'VYMI': 'INDEX FUND',
+        'IDV': 'INDEX FUND',
+        'DGT': 'INDEX FUND',
+        'DWX': 'INDEX FUND',
+        
+        # Growth Index ETFs
+        'VUG': 'INDEX FUND',
+        'MGK': 'INDEX FUND',
+        'IWF': 'INDEX FUND',
+        'RPG': 'INDEX FUND',
+        'SCHG': 'INDEX FUND',
+        'QGRO': 'INDEX FUND',
+        'JKE': 'INDEX FUND',
+        'IVW': 'INDEX FUND',
+        'TGRW': 'INDEX FUND',
+        'SPYG': 'INDEX FUND',
+        'SYG': 'INDEX FUND',
+        'GFG': 'INDEX FUND',
+        'GXG': 'INDEX FUND',
+        'GGRO': 'INDEX FUND',
+        'XLG': 'INDEX FUND',
+        
+        # Leveraged Index ETFs
+        'SSO': 'LEVERAGED ETF',
+        'QLD': 'LEVERAGED ETF',
+        'SPXL': 'LEVERAGED ETF',
+        'UPRO': 'LEVERAGED ETF',
+        'TQQQ': 'LEVERAGED ETF',
+        'TMF': 'LEVERAGED ETF',
+        'SOXL': 'LEVERAGED ETF',
+        'TNA': 'LEVERAGED ETF',
+        'CURE': 'LEVERAGED ETF',
+        'FAS': 'LEVERAGED ETF',
+        'LABU': 'LEVERAGED ETF',
+        'TECL': 'LEVERAGED ETF',
+        'TQQQTR': 'LEVERAGED ETF',
+        'SPXLTR': 'LEVERAGED ETF',
+        'UPROTR': 'LEVERAGED ETF',
+        'QLDTR': 'LEVERAGED ETF',
+        'SSOTR': 'LEVERAGED ETF',
+        'SHTR': 'LEVERAGED ETF',
+        'PSQTR': 'LEVERAGED ETF',
+        'SDSTR': 'LEVERAGED ETF',
+        'QIDTR': 'LEVERAGED ETF',
+        'SPXUTR': 'LEVERAGED ETF',
+        'SQQQTR': 'LEVERAGED ETF',
+        
+        # Treasury/Bond ETFs
+        'TLT': 'TREASURIES',
+        'IEF': 'TREASURIES',
+        'SHY': 'TREASURIES',
+        'BIL': 'TREASURIES',
+        'ZROZ': 'TREASURIES',
+        'TLH': 'TREASURIES',
+        'IEI': 'TREASURIES',
+        'SHV': 'TREASURIES',
+        'VGSH': 'TREASURIES',
+        'VGIT': 'TREASURIES',
+        'VGLT': 'TREASURIES',
+        'GOVT': 'TREASURIES',
+        'SPTL': 'TREASURIES',
+        'SPTS': 'TREASURIES',
+        'SPTI': 'TREASURIES',
+        'TLTTR': 'TREASURIES',
+        'TLT_COMPLETE': 'TREASURIES',
+        'ZROZX': 'TREASURIES',
+        'ZROZ_COMPLETE': 'TREASURIES',
+        'IEFTR': 'TREASURIES',
+        'IEF_COMPLETE': 'TREASURIES',
+        'TBILL': 'TREASURIES',
+        'TBILL_COMPLETE': 'TREASURIES',
+        '^TNX': 'TREASURIES',
+        '^TYX': 'TREASURIES',
+        '^FVX': 'TREASURIES',
+        '^IRX': 'TREASURIES',
+        'AGG': 'BONDS',
+        'BND': 'BONDS',
+        'BNDX': 'BONDS',
+        'LQD': 'BONDS',
+        'HYG': 'BONDS',
+        'JNK': 'BONDS',
+        'MUB': 'BONDS',
+        'TIP': 'BONDS',
+        'VTIP': 'BONDS',
+        
+        # Gold/Precious Metals
+        'GLD': 'GOLD',
+        'GOLDX': 'GOLD',
+        'GOLDSIM': 'GOLD',
+        'IAU': 'GOLD',
+        'GLDM': 'GOLD',
+        'SGOL': 'GOLD',
+        'GOLD_COMPLETE': 'GOLD',
+        'GOLDSIM_COMPLETE': 'GOLD',
+        'GC=F': 'GOLD',
+        'GOLDF': 'GOLD',
+        'GDX': 'GOLD MINERS',
+        'GDXJ': 'GOLD MINERS',
+        'SLV': 'SILVER',
+        'SI=F': 'SILVER',
+        'SILVER': 'SILVER',
+        'PPLT': 'PLATINUM',
+        'PL=F': 'PLATINUM',
+        'PLATINUM': 'PLATINUM',
+        'PALL': 'PALLADIUM',
+        'PA=F': 'PALLADIUM',
+        'PALLADIUM': 'PALLADIUM',
+        
+        # Commodities
+        'USO': 'OIL',
+        'CL=F': 'OIL',
+        'OIL': 'OIL',
+        'UNG': 'NATURAL GAS',
+        'NG=F': 'NATURAL GAS',
+        'NATGAS': 'NATURAL GAS',
+        'DBA': 'AGRICULTURE',
+        'ZC=F': 'AGRICULTURE',
+        'CORN': 'AGRICULTURE',
+        'ZS=F': 'AGRICULTURE',
+        'SOYBEAN': 'AGRICULTURE',
+        'KC=F': 'AGRICULTURE',
+        'COFFEE': 'AGRICULTURE',
+        'SB=F': 'AGRICULTURE',
+        'SUGAR': 'AGRICULTURE',
+        'CT=F': 'AGRICULTURE',
+        'COTTON': 'AGRICULTURE',
+        'DBC': 'COMMODITIES',
+        'GSG': 'COMMODITIES',
+        'PDBC': 'COMMODITIES',
+        'BCI': 'COMMODITIES',
+        'HG=F': 'COMMODITIES',
+        'COPPER': 'COMMODITIES',
+        'KMLM': 'MANAGED FUTURES',
+        'DBMF': 'MANAGED FUTURES',
+        'KMLMX': 'MANAGED FUTURES',
+        'KMLM_COMPLETE': 'MANAGED FUTURES',
+        'DBMFX': 'MANAGED FUTURES',
+        'DBMF_COMPLETE': 'MANAGED FUTURES',
+        
+        # Cryptocurrency
+        'BTC-USD': 'CRYPTOCURRENCY',
+        'ETH-USD': 'CRYPTOCURRENCY',
+        'BITO': 'CRYPTOCURRENCY',
+        'GBTC': 'CRYPTOCURRENCY',
+        'ETHE': 'CRYPTOCURRENCY',
+        'BITCOINX': 'CRYPTOCURRENCY',
+        'BTC_COMPLETE': 'CRYPTOCURRENCY',
+        
+        # Technology
+        'XLK': 'TECHNOLOGY INDEX',
+        'VGT': 'TECHNOLOGY INDEX',
+        'FTEC': 'TECHNOLOGY INDEX',
+        'IGM': 'TECHNOLOGY INDEX',
+        'SMH': 'TECHNOLOGY',
+        'SOXX': 'TECHNOLOGY',
+        'SOXS': 'LEVERAGED ETF',
+        'USD': 'LEVERAGED ETF',
+        
+        # S&P 500 Sector Indices
+        '^SP500-45': 'TECHNOLOGY INDEX',
+        '^SP500-35': 'HEALTHCARE INDEX',
+        '^SP500-30': 'CONSUMER STAPLES INDEX',
+        '^SP500-40': 'FINANCIAL INDEX',
+        '^SP500-10': 'ENERGY INDEX',
+        '^SP500-20': 'INDUSTRIALS INDEX',
+        '^SP500-25': 'CONSUMER DISCRETIONARY INDEX',
+        '^SP500-15': 'MATERIALS INDEX',
+        '^SP500-55': 'UTILITIES INDEX',
+        '^SP500-60': 'REAL ESTATE INDEX',
+        '^SP500-50': 'COMMUNICATION INDEX',
+        'XLF': 'FINANCIAL INDEX',
+        'XLV': 'HEALTHCARE INDEX',
+        'XLP': 'CONSUMER STAPLES INDEX',
+        'XLE': 'ENERGY INDEX',
+        'XLI': 'INDUSTRIALS INDEX',
+        'XLY': 'CONSUMER DISCRETIONARY INDEX',
+        'XLB': 'MATERIALS INDEX',
+        'XLU': 'UTILITIES INDEX',
+        'XLC': 'COMMUNICATION INDEX',
+        
+        # Real Estate
+        'VNQ': 'REAL ESTATE',
+        'IYR': 'REAL ESTATE',
+        'SCHH': 'REAL ESTATE',
+        'RWR': 'REAL ESTATE',
+        'XLRE': 'REAL ESTATE',
+        
+        # Volatility
+        'VXX': 'VOLATILITY',
+        'UVXY': 'VOLATILITY',
+        'SVXY': 'VOLATILITY',
+        
+        # Cash Equivalents
+        'CASH': 'CASH',
+        'SGOV': 'CASH EQUIVALENT',
+        'USFR': 'CASH EQUIVALENT',
+        'ZEROX': 'CASH',
+    }
+    
+    return custom_sectors.get(base_ticker, None)
+
+
+def get_custom_industry_for_ticker(ticker):
+    """Get custom industry for ETFs and special tickers that don't have traditional industries
+    
+    Returns custom industry name for special tickers, or None to use Yahoo Finance industry.
+    """
+    # Check if ticker has leverage parameter (?L=)
+    has_leverage = '?L=' in ticker.upper()
+    
+    # Extract base ticker (remove leverage parameters)
+    base_ticker = ticker.split('?')[0].upper()
+    
+    # List of tickers that are indices/ETFs (not individual stocks) - same as in get_custom_sector_for_ticker
+    index_etf_tickers = {
+        'SPY', 'VOO', 'IVV', 'VTI', 'ITOT', 'SCHB', 'VT', 'VXUS', 'IXUS', 'QQQ', 'QQQM', 'DIA',
+        '^GSPC', '^SP500TR', '^IXIC', '^NDX', '^DJI', 'SPYSIM', 'SPYSIM_COMPLETE',
+        'MTUM', 'SPMO', 'VFMO', 'QMOM', 'IMOM', 'JMOM', 'SEIM', 'FDMO', 'FPMO', 'IWMO', 'UMMT', 'LRGF', 'MOM', 'USMC', 'PDP', 'DWAQ', 'DWAS',
+        'VIG', 'SCHD', 'DGRO', 'HDV', 'SPYD', 'DVY', 'SDY', 'VYM', 'RDVY', 'FDL', 'FVD', 'NOBL', 'DHS', 'FDVV', 'DGRW', 'DIVO', 'LVHD', 'SPHD', 'OUSA', 'PID', 'PEY', 'DON', 'FQAL', 'RDIV', 'VYMI', 'IDV', 'DGT', 'DWX',
+        'VUG', 'MGK', 'IWF', 'RPG', 'SCHG', 'QGRO', 'JKE', 'IVW', 'TGRW', 'SPYG', 'SYG', 'GFG', 'GXG', 'GGRO', 'XLG',
+        'SSO', 'QLD', 'SPXL', 'UPRO', 'TQQQ', 'TMF', 'SOXL', 'TNA', 'CURE', 'FAS', 'LABU', 'TECL',
+        'TQQQTR', 'SPXLTR', 'UPROTR', 'QLDTR', 'SSOTR', 'SHTR', 'PSQTR', 'SDSTR', 'QIDTR', 'SPXUTR', 'SQQQTR',
+        'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
+        'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
+        '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
+        'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
+        'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
+        'BTC-USD', 'ETH-USD', 'BITO', 'GBTC', 'ETHE', 'BITCOINX', 'BTC_COMPLETE',
+        'XLK', 'VGT', 'FTEC', 'IGM', 'SMH', 'SOXX', 'SOXS', 'USD',
+        '^SP500-45', '^SP500-35', '^SP500-30', '^SP500-40', '^SP500-10', '^SP500-20', '^SP500-25', '^SP500-15', '^SP500-55', '^SP500-60', '^SP500-50',
+        'XLF', 'XLV', 'XLP', 'XLE', 'XLI', 'XLY', 'XLB', 'XLU', 'XLC',
+        'VNQ', 'IYR', 'SCHH', 'RWR', 'XLRE',
+        'VXX', 'UVXY', 'SVXY',
+        'CASH', 'SGOV', 'USFR', 'ZEROX'
+    }
+    
+    # If ticker has leverage parameter AND is in our index/ETF list, determine industry
+    if has_leverage and base_ticker in index_etf_tickers:
+        # Check for specific semiconductor tickers (SMH, SOXX)
+        if base_ticker in ['SMH', 'SOXX']:
+            return 'LEVERAGED SEMICONDUCTORS'
+        
+        # Check for gold/precious metals tickers
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF']:
+            return 'LEVERAGED GOLD'
+        if base_ticker in ['GDX', 'GDXJ']:
+            return 'LEVERAGED GOLD MINERS'
+        if base_ticker in ['SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
+            return 'LEVERAGED PRECIOUS METALS'
+        
+        # Check for treasury/bond tickers
+        if base_ticker in ['TLT', 'ZROZ', 'VGLT', 'SPTL', 'TLH', 'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE']:
+            return 'LEVERAGED LONG TERM TREASURIES'
+        if base_ticker in ['IEF', 'VGIT', 'SPTI', 'IEI', 'IEFTR', 'IEF_COMPLETE']:
+            return 'LEVERAGED INTERMEDIATE TREASURIES'
+        if base_ticker in ['SHY', 'BIL', 'VGSH', 'SPTS', 'SHV', 'TBILL', 'TBILL_COMPLETE']:
+            return 'LEVERAGED SHORT TERM TREASURIES'
+        if base_ticker in ['AGG', 'BND', 'BNDX', 'GOVT', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP']:
+            return 'LEVERAGED BONDS'
+        
+        # Check for commodities
+        if base_ticker in ['USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS']:
+            return 'LEVERAGED ENERGY COMMODITIES'
+        if base_ticker in ['DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON']:
+            return 'LEVERAGED AGRICULTURAL COMMODITIES'
+        if base_ticker in ['DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER']:
+            return 'LEVERAGED BROAD COMMODITIES'
+        if base_ticker in ['KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE']:
+            return 'LEVERAGED MANAGED FUTURES'
+        
+        # Check for cryptocurrency
+        if base_ticker in ['BTC-USD', 'ETH-USD', 'BITO', 'GBTC', 'ETHE', 'BITCOINX', 'BTC_COMPLETE']:
+            return 'LEVERAGED DIGITAL ASSETS'
+        
+        # Check for real estate
+        if base_ticker in ['VNQ', 'IYR', 'SCHH', 'RWR', 'XLRE']:
+            return 'LEVERAGED REIT INDEX'
+        
+        # Check for volatility
+        if base_ticker in ['VXX', 'UVXY', 'SVXY']:
+            return 'LEVERAGED VOLATILITY INDEX'
+        
+        # Check if it's inverse leverage (negative L value)
+        if '?L=-' in ticker.upper():
+            # Determine specific inverse type based on base ticker
+            if base_ticker in ['^IXIC', '^NDX']:
+                return 'INVERSE LEVERAGED NASDAQ'
+            else:
+                return 'INVERSE LEVERAGED INDEX'
+        else:
+            # Determine specific leveraged type based on base ticker
+            if base_ticker in ['^IXIC', '^NDX']:
+                return 'LEVERAGED NASDAQ INDEX'
+            elif base_ticker in ['^GSPC', '^SP500TR']:
+                return 'LEVERAGED SP500 INDEX'
+            else:
+                return 'LEVERAGED INDEX FUND'
+    
+    # Custom industry mappings for ETFs and special tickers
+    custom_industries = {
+        # Broad Market Index ETFs
+        'SPY': 'BROAD MARKET INDEX',
+        'VOO': 'BROAD MARKET INDEX',
+        'IVV': 'BROAD MARKET INDEX',
+        'VTI': 'BROAD MARKET INDEX',
+        'ITOT': 'BROAD MARKET INDEX',
+        'SCHB': 'BROAD MARKET INDEX',
+        'VT': 'BROAD MARKET INDEX',
+        'VXUS': 'BROAD MARKET INDEX',
+        'IXUS': 'BROAD MARKET INDEX',
+        'DIA': 'BROAD MARKET INDEX',
+        '^GSPC': 'BROAD MARKET INDEX',
+        '^SP500TR': 'BROAD MARKET INDEX',
+        '^DJI': 'BROAD MARKET INDEX',
+        'SPYSIM': 'SP500 SIMULATION',
+        'SPYSIM_COMPLETE': 'SP500 SIMULATION',
+        
+        # NASDAQ Index ETFs
+        'QQQ': 'NASDAQ INDEX',
+        'QQQM': 'NASDAQ INDEX',
+        '^IXIC': 'NASDAQ INDEX',
+        '^NDX': 'NASDAQ INDEX',
+        
+        # Momentum Index ETFs
+        'MTUM': 'MOMENTUM INDEX',
+        'SPMO': 'MOMENTUM INDEX',
+        'VFMO': 'MOMENTUM INDEX',
+        'QMOM': 'MOMENTUM INDEX',
+        'IMOM': 'MOMENTUM INDEX',
+        'JMOM': 'MOMENTUM INDEX',
+        'SEIM': 'MOMENTUM INDEX',
+        'FDMO': 'MOMENTUM INDEX',
+        'FPMO': 'MOMENTUM INDEX',
+        'IWMO': 'MOMENTUM INDEX',
+        'UMMT': 'MOMENTUM INDEX',
+        'LRGF': 'MOMENTUM INDEX',
+        'MOM': 'MOMENTUM INDEX',
+        'USMC': 'MOMENTUM INDEX',
+        'PDP': 'MOMENTUM INDEX',
+        'DWAQ': 'MOMENTUM INDEX',
+        'DWAS': 'MOMENTUM INDEX',
+        
+        # Dividend Index ETFs
+        'VIG': 'DIVIDEND INDEX',
+        'SCHD': 'DIVIDEND INDEX',
+        'DGRO': 'DIVIDEND INDEX',
+        'HDV': 'DIVIDEND INDEX',
+        'SPYD': 'DIVIDEND INDEX',
+        'DVY': 'DIVIDEND INDEX',
+        'SDY': 'DIVIDEND INDEX',
+        'VYM': 'DIVIDEND INDEX',
+        'RDVY': 'DIVIDEND INDEX',
+        'FDL': 'DIVIDEND INDEX',
+        'FVD': 'DIVIDEND INDEX',
+        'NOBL': 'DIVIDEND INDEX',
+        'DHS': 'DIVIDEND INDEX',
+        'FDVV': 'DIVIDEND INDEX',
+        'DGRW': 'DIVIDEND INDEX',
+        'DIVO': 'DIVIDEND INDEX',
+        'LVHD': 'DIVIDEND INDEX',
+        'SPHD': 'DIVIDEND INDEX',
+        'OUSA': 'DIVIDEND INDEX',
+        'PID': 'DIVIDEND INDEX',
+        'PEY': 'DIVIDEND INDEX',
+        'DON': 'DIVIDEND INDEX',
+        'FQAL': 'DIVIDEND INDEX',
+        'RDIV': 'DIVIDEND INDEX',
+        'VYMI': 'DIVIDEND INDEX',
+        'IDV': 'DIVIDEND INDEX',
+        'DGT': 'DIVIDEND INDEX',
+        'DWX': 'DIVIDEND INDEX',
+        
+        # Growth Index ETFs
+        'VUG': 'GROWTH INDEX',
+        'MGK': 'GROWTH INDEX',
+        'IWF': 'GROWTH INDEX',
+        'RPG': 'GROWTH INDEX',
+        'SCHG': 'GROWTH INDEX',
+        'QGRO': 'GROWTH INDEX',
+        'JKE': 'GROWTH INDEX',
+        'IVW': 'GROWTH INDEX',
+        'TGRW': 'GROWTH INDEX',
+        'SPYG': 'GROWTH INDEX',
+        'SYG': 'GROWTH INDEX',
+        'GFG': 'GROWTH INDEX',
+        'GXG': 'GROWTH INDEX',
+        'GGRO': 'GROWTH INDEX',
+        'XLG': 'GROWTH INDEX',
+        
+        # Leveraged Index ETFs
+        'SSO': 'LEVERAGED INDEX FUND',
+        'QLD': 'LEVERAGED INDEX FUND',
+        'SPXL': 'LEVERAGED INDEX FUND',
+        'UPRO': 'LEVERAGED INDEX FUND',
+        'TQQQ': 'LEVERAGED INDEX FUND',
+        'TMF': 'LEVERAGED INDEX FUND',
+        'SOXL': 'LEVERAGED INDEX FUND',
+        'TNA': 'LEVERAGED INDEX FUND',
+        'CURE': 'LEVERAGED INDEX FUND',
+        'FAS': 'LEVERAGED INDEX FUND',
+        'LABU': 'LEVERAGED INDEX FUND',
+        'TECL': 'LEVERAGED INDEX FUND',
+        'TQQQTR': 'LEVERAGED INDEX FUND',
+        'SPXLTR': 'LEVERAGED INDEX FUND',
+        'UPROTR': 'LEVERAGED INDEX FUND',
+        'QLDTR': 'LEVERAGED INDEX FUND',
+        'SSOTR': 'LEVERAGED INDEX FUND',
+        'SHTR': 'INVERSE LEVERAGED INDEX',
+        'PSQTR': 'INVERSE LEVERAGED INDEX',
+        'SDSTR': 'INVERSE LEVERAGED INDEX',
+        'QIDTR': 'INVERSE LEVERAGED INDEX',
+        'SPXUTR': 'INVERSE LEVERAGED INDEX',
+        'SQQQTR': 'INVERSE LEVERAGED INDEX',
+        
+        # Treasury/Bond ETFs
+        'TLT': 'LONG TERM TREASURIES',
+        'ZROZ': 'LONG TERM TREASURIES',
+        'VGLT': 'LONG TERM TREASURIES',
+        'SPTL': 'LONG TERM TREASURIES',
+        'TLH': 'LONG TERM TREASURIES',
+        'TLTTR': 'LONG TERM TREASURIES',
+        'TLT_COMPLETE': 'LONG TERM TREASURIES',
+        'ZROZX': 'LONG TERM TREASURIES',
+        'ZROZ_COMPLETE': 'LONG TERM TREASURIES',
+        'IEF': 'INTERMEDIATE TREASURIES',
+        'VGIT': 'INTERMEDIATE TREASURIES',
+        'SPTI': 'INTERMEDIATE TREASURIES',
+        'IEI': 'INTERMEDIATE TREASURIES',
+        'IEFTR': 'INTERMEDIATE TREASURIES',
+        'IEF_COMPLETE': 'INTERMEDIATE TREASURIES',
+        'SHY': 'SHORT TERM TREASURIES',
+        'BIL': 'SHORT TERM TREASURIES',
+        'VGSH': 'SHORT TERM TREASURIES',
+        'SPTS': 'SHORT TERM TREASURIES',
+        'SHV': 'SHORT TERM TREASURIES',
+        'TBILL': 'SHORT TERM TREASURIES',
+        'TBILL_COMPLETE': 'SHORT TERM TREASURIES',
+        '^TNX': 'TREASURY YIELDS',
+        '^TYX': 'TREASURY YIELDS',
+        '^FVX': 'TREASURY YIELDS',
+        '^IRX': 'TREASURY YIELDS',
+        'AGG': 'TOTAL BOND MARKET',
+        'BND': 'TOTAL BOND MARKET',
+        'BNDX': 'TOTAL BOND MARKET',
+        'GOVT': 'TOTAL BOND MARKET',
+        'LQD': 'CORPORATE BONDS',
+        'HYG': 'CORPORATE BONDS',
+        'JNK': 'CORPORATE BONDS',
+        'MUB': 'CORPORATE BONDS',
+        'TIP': 'CORPORATE BONDS',
+        'VTIP': 'CORPORATE BONDS',
+        
+        # Gold/Precious Metals
+        'GLD': 'PRECIOUS METALS',
+        'GOLDX': 'PRECIOUS METALS',
+        'GOLDSIM': 'PRECIOUS METALS',
+        'IAU': 'PRECIOUS METALS',
+        'GLDM': 'PRECIOUS METALS',
+        'SGOL': 'PRECIOUS METALS',
+        'GOLD_COMPLETE': 'PRECIOUS METALS',
+        'GOLDSIM_COMPLETE': 'PRECIOUS METALS',
+        'GC=F': 'GOLD FUTURES',
+        'GOLDF': 'GOLD FUTURES',
+        'GDX': 'GOLD MINERS',
+        'GDXJ': 'GOLD MINERS',
+        'SLV': 'SILVER/PLATINUM/PALLADIUM',
+        'SI=F': 'SILVER/PLATINUM/PALLADIUM',
+        'SILVER': 'SILVER/PLATINUM/PALLADIUM',
+        'PPLT': 'SILVER/PLATINUM/PALLADIUM',
+        'PL=F': 'SILVER/PLATINUM/PALLADIUM',
+        'PLATINUM': 'SILVER/PLATINUM/PALLADIUM',
+        'PALL': 'SILVER/PLATINUM/PALLADIUM',
+        'PA=F': 'SILVER/PLATINUM/PALLADIUM',
+        'PALLADIUM': 'SILVER/PLATINUM/PALLADIUM',
+        
+        # Commodities
+        'USO': 'ENERGY COMMODITIES',
+        'CL=F': 'ENERGY COMMODITIES',
+        'OIL': 'ENERGY COMMODITIES',
+        'UNG': 'ENERGY COMMODITIES',
+        'NG=F': 'ENERGY COMMODITIES',
+        'NATGAS': 'ENERGY COMMODITIES',
+        'DBA': 'AGRICULTURAL COMMODITIES',
+        'ZC=F': 'AGRICULTURAL COMMODITIES',
+        'CORN': 'AGRICULTURAL COMMODITIES',
+        'ZS=F': 'AGRICULTURAL COMMODITIES',
+        'SOYBEAN': 'AGRICULTURAL COMMODITIES',
+        'KC=F': 'AGRICULTURAL COMMODITIES',
+        'COFFEE': 'AGRICULTURAL COMMODITIES',
+        'SB=F': 'AGRICULTURAL COMMODITIES',
+        'SUGAR': 'AGRICULTURAL COMMODITIES',
+        'CT=F': 'AGRICULTURAL COMMODITIES',
+        'COTTON': 'AGRICULTURAL COMMODITIES',
+        'DBC': 'BROAD COMMODITIES',
+        'GSG': 'BROAD COMMODITIES',
+        'PDBC': 'BROAD COMMODITIES',
+        'BCI': 'BROAD COMMODITIES',
+        'HG=F': 'INDUSTRIAL METALS',
+        'COPPER': 'INDUSTRIAL METALS',
+        'KMLM': 'MANAGED FUTURES',
+        'DBMF': 'MANAGED FUTURES',
+        'KMLMX': 'MANAGED FUTURES',
+        'KMLM_COMPLETE': 'MANAGED FUTURES',
+        'DBMFX': 'MANAGED FUTURES',
+        'DBMF_COMPLETE': 'MANAGED FUTURES',
+        
+        # Cryptocurrency
+        'BTC-USD': 'DIGITAL ASSETS',
+        'ETH-USD': 'DIGITAL ASSETS',
+        'BITO': 'DIGITAL ASSETS',
+        'GBTC': 'DIGITAL ASSETS',
+        'ETHE': 'DIGITAL ASSETS',
+        'BITCOINX': 'DIGITAL ASSETS',
+        'BTC_COMPLETE': 'DIGITAL ASSETS',
+        
+        # Technology
+        'XLK': 'TECHNOLOGY INDEX FUND',
+        'VGT': 'TECHNOLOGY INDEX FUND',
+        'FTEC': 'TECHNOLOGY INDEX FUND',
+        'IGM': 'TECHNOLOGY INDEX FUND',
+        'SMH': 'SEMICONDUCTORS',
+        'SOXX': 'SEMICONDUCTORS',
+        'SOXS': 'LEVERAGED SEMICONDUCTORS',
+        'USD': 'LEVERAGED SEMICONDUCTORS',
+        
+        # S&P 500 Sector Indices
+        '^SP500-45': 'SECTOR INDEX FUND',
+        '^SP500-35': 'SECTOR INDEX FUND',
+        '^SP500-30': 'SECTOR INDEX FUND',
+        '^SP500-40': 'SECTOR INDEX FUND',
+        '^SP500-10': 'SECTOR INDEX FUND',
+        '^SP500-20': 'SECTOR INDEX FUND',
+        '^SP500-25': 'SECTOR INDEX FUND',
+        '^SP500-15': 'SECTOR INDEX FUND',
+        '^SP500-55': 'SECTOR INDEX FUND',
+        '^SP500-60': 'SECTOR INDEX FUND',
+        '^SP500-50': 'SECTOR INDEX FUND',
+        'XLF': 'SECTOR INDEX FUND',
+        'XLV': 'SECTOR INDEX FUND',
+        'XLP': 'SECTOR INDEX FUND',
+        'XLE': 'SECTOR INDEX FUND',
+        'XLI': 'SECTOR INDEX FUND',
+        'XLY': 'SECTOR INDEX FUND',
+        'XLB': 'SECTOR INDEX FUND',
+        'XLU': 'SECTOR INDEX FUND',
+        'XLC': 'SECTOR INDEX FUND',
+        
+        # Real Estate
+        'VNQ': 'REIT INDEX',
+        'IYR': 'REIT INDEX',
+        'SCHH': 'REIT INDEX',
+        'RWR': 'REIT INDEX',
+        'XLRE': 'REIT INDEX',
+        
+        # Volatility
+        'VXX': 'VOLATILITY INDEX',
+        'UVXY': 'VOLATILITY INDEX',
+        'SVXY': 'VOLATILITY INDEX',
+        
+        # Cash Equivalents
+        'CASH': 'CASH EQUIVALENT',
+        'SGOV': 'CASH EQUIVALENT',
+        'USFR': 'CASH EQUIVALENT',
+        'ZEROX': 'CASH EQUIVALENT',
+    }
+    
+    return custom_industries.get(base_ticker, None)
+
 # =============================================================================
 # PERFORMANCE OPTIMIZATION: CACHING FUNCTIONS
 # =============================================================================
@@ -871,8 +1573,10 @@ def get_spysim_complete_data(period="max"):
         from Complete_Tickers.SPYSIM_COMPLETE_TICKER import create_spysim_complete_ticker
         spysim_data = create_spysim_complete_ticker()
         if spysim_data is not None and not spysim_data.empty:
+            # Extract Close column from DataFrame
+            close_series = spysim_data['Close'] if isinstance(spysim_data, pd.DataFrame) else spysim_data
             result = pd.DataFrame({
-                'Close': spysim_data,
+                'Close': close_series,
                 'Dividends': [0.0] * len(spysim_data)
             }, index=spysim_data.index)
             return result
@@ -7083,7 +7787,7 @@ if st.session_state.get('alloc_backtest_run', False):
         
         if snapshot and active_name in today_weights_map:
             today_weights = today_weights_map.get(active_name, {})
-            
+        
             # If momentum is not used, use the initial target allocation from portfolio configuration
             if not use_momentum and (not today_weights or all(v == 0 for v in today_weights.values())):
                 # Use the target allocation from portfolio configuration (same as initial allocation)
@@ -8252,11 +8956,18 @@ if st.session_state.get('alloc_backtest_run', False):
                         is_commodity = ticker in ['GLD', 'SLV', 'USO', 'UNG'] or 'gold' in info.get('longName', '').lower()
                         
                         # Extract all available financial indicators with intelligent handling
+                        # Get custom sector and industry for special tickers (ETFs, indices, etc.)
+                        custom_sector = get_custom_sector_for_ticker(ticker)
+                        sector = custom_sector if custom_sector else info.get('sector', 'N/A')
+                        
+                        custom_industry = get_custom_industry_for_ticker(ticker)
+                        industry = custom_industry if custom_industry else info.get('industry', 'N/A')
+                        
                         row = {
                             'Ticker': ticker,
                             'Company Name': info.get('longName', info.get('shortName', 'N/A')),
-                            'Sector': info.get('sector', 'N/A'),
-                            'Industry': info.get('industry', 'N/A'),
+                            'Sector': sector,
+                            'Industry': industry,
                             'Current Price ($)': current_price,
                             'Allocation %': alloc_pct * 100,
                             'Shares': shares,
@@ -8438,26 +9149,31 @@ if st.session_state.get('alloc_backtest_run', False):
                         if column not in df.columns or weight_column not in df.columns:
                             return None
                         
+                        # Convert column to numeric, coercing errors to NaN
+                        df_numeric = df.copy()
+                        df_numeric[column] = pd.to_numeric(df_numeric[column], errors='coerce')
+                        df_numeric[weight_column] = pd.to_numeric(df_numeric[weight_column], errors='coerce')
+                        
                         # Base mask for valid (non-NaN) values
-                        valid_mask = df[column].notna() & df[weight_column].notna()
+                        valid_mask = df_numeric[column].notna() & df_numeric[weight_column].notna()
                         
                         # Special handling for PE ratios and similar valuation metrics
                         if 'P/E' in column or 'PE' in column or 'PEG' in column:
                             # Filter out negative or extremely high PE values that are likely errors
                             # Negative PE means negative earnings (company losing money)
                             # Very high PE (>1000) is usually a data error or near-zero earnings
-                            valid_mask = valid_mask & (df[column] > 0) & (df[column] <= 1000)
+                            valid_mask = valid_mask & (df_numeric[column] > 0) & (df_numeric[column] <= 1000)
                         elif column == 'Beta':
                             # Filter out extreme beta values (likely data errors)
-                            valid_mask = valid_mask & (df[column] >= -5) & (df[column] <= 5)
+                            valid_mask = valid_mask & (df_numeric[column] >= -5) & (df_numeric[column] <= 5)
                         elif 'Ratio' in column and column != 'PEG Ratio':
                             # For other ratios, filter out negative values (usually data errors)
-                            valid_mask = valid_mask & (df[column] >= 0)
+                            valid_mask = valid_mask & (df_numeric[column] >= 0)
                         
                         if valid_mask.sum() == 0:
                             return None
                             
-                        valid_df = df[valid_mask]
+                        valid_df = df_numeric[valid_mask]
                         # Since weight_column is already in percentage, we divide by 100 to get decimal weights
                         result = (valid_df[column] * valid_df[weight_column] / 100).sum() / (valid_df[weight_column].sum() / 100)
                         
