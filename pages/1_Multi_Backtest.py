@@ -3340,9 +3340,9 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
         # 2) Momentum-based portfolio using SPY, QQQ, GLD, TLT
         {
@@ -3378,9 +3378,9 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
         # 3) Equal weight (No Momentum) using the same tickers
         {
@@ -3412,9 +3412,9 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'vol_window_days': 365,
             'exclude_days_vol': 30,
             'use_minimal_threshold': False,
-            'minimal_threshold_percent': 2.0,
+            'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
-            'max_allocation_percent': 10.0,
+            'max_allocation_percent': 20.0,
         },
     ]
     st.session_state.multi_backtest_active_portfolio_index = 0
@@ -6850,9 +6850,9 @@ def add_portfolio_callback():
         'vol_window_days': 365,
         'exclude_days_vol': 30,
         'use_minimal_threshold': False,
-        'minimal_threshold_percent': 2.0,
+        'minimal_threshold_percent': 4.0,
         'use_max_allocation': False,
-        'max_allocation_percent': 10.0,
+        'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
         'start_date_user': None,
         'end_date_user': None,
@@ -7826,9 +7826,9 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="multi_backtest_clear_a
         'vol_window_days': 365,
         'exclude_days_vol': 30,
         'use_minimal_threshold': False,
-        'minimal_threshold_percent': 2.0,
+        'minimal_threshold_percent': 4.0,
         'use_max_allocation': False,
-        'max_allocation_percent': 10.0,
+        'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
         'start_date_user': None,
         'end_date_user': None,
@@ -9746,9 +9746,8 @@ for i in range(len(active_portfolio['stocks'])):
     col_t, col_a, col_d, col_b = st.columns([0.2, 0.2, 0.3, 0.15])
     with col_t:
         ticker_key = f"multi_backtest_ticker_{st.session_state.multi_backtest_active_portfolio_index}_{i}"
-        # Only set initial value if key doesn't exist (first time)
-        if ticker_key not in st.session_state:
-            st.session_state[ticker_key] = stock['ticker']
+        # Always sync the session state with the portfolio config to show resolved ticker
+        st.session_state[ticker_key] = stock['ticker']
         st.text_input("Ticker", key=ticker_key, label_visibility="visible", on_change=update_stock_ticker, args=(i,))
     with col_a:
         use_mom = st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.get('use_momentum', True))
