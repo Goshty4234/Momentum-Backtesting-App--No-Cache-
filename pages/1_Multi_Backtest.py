@@ -4483,6 +4483,7 @@ def calculate_sma(df, window):
 def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='SMA', config=None, stocks_config=None):
     """
     Filter out assets that are below their Moving Average (SMA or EMA).
+    Now supports using a different ticker's MA as reference!
     
     Args:
         valid_assets: List of tickers to filter
@@ -4491,7 +4492,7 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
         ma_window: MA window in days (e.g., 200 for 200-day MA)
         ma_type: Type of moving average - 'SMA' or 'EMA'
         config: Optional config dict
-        stocks_config: List of stock configs with include_in_ma_filter option
+        stocks_config: List of stock configs with include_in_ma_filter and ma_reference_ticker options
         
     Returns:
         filtered_assets: List of tickers above their MA
@@ -4504,14 +4505,28 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
     excluded_assets = {}
     tickers_with_enough_data = []
     
-    # Create a mapping of ticker -> include_in_sma_filter from stocks_config
+    # Create mappings from stocks_config
     include_in_ma = {}
+    ma_reference = {}
     if stocks_config:
         for stock in stocks_config:
             ticker = stock.get('ticker')
             if ticker:
                 # Keep backward compatibility with 'include_in_sma_filter'
                 include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
+                # Get MA reference ticker (empty or None means use ticker itself)
+                ref = stock.get('ma_reference_ticker', '').strip()
+                # Apply same transformations as regular tickers for consistency
+                if ref:
+                    ref = ref.replace(",", ".").upper()
+                    # Special conversion for Berkshire Hathaway
+                    if ref == 'BRK.B':
+                        ref = 'BRK-B'
+                    elif ref == 'BRK.A':
+                        ref = 'BRK-A'
+                    # Resolve alias (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
+                    ref = resolve_ticker_alias(ref)
+                ma_reference[ticker] = ref if ref else ticker
     
     for ticker in valid_assets:
         is_included = include_in_ma.get(ticker, True)
@@ -4520,45 +4535,64 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
             filtered_assets.append(ticker)
             continue
             
+        # Get MA reference ticker (default to self)
+        reference_ticker = ma_reference.get(ticker, ticker)
+        
+        # Get ticker's price data
         df = reindexed_data.get(ticker)
         if df is None or not isinstance(df, pd.DataFrame):
             filtered_assets.append(ticker)
             continue
         
+        # Get reference ticker's data for MA calculation
+        df_ref = reindexed_data.get(reference_ticker)
+        if df_ref is None or not isinstance(df_ref, pd.DataFrame):
+            # Reference ticker not available, fallback to using ticker itself
+            df_ref = df
+            reference_ticker = ticker
+        
         # Get data up to current date
         df_up_to_date = df[df.index <= date]
-        if len(df_up_to_date) < ma_window:
-            # Not enough data to calculate MA, include by default (no filter)
+        df_ref_up_to_date = df_ref[df_ref.index <= date]
+        
+        if len(df_ref_up_to_date) < ma_window:
+            # Not enough data to calculate MA on reference, include by default (no filter)
             filtered_assets.append(ticker)
             continue
         
         # Mark that this ticker has enough data for MA calculation
         tickers_with_enough_data.append(ticker)
         
-        # Calculate MA based on type
+        # Calculate MA on the REFERENCE ticker
         if ma_type == 'EMA':
-            ma = calculate_ema(df_up_to_date, ma_window)
+            ma = calculate_ema(df_ref_up_to_date, ma_window)
         else:  # Default to SMA
-            ma = calculate_sma(df_up_to_date, ma_window)
+            ma = calculate_sma(df_ref_up_to_date, ma_window)
             
         if ma is None:
             filtered_assets.append(ticker)
             continue
         
-        # Get current price and MA value at date
+        # Get current price of REFERENCE TICKER and MA value of REFERENCE at date
         try:
-            current_price = df_up_to_date.loc[date, 'Close']
+            # CRITICAL: Use reference ticker's price, not the ticker itself!
+            # Compare: reference price vs reference MA (same price scale)
+            if len(df_ref_up_to_date) == 0:
+                filtered_assets.append(ticker)
+                continue
+            current_price = df_ref_up_to_date['Close'].iloc[-1]
             current_ma = ma.iloc[-1]
             
             if pd.isna(current_price) or pd.isna(current_ma):
                 filtered_assets.append(ticker)
                 continue
             
-            # Include only if price is above MA
+            # Include only if REFERENCE ticker's price is above REFERENCE ticker's MA
             if current_price >= current_ma:
                 filtered_assets.append(ticker)
             else:
-                excluded_assets[ticker] = f"Below {ma_window}-day {ma_type} ({current_price:.2f} < {current_ma:.2f})"
+                ref_label = f" (using {reference_ticker})" if reference_ticker != ticker else ""
+                excluded_assets[ticker] = f"Below {ma_window}-day {ma_type}{ref_label} ({current_price:.2f} < {current_ma:.2f})"
         except:
             # If any error, include by default
             filtered_assets.append(ticker)
@@ -5640,15 +5674,11 @@ def single_backtest(config, sim_index, reindexed_data):
                 
                 # Apply MA filter if enabled (for non-momentum strategies)
                 if config.get('use_sma_filter', False):
-                    print(f"🔍 DEBUG MA FILTER: Portfolio {config.get('name', 'Unknown')} - MA filter enabled")
                     ma_window = config.get('sma_window', 200)
                     ma_type = config.get('ma_type', 'SMA')
                     # Get list of current tickers (excluding CASH)
                     current_tickers = [t for t in tickers if t != 'CASH']
-                    print(f"🔍 DEBUG MA FILTER: Current tickers: {current_tickers}")
-                    print(f"🔍 DEBUG MA FILTER: Before filtering - rebalance_allocations: {rebalance_allocations}")
                     filtered_tickers, excluded_assets = filter_assets_by_ma(current_tickers, reindexed_data, date, ma_window, ma_type, config, config['stocks'])
-                    print(f"🔍 DEBUG MA FILTER: After filtering - filtered_tickers: {filtered_tickers}, excluded_assets: {excluded_assets}")
                     
                     
                     # Redistribute allocations of excluded tickers proportionally among remaining tickers
@@ -5684,7 +5714,6 @@ def single_backtest(config, sim_index, reindexed_data):
                                     for t in filtered_tickers:
                                         rebalance_allocations[t] = equal_allocation
                     
-                    print(f"🔍 DEBUG MA FILTER: After redistribution - rebalance_allocations: {rebalance_allocations}")
                 
                 if use_max_allocation and rebalance_allocations:
                     max_allocation_decimal = max_allocation_percent / 100.0
@@ -6607,10 +6636,12 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
     if 'ma_type' not in portfolio:
         portfolio['ma_type'] = 'SMA'
     
-    # Ensure all stocks have include_in_sma_filter setting
+    # Ensure all stocks have include_in_sma_filter and ma_reference_ticker settings
     for stock in portfolio.get('stocks', []):
         if 'include_in_sma_filter' not in stock:
             stock['include_in_sma_filter'] = True
+        if 'ma_reference_ticker' not in stock:
+            stock['ma_reference_ticker'] = ''  # Empty = use ticker's own MA
 
 if 'multi_backtest_paste_json_text' not in st.session_state:
     st.session_state.multi_backtest_paste_json_text = ""
@@ -10331,6 +10362,10 @@ def update_stock_ticker(index):
         # Update the portfolio configuration with the resolved ticker (with leverage/expense)
         st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][index]['ticker'] = resolved_ticker
         
+        # IMPORTANT: Force UI update by setting the widget's session_state value
+        # This ensures the resolved ticker is displayed immediately in the text_input
+        st.session_state[key] = resolved_ticker
+        
         # Auto-disable dividends for negative leverage (inverse ETFs)
         if '?L=-' in resolved_ticker:
             st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][index]['include_dividends'] = False
@@ -10355,6 +10390,43 @@ def update_stock_dividends(index):
         st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][index]['include_dividends'] = bool(val)
     except Exception:
         return
+
+
+def update_ma_reference_ticker(stock_index):
+    """Callback function when MA reference ticker changes"""
+    ma_ref_key = f"multi_backtest_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}_{stock_index}"
+    new_value = st.session_state.get(ma_ref_key, '').strip()
+    
+    # Apply EXACTLY the same transformations as regular tickers
+    # Convert commas to dots for decimal separators
+    new_value = new_value.replace(",", ".")
+    
+    # Convert to uppercase
+    new_value = new_value.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if new_value == 'BRK.B':
+        new_value = 'BRK-B'
+    elif new_value == 'BRK.A':
+        new_value = 'BRK-A'
+    
+    # CRITICAL: Resolve ticker alias (GOLDX → GOLD_COMPLETE, SPYTR → ^SP500TR, etc.)
+    if new_value:  # Only resolve if not empty
+        resolved_value = resolve_ticker_alias(new_value)
+    else:
+        resolved_value = new_value
+    
+    # Update session state with resolved value for display
+    st.session_state[ma_ref_key] = resolved_value
+    
+    # Update the stock config
+    portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+    if stock_index < len(portfolio['stocks']):
+        old_value = portfolio['stocks'][stock_index].get('ma_reference_ticker', '')
+        if resolved_value != old_value:
+            portfolio['stocks'][stock_index]['ma_reference_ticker'] = resolved_value
+            st.session_state.multi_backtest_rerun_flag = True
+
 
 # Update active_portfolio
 active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
@@ -10421,6 +10493,30 @@ for i in range(len(active_portfolio['stocks'])):
             st.checkbox("Include in MA Filter", key=sma_key, help="Uncheck to exclude this ticker from the Moving Average filter")
             if st.session_state[sma_key] != stock['include_in_sma_filter']:
                 st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['include_in_sma_filter'] = st.session_state[sma_key]
+            
+            # MA Reference Ticker - allows using another ticker's MA for filtering
+            ma_ref_key = f"multi_backtest_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}_{i}"
+            if 'ma_reference_ticker' not in stock:
+                stock['ma_reference_ticker'] = ""  # Empty = use own ticker
+            
+            if ma_ref_key not in st.session_state:
+                st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
+            
+            # Always sync the session state with the portfolio config to show resolved ticker
+            st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
+            
+            st.text_input(
+                "MA Reference Ticker",
+                key=ma_ref_key,
+                placeholder=f"Leave empty for {stock['ticker']}",
+                help=f"Optional: Use another ticker's MA (e.g., SPY for SSO, QQQ for TQQQ). Leave empty to use {stock['ticker']}'s own MA.",
+                label_visibility="visible",
+                on_change=update_ma_reference_ticker,
+                args=(i,)
+            )
+            
+            if st.session_state[ma_ref_key] != stock.get('ma_reference_ticker', ''):
+                st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['ma_reference_ticker'] = st.session_state[ma_ref_key]
             
         else:
             st.write("")
@@ -11803,6 +11899,25 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
         for base_ticker in base_tickers_to_add:
             if base_ticker not in all_tickers:
                 all_tickers.append(base_ticker)
+        
+        # CRITICAL FIX: Add MA reference tickers to ensure they are downloaded
+        ma_reference_tickers_to_add = set()
+        for cfg in st.session_state.multi_backtest_portfolio_configs:
+            # Only collect MA reference tickers if MA filter is enabled
+            if cfg.get('use_sma_filter', False):
+                for stock in cfg.get('stocks', []):
+                    ma_ref_ticker = stock.get('ma_reference_ticker', '').strip()
+                    # If a custom reference ticker is specified (not empty)
+                    if ma_ref_ticker:
+                        # Resolve aliases (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
+                        resolved_ma_ref = resolve_ticker_alias(ma_ref_ticker)
+                        if resolved_ma_ref not in all_tickers:
+                            ma_reference_tickers_to_add.add(resolved_ma_ref)
+        
+        # Add MA reference tickers to the download list
+        for ma_ref_ticker in ma_reference_tickers_to_add:
+            if ma_ref_ticker not in all_tickers:
+                all_tickers.append(ma_ref_ticker)
         
         # BULLETPROOF VALIDATION: Check for empty ticker list first
         if not all_tickers:
