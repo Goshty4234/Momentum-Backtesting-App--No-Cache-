@@ -1,4 +1,4 @@
-# NO_CACHE VERSION - All @st.cache_data decorators removed for reliability (with full MA Filter support)
+# NO CACHE VERSION - ALL @st.cache_data decorators removed - ZERO CACHE ANYWHERE
 import streamlit as st
 import datetime
 from datetime import timedelta, time
@@ -1471,7 +1471,7 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     return results
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
-    """Get ticker data (NO_CACHE version)
+    """Get ticker data (NO CACHE for maximum freshness)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
@@ -1754,7 +1754,7 @@ def get_tbill_complete_data(period="max"):
             return pd.DataFrame()
 
 def get_ticker_info(ticker_symbol):
-    """Get ticker info (NO_CACHE version)
+    """Get ticker info (NO CACHE for maximum freshness)
     
     This function handles two special cases:
     1. Canadian tickers: Converts USD OTC to Canadian exchange (CNSWF → CSU.TO)
@@ -1842,8 +1842,8 @@ def get_multiple_tickers_info_batch(ticker_list):
     return results
 
 def calculate_portfolio_metrics(portfolio_config, allocation_data):
-    """Calculate portfolio metrics (NO_CACHE version)"""
-    # This will calculate portfolio metrics every time (NO_CACHE version)
+    """Calculate portfolio metrics (NO CACHE for maximum freshness)"""
+    # This will calculate portfolio metrics fresh every time
     # Note: The actual calculation logic remains unchanged
     return portfolio_config, allocation_data  # Placeholder - will be filled in by calling functions
 
@@ -1880,7 +1880,7 @@ def create_safe_hash_key(data):
         return hashlib.md5(str(data).encode()).hexdigest()
 
 def run_fresh_backtest(portfolios_config_hash, start_date_str, end_date_str, benchmark_str, page_id="allocations"):
-    """Run backtest calculations (NO_CACHE version)
+    """Run fresh backtest calculations (NO CACHE for maximum freshness)
     
     Args:
         portfolios_config_hash: Hash of portfolio configurations to detect changes
@@ -5956,7 +5956,7 @@ freq_options = ["Never", "Weekly", "Biweekly", "Monthly", "Quarterly", "Semiannu
 with col_freq_rebal:
     if "alloc_active_rebal_freq" not in st.session_state:
         st.session_state["alloc_active_rebal_freq"] = active_portfolio['rebalancing_frequency']
-    st.selectbox("Rebalancing Frequency", freq_options, key="alloc_active_rebal_freq", on_change=update_rebal_freq, help="How often the portfolio is rebalanced.", )
+    st.selectbox("Rebalancing Frequency", freq_options, key="alloc_active_rebal_freq", on_change=update_rebal_freq, help="How often the portfolio is rebalanced.")
 # Note: Added Frequency removed for allocation tracker
 
 # Rebalancing and Added Frequency explanation removed for allocation tracker UI
@@ -5968,13 +5968,13 @@ st.text_input("Benchmark Ticker (default: ^GSPC, starts 1927-12-30, used for bet
 st.subheader("Tickers")
 col_ticker_buttons = st.columns([0.3, 0.3, 0.3, 0.1])
 with col_ticker_buttons[0]:
-    if st.button("Normalize Tickers %", on_click=normalize_stock_allocations_callback, width='stretch'):
+    if st.button("Normalize Tickers %", on_click=normalize_stock_allocations_callback, use_container_width=True):
         pass
 with col_ticker_buttons[1]:
-    if st.button("Equal Allocation %", on_click=equal_stock_allocation_callback, width='stretch'):
+    if st.button("Equal Allocation %", on_click=equal_stock_allocation_callback, use_container_width=True):
         pass
 with col_ticker_buttons[2]:
-    if st.button("Reset Tickers", on_click=reset_stock_selection_callback, width='stretch'):
+    if st.button("Reset Tickers", on_click=reset_stock_selection_callback, use_container_width=True):
         pass
 
 # Calculate live total ticker allocation
@@ -6243,12 +6243,12 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
     col_quick1, col_quick2 = st.columns([1, 1])
     
     with col_quick1:
-        if st.button("Select All", key="page2_select_all_tickers"):
+        if st.button("Select All", key="page2_select_all_tickers", use_container_width=True):
             st.session_state.bulk_selected_tickers = available_tickers.copy()
             st.rerun()
     
     with col_quick2:
-        if st.button("Clear Selection", key="page2_clear_all_tickers"):
+        if st.button("Clear Selection", key="page2_clear_all_tickers", use_container_width=True):
             st.session_state.bulk_selected_tickers = []
             st.rerun()
     
@@ -7264,7 +7264,6 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
                 file_name=filename,
                 mime="application/pdf",
                 key="alloc_json_pdf_download",
-                width='stretch'
             )
             st.success("PDF generated successfully! Click the download button above.")
         except Exception as e:
@@ -7352,7 +7351,7 @@ _ALLOC_TOL = 1.0
 
 # Clear all portfolios button - quick access for single portfolio pages
 if st.sidebar.button("🗑️ Clear All Portfolios", key="alloc_clear_all_portfolios_immediate", 
-                    help="Delete ALL portfolios and create a blank one", width='stretch'):
+                    help="Delete ALL portfolios and create a blank one", use_container_width=True):
     # Clear all portfolios and create a single blank portfolio
     st.session_state.alloc_portfolio_configs = [{
         'name': 'New Portfolio 1',
@@ -7419,18 +7418,18 @@ def clear_all_outputs():
     st.success("✅ All outputs cleared! Portfolio configurations preserved.")
 
 # Clear All Outputs Button
-if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", width='stretch', help="Clear all charts and results while keeping portfolio configurations"):
+if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", help="Clear all charts and results while keeping portfolio configurations", use_container_width=True):
     clear_all_outputs()
     st.rerun()
 
 # Cancel Run Button
-if st.sidebar.button("🛑 Cancel Run", type="secondary", width='stretch', help="Stop current backtest execution gracefully"):
+if st.sidebar.button("🛑 Cancel Run", type="secondary", help="Stop current backtest execution gracefully", use_container_width=True):
     st.session_state.hard_kill_requested = True
     st.toast("🛑 **CANCELLING** - Stopping backtest execution...", icon="⏹️")
     st.rerun()
 
 # Emergency Kill Button
-if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", width='stretch', help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states"):
+if st.sidebar.button("🚨 EMERGENCY KILL", type="secondary", help="Force terminate all processes immediately - Use for crashes, freezes, or unresponsive states", use_container_width=True):
     st.toast("🚨 **EMERGENCY KILL** - Force terminating all processes...", icon="💥")
     emergency_kill()
 
@@ -7468,7 +7467,7 @@ def calculate_minimum_lookback_days(portfolios):
     return total_days_needed
 
 # Move Run Backtest to the first sidebar to make it conspicuous and separate from config
-if st.sidebar.button("🚀 Run Backtest", type="primary", width='stretch'):
+if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=True):
     # Reset kill request when starting new backtest
     st.session_state.hard_kill_requested = False
     print(f"[THRESHOLD DEBUG] Run Backtest button clicked!")
@@ -8655,7 +8654,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 )])
                 fig_today.update_traces(textinfo='percent+label')
                 fig_today.update_layout(template='plotly_dark', margin=dict(t=10), height=600)
-                st.plotly_chart(fig_today, width='stretch', key=f"alloc_today_chart_{active_name}")
+                st.plotly_chart(fig_today, key=f"alloc_today_chart_{active_name}")
             
             # static shares table
 
@@ -8776,9 +8775,9 @@ if st.session_state.get('alloc_backtest_run', False):
                         return [''] * len(s)
                     sty = sty.apply(_highlight_total_row, axis=1)
                     
-                    st.dataframe(sty, width='stretch')
+                    st.dataframe(sty, )
                 except Exception:
-                    st.dataframe(df_display, width='stretch')
+                    st.dataframe(df_display, )
                 
                 # Add comprehensive portfolio data table right after the main allocation table
                 build_comprehensive_portfolio_table(alloc_dict, portfolio_value)
@@ -9173,7 +9172,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                        'Allocation %', 'Shares', 'Total Value ($)', '% of Portfolio', 
                                        'Market Cap ($B)', 'P/E Ratio', 'PEG Ratio', 'PEG Source', 'Beta', 'Analyst Rating']
                         df_overview = df_comprehensive[overview_cols].copy()
-                        st.dataframe(df_overview, width='stretch')
+                        st.dataframe(df_overview, )
                     
                     with tab2:
                         # Valuation tab - all valuation metrics
@@ -9182,7 +9181,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                         'Price/Cash Flow', 'EV/EBITDA', 'Book Value ($)', 'Cash per Share ($)',
                                         'Revenue per Share ($)', 'Target Price ($)', 'Target High ($)', 'Target Low ($)']
                         df_valuation = df_comprehensive[valuation_cols].copy()
-                        st.dataframe(df_valuation, width='stretch')
+                        st.dataframe(df_valuation, )
                     
                     with tab3:
                         # Financial Health tab - ratios and margins
@@ -9190,7 +9189,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                      'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)', 
                                      'Gross Margin (%)']
                         df_health = df_comprehensive[health_cols].copy()
-                        st.dataframe(df_health, width='stretch')
+                        st.dataframe(df_health, )
                     
                     with tab4:
                         # Growth & Dividends tab
@@ -9198,14 +9197,14 @@ if st.session_state.get('alloc_backtest_run', False):
                                      'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', 
                                      '5Y Dividend Growth (%)']
                         df_growth = df_comprehensive[growth_cols].copy()
-                        st.dataframe(df_growth, width='stretch')
+                        st.dataframe(df_growth, )
                     
                     with tab5:
                         # Technical tab - price levels and volume
                         technical_cols = ['Ticker', 'Current Price ($)', '52W High ($)', '52W Low ($)', 
                                         '50D MA ($)', '200D MA ($)', 'Beta', 'Volume', 'Avg Volume']
                         df_technical = df_comprehensive[technical_cols].copy()
-                        st.dataframe(df_technical, width='stretch')
+                        st.dataframe(df_technical, )
                     
                     # Add portfolio-weighted summary statistics in collapsible section
                     with st.expander("📊 Portfolio-Weighted Summary Statistics", expanded=True):
@@ -9269,7 +9268,7 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         if summary_data:
                             summary_df = pd.DataFrame(summary_data)
-                            st.dataframe(summary_df, width='stretch', hide_index=True)
+                            st.dataframe(summary_df, hide_index=True)
                             
                             # Add interpretation
                             st.markdown("**📈 Portfolio Interpretation:**")
@@ -9309,7 +9308,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             }).round(2)
                             
                             # Display table
-                            st.dataframe(sector_df, width='stretch', hide_index=True)
+                            st.dataframe(sector_df, hide_index=True)
                             
                             # Create pie chart for sectors (filter out 0% allocations)
                             if len(sector_data) > 0:
@@ -9329,7 +9328,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                         margin=dict(t=50, b=50),
                                         template='plotly_dark'
                                     )
-                                    st.plotly_chart(fig_sector, width='stretch')
+                                    st.plotly_chart(fig_sector, )
                     
                     with col2:
                         # Industry breakdown with table and pie chart
@@ -9343,7 +9342,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             }).round(2)
                             
                             # Display table
-                            st.dataframe(industry_df, width='stretch', hide_index=True)
+                            st.dataframe(industry_df, hide_index=True)
                             
                             # Create pie chart for industries (filter out 0% allocations)
                             if len(industry_data) > 0:
@@ -9363,7 +9362,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                         margin=dict(t=50, b=50),
                                         template='plotly_dark'
                                     )
-                                    st.plotly_chart(fig_industry, width='stretch')
+                                    st.plotly_chart(fig_industry, )
                     
                     # Portfolio risk metrics
                     st.markdown("### ⚠️ Portfolio Risk Metrics")
@@ -9888,7 +9887,7 @@ if st.session_state.get('alloc_backtest_run', False):
             </style>
             """, unsafe_allow_html=True)
             
-            st.dataframe(styled_portfolio_returns, width='stretch')
+            st.dataframe(styled_portfolio_returns, )
         else:
             st.info("Portfolio returns data not available.")
         
@@ -10284,7 +10283,7 @@ if st.session_state.get('alloc_backtest_run', False):
             </style>
             """, unsafe_allow_html=True)
             
-            st.dataframe(styled_benchmark, width='stretch')
+            st.dataframe(styled_benchmark, )
         else:
             st.info("Benchmark data not available.")
         
@@ -10392,7 +10391,7 @@ if st.session_state.get('alloc_backtest_run', False):
         </style>
         """, unsafe_allow_html=True)
         
-        st.dataframe(styler, width='stretch')
+        st.dataframe(styler, )
 
     if metrics_for_portfolio:
         st.markdown("---")
@@ -10572,7 +10571,7 @@ if st.session_state.get('alloc_backtest_run', False):
             </style>
             """, unsafe_allow_html=True)
             
-            st.dataframe(styler_metrics, width='stretch')
+            st.dataframe(styler_metrics, )
 
     # Allocation pie charts (last rebalance vs current)
     if allocs_for_portfolio:
@@ -10731,9 +10730,9 @@ if st.session_state.get('alloc_backtest_run', False):
                         return [''] * len(s)
                     sty = sty.apply(_highlight_total_row, axis=1)
                     
-                    st.dataframe(sty, width='stretch')
+                    st.dataframe(sty, )
                 except Exception:
-                    st.dataframe(df_display, width='stretch')
+                    st.dataframe(df_display, )
             
             # Add Returns Table BEFORE the pie charts
             st.markdown("### 📈 **Returns Summary**")
@@ -10935,7 +10934,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 styled_returns = styled_returns.apply(highlight_portfolio_row, axis=1)
                 
                 # Display the table
-                st.dataframe(styled_returns, width='stretch')
+                st.dataframe(styled_returns, )
             else:
                 st.info("Returns data not available. Please run a backtest first.")
             
@@ -10953,7 +10952,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     )])
                     fig_rebal_small.update_traces(textinfo='percent+label')
                     fig_rebal_small.update_layout(template='plotly_dark', margin=dict(t=10))
-                    st.plotly_chart(fig_rebal_small, width='stretch', key=f"alloc_rebal_small_{active_name}")
+                    st.plotly_chart(fig_rebal_small, key=f"alloc_rebal_small_{active_name}")
                 with col2:
                     st.markdown(f"**Portfolio Evolution (Current Allocation)**")
                     fig_today_small = go.Figure(data=[go.Pie(
@@ -10963,7 +10962,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     )])
                     fig_today_small.update_traces(textinfo='percent+label')
                     fig_today_small.update_layout(template='plotly_dark', margin=dict(t=10))
-                    st.plotly_chart(fig_today_small, width='stretch', key=f"alloc_today_small_{active_name}")
+                    st.plotly_chart(fig_today_small, key=f"alloc_today_small_{active_name}")
             except Exception:
                 # If plotting fails, continue and still render the tables below
                 pass
@@ -10988,7 +10987,7 @@ if st.session_state.get('alloc_backtest_run', False):
         key="allocations_custom_report_name"
     )
     
-    if st.button("Generate PDF Report", type="primary", width='stretch', key="alloc_pdf_btn_2"):
+    if st.button("Generate PDF Report", type="primary", key="alloc_pdf_btn_2", use_container_width=True):
         try:
             success = generate_allocations_pdf(custom_report_name)
             if success:
@@ -11007,7 +11006,6 @@ if st.session_state.get('alloc_backtest_run', False):
                     data=st.session_state.get('pdf_buffer', b''),
                     file_name=filename,
                     mime="application/pdf",
-                    width='stretch'
                 )
             else:
                 st.error("❌ Failed to generate PDF report")
