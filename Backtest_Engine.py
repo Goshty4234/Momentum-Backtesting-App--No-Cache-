@@ -5232,7 +5232,7 @@ if st.session_state.fig_dict:
                 hovermode='x unified',
                 template='plotly_white',
                 margin=dict(l=80, r=20, t=60, b=60),
-                xaxis=dict(rangeslider=dict(visible=True), type='date')
+                xaxis=dict(rangeslider=dict(visible=False), type='date')
             )
 
             # Align the x-range with other charts if available
