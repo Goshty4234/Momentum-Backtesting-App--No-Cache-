@@ -12796,15 +12796,12 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 pass
             # Yearly performance section (interactive table below)
             all_years = {}
-            for name in portfolio_order:
-                if name in all_results:
-                    ser = all_results[name]
-                    # Use the with-additions series for yearly performance (user requested)
-                    yearly = ser['with_additions'].resample('YE').last()
-                    all_years[name] = yearly
+            for name, ser in all_results.items():
+                # Use the with-additions series for yearly performance (user requested)
+                yearly = ser['with_additions'].resample('YE').last()
+                all_years[name] = yearly
             years = sorted(list(set(y.year for ser in all_years.values() for y in ser.index)))
-            # CRITICAL: Maintain portfolio order from portfolio_configs
-            names = [name for name in portfolio_order if name in all_years]
+            names = list(all_years.keys())
             
             # Print console log yearly table correctly
             col_width = 22
