@@ -7922,6 +7922,15 @@ def update_active_portfolio_index():
         st.session_state['multi_backtest_active_use_sma_filter'] = active_portfolio.get('use_sma_filter', False)
         st.session_state['multi_backtest_active_sma_window'] = active_portfolio.get('sma_window', 200)
         
+        # NUCLEAR: FORCE MA Filter widgets to sync with portfolio-specific keys
+        portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+        ma_filter_key = f"multi_backtest_active_use_sma_filter_{portfolio_index}"
+        ma_window_key = f"multi_backtest_active_ma_window_{portfolio_index}"
+        ma_type_key = f"multi_backtest_active_ma_type_{portfolio_index}"
+        st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
+        st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
+        st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
+        
         # NUCLEAR: If portfolio has momentum enabled but no windows, FORCE create them
         if active_portfolio.get('use_momentum', False) and not active_portfolio.get('momentum_windows'):
             active_portfolio['momentum_windows'] = [
@@ -11404,12 +11413,10 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
     ma_window_key = f"multi_backtest_active_ma_window_{st.session_state.multi_backtest_active_portfolio_index}"
     ma_type_key = f"multi_backtest_active_ma_type_{st.session_state.multi_backtest_active_portfolio_index}"
     
-    if ma_filter_key not in st.session_state:
-        st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
-    if ma_window_key not in st.session_state:
-        st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
-    if ma_type_key not in st.session_state:
-        st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
+    # FORCE sync with current portfolio values (like momentum checkbox does)
+    st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
+    st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
+    st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
 
     # MA Filter options - LEFT ALIGNED STYLE
     st.checkbox("Enable MA Filter", 
