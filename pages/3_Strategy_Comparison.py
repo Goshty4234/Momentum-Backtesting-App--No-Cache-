@@ -3866,7 +3866,14 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 price_end = df_t.loc[price_end_index, "Close"]
                 if pd.isna(price_start) or pd.isna(price_end) or price_start == 0:
                     is_valid = False; break
-                ret = (price_end - price_start) / price_start
+                
+                # ACADEMIC FIX: Include dividends in momentum calculation if configured (Jegadeesh & Titman 1993)
+                if include_dividends.get(t, False):
+                    # Calculate cumulative dividends in the momentum window
+                    divs_in_period = df_t.loc[price_start_index:price_end_index, "Dividends"].fillna(0).sum()
+                    ret = ((price_end + divs_in_period) - price_start) / price_start
+                else:
+                    ret = (price_end - price_start) / price_start
                 asset_returns += ret * weight
             if is_valid:
                 cumulative_returns[t] = asset_returns
@@ -5062,6 +5069,13 @@ def continuous_duplicate_check():
 continuous_duplicate_check()
 
 def add_portfolio_callback():
+    # Inherit custom dates from current global settings if enabled
+    inherit_start_date = None
+    inherit_end_date = None
+    if st.session_state.get("strategy_comparison_use_custom_dates", False):
+        inherit_start_date = st.session_state.get("strategy_comparison_start_date")
+        inherit_end_date = st.session_state.get("strategy_comparison_end_date")
+    
     # Create a completely blank portfolio with no default tickers and no momentum
     new_portfolio = {
         'name': f"New Portfolio {len(st.session_state.strategy_comparison_portfolio_configs) + 1}",
@@ -5090,8 +5104,8 @@ def add_portfolio_callback():
         'use_max_allocation': False,
         'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
-        'start_date_user': None,
-        'end_date_user': None,
+        'start_date_user': inherit_start_date,
+        'end_date_user': inherit_end_date,
         'fusion_portfolio': {'enabled': False, 'selected_portfolios': [], 'allocations': {}}
     }
     
@@ -6635,6 +6649,42 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="strategy_comparison_cl
     st.success("✅ All portfolios cleared! Created 'New Portfolio 1'")
     st.rerun()
 
+# Clear All Outputs Function
+def clear_all_outputs():
+    """Clear all backtest results and outputs while preserving portfolio configurations"""
+    # Clear all result data
+    st.session_state.multi_all_results = None
+    st.session_state.multi_all_allocations = None
+    st.session_state.multi_all_metrics = None
+    st.session_state.multi_backtest_all_drawdowns = None
+    st.session_state.multi_backtest_stats_df_display = None
+    st.session_state.multi_backtest_all_years = None
+    st.session_state.multi_backtest_portfolio_key_map = {}
+    st.session_state.multi_backtest_ran = False
+    
+    # Clear strategy comparison page specific data
+    st.session_state.strategy_comparison_all_results = None
+    st.session_state.strategy_comparison_all_allocations = None
+    st.session_state.strategy_comparison_all_metrics = None
+    st.session_state.strategy_comparison_snapshot_data = None
+    st.session_state.strategy_comparison_ran = False
+    
+    # Clear any processing flags
+    for key in list(st.session_state.keys()):
+        if key.startswith("processing_portfolio_"):
+            del st.session_state[key]
+    
+    # Clear any cached data
+    if 'raw_data' in st.session_state:
+        del st.session_state['raw_data']
+    
+    st.success("✅ All outputs cleared! Portfolio configurations preserved.")
+
+# Clear All Outputs Button
+if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_container_width=True, help="Clear all charts and results while keeping portfolio configurations"):
+    clear_all_outputs()
+    st.rerun()
+
 # NEW: Enhanced bulk portfolio management dropdown
 if len(st.session_state.strategy_comparison_portfolio_configs) > 1:
     st.sidebar.markdown("---")
@@ -7212,42 +7262,6 @@ with st.sidebar.expander("📝 Bulk Ticker Input", expanded=False):
 # Validation constants
 _TOTAL_TOL = 1.0
 _ALLOC_TOL = 1.0
-
-# Clear All Outputs Function
-def clear_all_outputs():
-    """Clear all backtest results and outputs while preserving portfolio configurations"""
-    # Clear all result data
-    st.session_state.multi_all_results = None
-    st.session_state.multi_all_allocations = None
-    st.session_state.multi_all_metrics = None
-    st.session_state.multi_backtest_all_drawdowns = None
-    st.session_state.multi_backtest_stats_df_display = None
-    st.session_state.multi_backtest_all_years = None
-    st.session_state.multi_backtest_portfolio_key_map = {}
-    st.session_state.multi_backtest_ran = False
-    
-    # Clear strategy comparison page specific data
-    st.session_state.strategy_comparison_all_results = None
-    st.session_state.strategy_comparison_all_allocations = None
-    st.session_state.strategy_comparison_all_metrics = None
-    st.session_state.strategy_comparison_snapshot_data = None
-    st.session_state.strategy_comparison_ran = False
-    
-    # Clear any processing flags
-    for key in list(st.session_state.keys()):
-        if key.startswith("processing_portfolio_"):
-            del st.session_state[key]
-    
-    # Clear any cached data
-    if 'raw_data' in st.session_state:
-        del st.session_state['raw_data']
-    
-    st.success("✅ All outputs cleared! Portfolio configurations preserved.")
-
-# Clear All Outputs Button
-if st.sidebar.button("🗑️ Clear All Outputs", type="secondary", use_container_width=True, help="Clear all charts and results while keeping portfolio configurations"):
-    clear_all_outputs()
-    st.rerun()
 
 # Cancel Run Button
 if st.sidebar.button("🛑 Cancel Run", type="secondary", use_container_width=True, help="Stop current backtest execution gracefully"):
