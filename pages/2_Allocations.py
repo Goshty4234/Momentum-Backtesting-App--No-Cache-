@@ -10216,12 +10216,14 @@ if st.session_state.get('alloc_backtest_run', False):
                         if isinstance(val, str) and val != 'N/A' and not val.endswith('%'):
                             try:
                                 pe_val = float(val)
-                                if pe_val > 30:
-                                    return 'color: #ff4444; font-weight: bold'
-                                elif pe_val > 20:
-                                    return 'color: #ffaa00; font-weight: bold'
+                                if pe_val >= 35:
+                                    return 'color: #ff4444; font-weight: bold'  # Red for PE >= 35 (Overvalued)
+                                elif pe_val >= 25:
+                                    return 'color: #ffaa00; font-weight: bold'  # Orange for PE 25-35 (Expensive)
+                                elif pe_val >= 15:
+                                    return 'color: #00ff00; font-weight: bold'  # Green for PE 15-25 (Fair Value)
                                 else:
-                                    return 'color: #00ff00; font-weight: bold'
+                                    return 'color: #00ff00; font-weight: bold'  # Green for PE < 15 (Undervalued)
                             except:
                                 pass
                         return ''
@@ -10633,12 +10635,14 @@ if st.session_state.get('alloc_backtest_run', False):
                         if isinstance(val, str) and val != 'N/A' and not val.endswith('%'):
                             try:
                                 pe_val = float(val)
-                                if pe_val > 30:
-                                    return 'color: #ff4444; font-weight: bold'
-                                elif pe_val > 20:
-                                    return 'color: #ffaa00; font-weight: bold'
+                                if pe_val >= 35:
+                                    return 'color: #ff4444; font-weight: bold'  # Red for PE >= 35 (Overvalued)
+                                elif pe_val >= 25:
+                                    return 'color: #ffaa00; font-weight: bold'  # Orange for PE 25-35 (Expensive)
+                                elif pe_val >= 15:
+                                    return 'color: #00ff00; font-weight: bold'  # Green for PE 15-25 (Fair Value)
                                 else:
-                                    return 'color: #00ff00; font-weight: bold'
+                                    return 'color: #00ff00; font-weight: bold'  # Green for PE < 15 (Undervalued)
                             except:
                                 pass
                         return ''
