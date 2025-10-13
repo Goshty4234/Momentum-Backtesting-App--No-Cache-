@@ -1766,7 +1766,7 @@ def _get_added_cash_dates(all_dates: pd.DatetimeIndex, added_frequency: str):
 # NEW MOMENTUM LOGIC
 # =============================
 
-def calculate_momentum(date, current_assets, momentum_windows, data_dict):
+def calculate_momentum(date, current_assets, momentum_windows, data_dict, include_dividends=None):
     cumulative_returns, valid_assets = {}, []
     filtered_windows = [w for w in momentum_windows if w["weight"] > 0]
     # Normalize weights so they sum to 1
@@ -1823,8 +1823,19 @@ def calculate_momentum(date, current_assets, momentum_windows, data_dict):
                 if pd.isna(price_start) or pd.isna(price_end) or price_start == 0:
                     is_valid = False
                     break
+                
+                # ACADEMIC FIX: Include dividends in momentum calculation if configured (Jegadeesh & Titman 1993)
+                if include_dividends and include_dividends.get(t, False):
+                    # Calculate cumulative dividends in the momentum window
+                    # Backtest_Engine uses "Dividend_per_share" column, not "Dividends"
+                    if "Dividend_per_share" in df_t.columns:
+                        divs_in_period = df_t.loc[price_start_index:price_end_index, "Dividend_per_share"].fillna(0).sum()
+                    else:
+                        divs_in_period = 0.0
+                    ret = ((price_end + divs_in_period) - price_start) / price_start
+                else:
+                    ret = (price_end - price_start) / price_start
                     
-                ret = (price_end - price_start) / price_start
                 asset_returns += ret * weight
                 
             except Exception:
@@ -1981,6 +1992,7 @@ def _rebalance_portfolio(
     exclude_days_vol_val,
     rebalancing_frequency=None,
     current_asset_values=None,
+    include_dividends=None,
 ):
     """Rebalancing now uses the new, more robust momentum logic."""
     global data, calc_beta, calc_volatility, beta_window_days, exclude_days_beta, benchmark_ticker, vol_window_days, exclude_days_vol, use_relative_momentum
@@ -2037,7 +2049,7 @@ def _rebalance_portfolio(
         return target_allocation, rebalance_metrics
 
     if use_momentum:
-        returns, valid_assets = calculate_momentum(current_date, set(tradable_tickers_today), momentum_windows, data)
+        returns, valid_assets = calculate_momentum(current_date, set(tradable_tickers_today), momentum_windows, data, include_dividends)
         weights, metrics = calculate_momentum_weights(returns, valid_assets, date=current_date, negative_momentum_strategy=negative_momentum_strategy)
         
         rebalance_metrics["momentum_scores"] = {t: metrics.get(t, {}).get("Momentum", None) for t in tradable_tickers_today}
@@ -2507,7 +2519,8 @@ def run_backtest(
                     vol_window_days,
                     exclude_days_vol,
                     rebalancing_frequency,
-                    asset_values_with_additions
+                    asset_values_with_additions,
+                    include_dividends
                 )
             else:
                 # Normal rebalancing for other strategies
@@ -2529,7 +2542,8 @@ def run_backtest(
                     vol_window_days,
                     exclude_days_vol,
                     rebalancing_frequency,
-                    asset_values_with_additions
+                    asset_values_with_additions,
+                    include_dividends
                 )
             # Store rebalance metrics ONLY on true rebalancing dates
             rebalance_metrics_list.append(rebalance_metrics)
@@ -2600,7 +2614,8 @@ def run_backtest(
                 vol_window_days,
                 exclude_days_vol,
                 rebalancing_frequency,
-                None
+                None,
+                include_dividends
             )
 
             # Reset shares to zero and calculate new shares, updating cash
@@ -4252,15 +4267,24 @@ with st.sidebar:
                 f"Ticker {i+1}", key=ticker_key, on_change=update_ticker_callback, args=(i,)
             )
         with col3:
-            # Use the same pattern as working Multi backtest and Allocations pages
-            div_key = f"divs_checkbox_{i}"
+            # EXACT SAME SYSTEM AS PAGE 1 MULTI BACKTEST
+            div_key = f"backtest_engine_div_{i}"
+            # Ensure include_dividends key exists with default value
+            if i < len(st.session_state.divs):
+                include_dividends_default = st.session_state.divs[i]
+            else:
+                include_dividends_default = True
+            
+            # Auto-disable dividends for negative leverage (inverse ETFs) ONLY on first display
+            # Don't override if user has explicitly set a value
+            if '?L=-' in st.session_state.tickers[i] and div_key not in st.session_state:
+                include_dividends_default = False
+            
             if div_key not in st.session_state:
-                st.session_state[div_key] = st.session_state.divs[i]
-            def update_dividend_callback(i):
-                # Check if index is still valid after potential ticker deletions
-                if i < len(st.session_state.divs) and div_key in st.session_state:
-                    st.session_state.divs[i] = st.session_state[div_key]
-            st.checkbox("Include Dividends", key=div_key, on_change=update_dividend_callback, args=(i,))
+                st.session_state[div_key] = include_dividends_default
+            st.checkbox("Reinvest Dividends", key=div_key)
+            if st.session_state[div_key] != include_dividends_default and i < len(st.session_state.divs):
+                st.session_state.divs[i] = st.session_state[div_key]
         with col4:
             if st.button("x", key=f"remove_ticker_{i}", help="Remove this ticker", on_click=remove_ticker_callback, args=(st.session_state.tickers[i],)):
                 pass
