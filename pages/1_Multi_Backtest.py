@@ -11480,6 +11480,25 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
     col_mom_options, col_beta_vol = st.columns(2)
     with col_mom_options:
         st.markdown("**Momentum Strategy Options**")
+        
+        # CRITICAL: Sync session state BEFORE creating selectboxes to avoid double-click issue
+        momentum_key = f"multi_backtest_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
+        negative_momentum_key = f"multi_backtest_negative_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
+        
+        if 'multi_backtest_active_momentum_strategy' in st.session_state:
+            # Update both session state and portfolio config
+            st.session_state[momentum_key] = st.session_state['multi_backtest_active_momentum_strategy']
+            active_portfolio['momentum_strategy'] = st.session_state['multi_backtest_active_momentum_strategy']
+            # Clear the temp session state to prevent conflicts
+            del st.session_state['multi_backtest_active_momentum_strategy']
+        
+        if 'multi_backtest_active_negative_momentum_strategy' in st.session_state:
+            # Update both session state and portfolio config
+            st.session_state[negative_momentum_key] = st.session_state['multi_backtest_active_negative_momentum_strategy']
+            active_portfolio['negative_momentum_strategy'] = st.session_state['multi_backtest_active_negative_momentum_strategy']
+            # Clear the temp session state to prevent conflicts
+            del st.session_state['multi_backtest_active_negative_momentum_strategy']
+        
         momentum_strategy = st.selectbox(
             "Momentum strategy when NOT all negative:",
             ["Classic", "Relative Momentum"],
