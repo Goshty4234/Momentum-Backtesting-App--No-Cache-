@@ -5179,6 +5179,14 @@ def single_backtest(config, sim_index, reindexed_data):
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
+        # Build dictionary of individual ticker caps from stock configs
+        individual_caps = {}
+        for stock in config.get('stocks', []):
+            ticker = stock.get('ticker', '')
+            individual_cap = stock.get('max_allocation_percent', None)
+            if individual_cap is not None and individual_cap > 0:
+                individual_caps[ticker] = individual_cap / 100.0
+        
         if use_max_allocation and current_allocations:
             max_allocation_decimal = max_allocation_percent / 100.0
             
@@ -5247,7 +5255,7 @@ def single_backtest(config, sim_index, reindexed_data):
                 current_allocations = current_allocations
         
         # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-        if use_max_allocation and current_allocations:
+        if (use_max_allocation or individual_caps) and current_allocations:
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # Check if any stocks exceed the cap after threshold filtering and normalization
@@ -5718,6 +5726,14 @@ def single_backtest(config, sim_index, reindexed_data):
                 use_threshold = config.get('use_minimal_threshold', False)
                 threshold_percent = config.get('minimal_threshold_percent', 2.0)
                 
+                # Build dictionary of individual ticker caps from stock configs
+                individual_caps = {}
+                for stock in config.get('stocks', []):
+                    ticker = stock.get('ticker', '')
+                    individual_cap = stock.get('max_allocation_percent', None)
+                    if individual_cap is not None and individual_cap > 0:
+                        individual_caps[ticker] = individual_cap / 100.0
+                
                 # Start with original allocations
                 rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
                 
@@ -5838,7 +5854,7 @@ def single_backtest(config, sim_index, reindexed_data):
                         rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
                 
                 # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-                if use_max_allocation and rebalance_allocations:
+                if (use_max_allocation or individual_caps) and rebalance_allocations:
                     max_allocation_decimal = max_allocation_percent / 100.0
                     
                     # Check if any stocks exceed the cap after threshold filtering and normalization
