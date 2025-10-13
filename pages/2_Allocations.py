@@ -2008,10 +2008,10 @@ if 'alloc_portfolio_configs' not in st.session_state:
         {
             'name': 'Allocation Portfolio',
             'stocks': [
-                {'ticker': 'SPY', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
-                {'ticker': 'QQQ', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
-                {'ticker': 'GLD', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
-                {'ticker': 'TLT', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
+                {'ticker': 'SPY', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
+                {'ticker': 'QQQ', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
+                {'ticker': 'GLD', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
+                {'ticker': 'TLT', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
             ],
             'benchmark_ticker': '^GSPC',
             'initial_value': 10000,
@@ -2065,6 +2065,8 @@ if 'alloc_portfolio_configs' in st.session_state:
                 stock['include_in_sma_filter'] = True
             if 'ma_reference_ticker' not in stock:
                 stock['ma_reference_ticker'] = ''  # Empty = use ticker's own MA
+            if 'max_allocation_percent' not in stock:
+                stock['max_allocation_percent'] = None
 if 'alloc_paste_json_text' not in st.session_state:
     st.session_state.alloc_paste_json_text = ""
 
@@ -5490,7 +5492,7 @@ def remove_portfolio_callback():
         st.session_state.alloc_rerun_flag = True
 
 def add_stock_callback():
-    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'].append({'ticker': '', 'allocation': 0.0, 'include_dividends': True})
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'].append({'ticker': '', 'allocation': 0.0, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None})
     st.session_state.alloc_rerun_flag = True
 
 def remove_stock_callback(ticker):
@@ -5749,6 +5751,13 @@ def paste_json_callback():
             # Debug output
             st.info(f"Converted {len(stocks)} stocks from legacy format: {[s['ticker'] for s in stocks]}")
         
+        # Ensure all stocks have max_allocation_percent field
+        for stock in stocks:
+            if 'max_allocation_percent' not in stock:
+                stock['max_allocation_percent'] = None
+            if 'include_in_sma_filter' not in stock:
+                stock['include_in_sma_filter'] = True
+        
         # Sanitize momentum window weights to prevent StreamlitValueAboveMaxError
         momentum_windows = json_data.get('momentum_windows', [])
         for window in momentum_windows:
@@ -5836,6 +5845,12 @@ def paste_json_callback():
         st.session_state['alloc_active_sma_window'] = allocations_config.get('sma_window', 200)
         st.session_state['alloc_active_ma_type'] = allocations_config.get('ma_type', 'SMA')
         
+        # Update session state for momentum settings (FIX FOR VISUAL BUG)
+        st.session_state['alloc_active_use_momentum'] = allocations_config.get('use_momentum', True)
+        st.session_state['alloc_active_momentum_strategy'] = allocations_config.get('momentum_strategy', 'Classic')
+        st.session_state['alloc_active_negative_momentum_strategy'] = allocations_config.get('negative_momentum_strategy', 'Cash')
+        st.session_state['alloc_active_calc_beta'] = allocations_config.get('calc_beta', False)
+        st.session_state['alloc_active_calc_vol'] = allocations_config.get('calc_volatility', False)
         
         # Update portfolio name input field to match the imported portfolio
         st.session_state.alloc_portfolio_name = allocations_config.get('name', 'Allocation Portfolio')
@@ -6169,7 +6184,31 @@ for i in range(len(active_portfolio['stocks'])):
             if st.session_state[alloc_key] != int(stock['allocation'] * 100):
                 st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['allocation'] = st.session_state[alloc_key] / 100.0
         else:
-            st.write("")
+            # Show Max Cap % field when momentum is active
+            max_cap_key = f"alloc_max_cap_{st.session_state.alloc_active_portfolio_index}_{i}"
+            # Ensure max_allocation_percent key exists
+            if 'max_allocation_percent' not in stock:
+                stock['max_allocation_percent'] = None
+            
+            if max_cap_key not in st.session_state:
+                st.session_state[max_cap_key] = int(stock['max_allocation_percent']) if stock['max_allocation_percent'] is not None else 0
+            
+            max_cap_value = st.number_input(
+                "Max Cap %", 
+                min_value=0, 
+                max_value=100,
+                step=1, 
+                format="%d", 
+                key=max_cap_key, 
+                label_visibility="visible",
+                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled)"
+            )
+            
+            # Update the portfolio config
+            if max_cap_value > 0:
+                st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['max_allocation_percent'] = float(max_cap_value)
+            else:
+                st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['max_allocation_percent'] = None
     with col_d:
         div_key = f"alloc_div_{st.session_state.alloc_active_portfolio_index}_{i}"
         # Ensure include_dividends key exists with default value
@@ -6496,7 +6535,9 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_
                 st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].append({
                     'ticker': resolved_ticker,  # Add the resolved Yahoo ticker
                     'allocation': 0.0, 
-                    'include_dividends': True
+                    'include_dividends': True,
+                    'include_in_sma_filter': True,
+                    'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
                 st.session_state.no_cache_alloc_special_tickers_expanded = True
@@ -6603,7 +6644,9 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_
                 st.session_state.alloc_portfolio_configs[portfolio_index]['stocks'].append({
                     'ticker': resolved_ticker,  # Add the resolved ticker
                     'allocation': 0.0, 
-                    'include_dividends': include_divs
+                    'include_dividends': include_divs,
+                    'include_in_sma_filter': True,
+                    'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
                 st.session_state.no_cache_alloc_special_tickers_expanded = True
@@ -6918,17 +6961,31 @@ if active_portfolio['use_momentum']:
     col_mom_options, col_beta_vol = st.columns(2)
     with col_mom_options:
         st.markdown("**Momentum Strategy Options**")
+        
+        # Initialize or sync with imported values
+        momentum_key = f"momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
+        negative_momentum_key = f"negative_momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
+        
+        # FORCE sync with session state if it was updated by JSON import
+        if 'alloc_active_momentum_strategy' in st.session_state:
+            st.session_state[momentum_key] = st.session_state['alloc_active_momentum_strategy']
+            active_portfolio['momentum_strategy'] = st.session_state['alloc_active_momentum_strategy']
+        
+        if 'alloc_active_negative_momentum_strategy' in st.session_state:
+            st.session_state[negative_momentum_key] = st.session_state['alloc_active_negative_momentum_strategy']
+            active_portfolio['negative_momentum_strategy'] = st.session_state['alloc_active_negative_momentum_strategy']
+        
         momentum_strategy = st.selectbox(
             "Momentum strategy when NOT all negative:",
             ["Classic", "Relative Momentum"],
             index=["Classic", "Relative Momentum"].index(active_portfolio.get('momentum_strategy', 'Classic')),
-            key=f"momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
+            key=momentum_key
         )
         negative_momentum_strategy = st.selectbox(
             "Strategy when ALL momentum scores are negative:",
             ["Cash", "Equal weight", "Relative momentum"],
             index=["Cash", "Equal weight", "Relative momentum"].index(active_portfolio.get('negative_momentum_strategy', 'Cash')),
-            key=f"negative_momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
+            key=negative_momentum_key
         )
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
