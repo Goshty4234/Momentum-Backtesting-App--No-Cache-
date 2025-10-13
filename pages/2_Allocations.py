@@ -4369,7 +4369,14 @@ def single_backtest(config, sim_index, reindexed_data):
                 if pd.isna(price_start) or pd.isna(price_end) or price_start == 0:
                     is_valid = False
                     break
-                ret = (price_end - price_start) / price_start
+                
+                # ACADEMIC FIX: Include dividends in momentum calculation if configured (Jegadeesh & Titman 1993)
+                if include_dividends.get(t, False):
+                    # Calculate cumulative dividends in the momentum window
+                    divs_in_period = df_t.loc[price_start_index:price_end_index, "Dividends"].fillna(0).sum()
+                    ret = ((price_end + divs_in_period) - price_start) / price_start
+                else:
+                    ret = (price_end - price_start) / price_start
                 asset_returns += ret * weight
             if is_valid:
                 cumulative_returns[t] = asset_returns
@@ -7468,10 +7475,10 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="alloc_clear_all_portfo
         'momentum_windows': [
             {"lookback": 365, "exclude": 30, "weight": 1.0}
         ],
-        'calc_beta': True,
+        'calc_beta': False,
         'beta_window_days': 365,
         'exclude_days_beta': 30,
-        'calc_volatility': True,
+        'calc_volatility': False,
         'vol_window_days': 365,
         'exclude_days_vol': 30,
         'use_minimal_threshold': False,
