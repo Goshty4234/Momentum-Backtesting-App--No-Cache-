@@ -1,8 +1,4 @@
-# CACHED VERSION - Optimized with @st.cache_data decorators for better performance
-# Performance Enhancements:
-# - @st.cache_data on ticker data functions (24h TTL) → Reduced API calls
-# - Parallel processing enabled by default for 3+ portfolios → 2-3x speedup
-# - TOTAL EXPECTED SPEEDUP: 2-3x faster
+# NO_CACHE VERSION - All @st.cache_data decorators removed for reliability (with full MA Filter support)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -653,8 +649,6 @@ def parse_leverage_ticker(ticker_symbol: str) -> tuple[str, float]:
     """
     base_ticker, leverage, _ = parse_ticker_parameters(ticker_symbol)
     return base_ticker, leverage
-
-@st.cache_data(show_spinner=False)
 def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_ratio: float = 0.0) -> pd.DataFrame:
     """
     Apply daily leverage multiplier and expense ratio to price data, simulating leveraged ETF behavior.
@@ -862,8 +856,6 @@ def resolve_ticker_alias(ticker):
         upper_ticker = 'BRK-A'
     
     return aliases.get(upper_ticker, upper_ticker)
-
-@st.cache_data(show_spinner=False)
 def generate_zero_return_data(period="max"):
     """Generate synthetic zero return data for ZEROX ticker"""
     try:
@@ -889,8 +881,6 @@ def generate_zero_return_data(period="max"):
             'Dividends': [0.0] * len(dates)
         }, index=dates)
         return zero_data
-
-@st.cache_data(show_spinner=False)
 def get_gold_complete_data(period="max"):
     """Get complete gold data from historical CSV and GLD"""
     try:
@@ -1183,8 +1173,6 @@ def get_goldsim_complete_data(period="max"):
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
-
-@st.cache_data(ttl=7200, show_spinner=False)
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
     Smart batch download with fallback to individual downloads.
@@ -1298,15 +1286,13 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                 results[ticker_symbol] = pd.DataFrame()
     
     return results
-
-@st.cache_data(ttl=86400, show_spinner=False)
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
-    """Get ticker data (CACHED version - 24 hours TTL - Optimized for backtesting)
+    """Get ticker data (NO_CACHE version)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period (used in cache key to prevent conflicts)
-        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
+        period: Data period
+        auto_adjust: Auto-adjust setting
     """
     try:
         # Parse parameters from ticker symbol
@@ -1372,10 +1358,8 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=
         return hist
     except Exception:
         return pd.DataFrame()
-
-@st.cache_data(ttl=86400, show_spinner=False)
 def get_ticker_info(ticker_symbol):
-    """Cache ticker info to improve performance across multiple tabs - 24 hours TTL"""
+    """Get ticker info (NO_CACHE version)"""
     try:
         # Parse leverage from ticker symbol
         base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
@@ -3314,7 +3298,7 @@ if 'multi_backtest_page_initialized' not in st.session_state:
         {
             'name': 'Benchmark Only (SPY)',
             'stocks': [
-                {'ticker': 'SPY', 'allocation': 1.0, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
+                {'ticker': 'SPY', 'allocation': 1.0, 'include_dividends': True, 'include_in_sma_filter': True},
             ],
             'benchmark_ticker': '^GSPC',
             'initial_value': 10000,
@@ -3383,10 +3367,10 @@ if 'multi_backtest_page_initialized' not in st.session_state:
         {
             'name': 'Equal Weight Portfolio (No Momentum)',
             'stocks': [
-                {'ticker': 'SPY', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
-                {'ticker': 'QQQ', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
-                {'ticker': 'GLD', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
-                {'ticker': 'TLT', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None},
+                {'ticker': 'SPY', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
+                {'ticker': 'QQQ', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
+                {'ticker': 'GLD', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
+                {'ticker': 'TLT', 'allocation': 0.25, 'include_dividends': True, 'include_in_sma_filter': True},
             ],
             'benchmark_ticker': '^GSPC',
             'initial_value': 10000,
@@ -3790,10 +3774,8 @@ def get_portfolio_value(portfolio_name):
                 if not pd.isna(latest_value) and latest_value > 0:
                     portfolio_value = float(latest_value)
     return portfolio_value
-
-@st.cache_data(show_spinner=False)
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio (CACHED version)"""
+    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3867,10 +3849,8 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
     except Exception as e:
         st.error(f"Error creating allocation evolution chart for {portfolio_name}: {str(e)}")
         return None
-
-@st.cache_data(show_spinner=False)
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame (CACHED version)"""
+    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
     try:
         # Ensure all tickers (excluding None) are present in all dates for proper DataFrame creation
         all_tickers = set()
@@ -3914,7 +3894,7 @@ def process_allocation_dataframe(portfolio_name, allocation_data):
         return None, []
 
 def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
-    """Create pie chart for portfolio allocation (CACHED version)"""
+    """Create pie chart for portfolio allocation (NO_CACHE version)"""
     try:
         if not allocation_data:
             return None
@@ -4156,14 +4136,14 @@ def get_dates_by_freq(freq, start, end, market_days):
         raise ValueError(f"Unknown frequency: {freq}")
 
 def get_cached_rebalancing_dates(portfolio_name, rebalancing_frequency, sim_index):
-    """Get rebalancing dates with caching to avoid recalculation"""
-    cache_key = f"rebalancing_dates_{portfolio_name}_{rebalancing_frequency}"
-    portfolio_rebalancing_dates = st.session_state.get(cache_key)
+    """Get rebalancing dates (stored in session_state to avoid recalculation)"""
+    session_key = f"rebalancing_dates_{portfolio_name}_{rebalancing_frequency}"
+    portfolio_rebalancing_dates = st.session_state.get(session_key)
     
     if portfolio_rebalancing_dates is None and sim_index is not None:
-        # Calculate and cache the rebalancing dates
+        # Calculate and store the rebalancing dates in session_state
         portfolio_rebalancing_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
-        st.session_state[cache_key] = portfolio_rebalancing_dates
+        st.session_state[session_key] = portfolio_rebalancing_dates
     
     return portfolio_rebalancing_dates
 
@@ -4547,8 +4527,15 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
                 include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
                 # Get MA reference ticker (empty or None means use ticker itself)
                 ref = stock.get('ma_reference_ticker', '').strip()
-                # Resolve alias if a custom reference is provided (e.g., TLTTR -> TLT_COMPLETE)
+                # Apply same transformations as regular tickers for consistency
                 if ref:
+                    ref = ref.replace(",", ".").upper()
+                    # Special conversion for Berkshire Hathaway
+                    if ref == 'BRK.B':
+                        ref = 'BRK-B'
+                    elif ref == 'BRK.A':
+                        ref = 'BRK-A'
+                    # Resolve alias (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
                     ref = resolve_ticker_alias(ref)
                 ma_reference[ticker] = ref if ref else ticker
     
@@ -4562,7 +4549,7 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
         # Get MA reference ticker (default to self)
         reference_ticker = ma_reference.get(ticker, ticker)
         
-        # Get ticker's price data (kept for validation even though we use reference price)
+        # Get ticker's price data
         df = reindexed_data.get(ticker)
         if df is None or not isinstance(df, pd.DataFrame):
             filtered_assets.append(ticker)
@@ -4571,24 +4558,16 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
         # Get reference ticker's data for MA calculation
         df_ref = reindexed_data.get(reference_ticker)
         if df_ref is None or not isinstance(df_ref, pd.DataFrame):
-            # Reference ticker not available - this is OK if user specified a different reference
-            # (e.g., SPY uses QQQ for MA, but QQQ starts later)
-            # In this case, include the asset without MA filtering
-            if reference_ticker != ticker:
-                filtered_assets.append(ticker)
-                continue
-            else:
-                # If reference is same as ticker and no data, skip
-                filtered_assets.append(ticker)
-                continue
+            # Reference ticker not available, fallback to using ticker itself
+            df_ref = df
+            reference_ticker = ticker
         
         # Get data up to current date
         df_up_to_date = df[df.index <= date]
         df_ref_up_to_date = df_ref[df_ref.index <= date]
         
         if len(df_ref_up_to_date) < ma_window:
-            # Not enough data to calculate MA on reference (e.g., QQQ started but not 200 days yet)
-            # Include by default (no filter) - MA filter will kick in once enough data
+            # Not enough data to calculate MA on reference, include by default (no filter)
             filtered_assets.append(ticker)
             continue
         
@@ -4607,12 +4586,11 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
         
         # Get current price of REFERENCE TICKER and MA value of REFERENCE at date
         try:
-            # Use the last available price up to date (in case exact date doesn't exist)
+            # CRITICAL: Use reference ticker's price, not the ticker itself!
+            # Compare: reference price vs reference MA (same price scale)
             if len(df_ref_up_to_date) == 0:
                 filtered_assets.append(ticker)
                 continue
-            # CRITICAL: Use reference ticker's price, not the ticker itself!
-            # Compare: reference price vs reference MA (same price scale)
             current_price = df_ref_up_to_date['Close'].iloc[-1]
             current_ma = ma.iloc[-1]
             
@@ -4626,7 +4604,7 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
             else:
                 ref_label = f" (using {reference_ticker})" if reference_ticker != ticker else ""
                 excluded_assets[ticker] = f"Below {ma_window}-day {ma_type}{ref_label} ({current_price:.2f} < {current_ma:.2f})"
-        except Exception as e:
+        except:
             # If any error, include by default
             filtered_assets.append(ticker)
     
@@ -4635,7 +4613,7 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
     return filtered_assets, excluded_assets
 
 def make_config_hashable(config):
-    """Convert config dict to hashable tuple for caching"""
+    """Convert config dict to hashable tuple for processing"""
     import json
     try:
         # Convert config to JSON string (hashable)
@@ -4661,7 +4639,7 @@ def make_config_hashable(config):
         return json.dumps(config, sort_keys=True, default=str)
 
 def make_data_hash(reindexed_data):
-    """Create a hash of reindexed_data for caching"""
+    """Create a hash of reindexed_data for processing"""
     try:
         # Create hash based on tickers and data shapes
         hash_parts = []
@@ -4674,11 +4652,10 @@ def make_data_hash(reindexed_data):
         return str(len(reindexed_data))
 
 @lru_cache(maxsize=128)
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=1000)
 def cached_momentum_calculation(ticker, start_date_str, end_date_str, lookback_days, exclude_days, reindexed_data_hash):
     """
-    Cache momentum calculations to avoid recomputation.
-    Uses string dates and hash for caching.
+    Momentum calculation (uses lru_cache only, NO Streamlit @st.cache_data).
+    Uses string dates and hash for Python-level caching only.
     Returns momentum return value.
     """
     try:
@@ -4688,22 +4665,18 @@ def cached_momentum_calculation(ticker, start_date_str, end_date_str, lookback_d
         return None
     except:
         return None
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=500)
 def cached_beta_calculation(ticker, benchmark, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
     """
-    Cache beta calculations to avoid recomputation.
+    Beta calculation (NO_CACHE version).
     Returns beta value.
     """
     try:
         return None  # Placeholder
     except:
         return None
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=500)
 def cached_volatility_calculation(ticker, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
     """
-    Cache volatility calculations to avoid recomputation.
+    Volatility calculation (NO_CACHE version).
     Returns volatility value (annualized).
     """
     try:
@@ -4714,7 +4687,7 @@ def cached_volatility_calculation(ticker, start_date_str, end_date_str, window_d
 # -----------------------
 # Single-backtest core (adapted from your code, robust)
 # -----------------------
-def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_allocations"):
+def single_backtest(config, sim_index, reindexed_data):
     
     stocks_list = config['stocks']
     tickers = [s['ticker'] for s in stocks_list if s['ticker']]
@@ -5206,16 +5179,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
-        # Build dictionary of individual ticker caps from stock configs
-        individual_caps = {}
-        for stock in config.get('stocks', []):
-            ticker = stock.get('ticker', '')
-            individual_cap = stock.get('max_allocation_percent', None)
-            if individual_cap is not None and individual_cap > 0:
-                individual_caps[ticker] = individual_cap / 100.0
-        
-        # Apply caps if either global cap is enabled OR any individual caps exist
-        if (use_max_allocation or individual_caps) and current_allocations:
+        if use_max_allocation and current_allocations:
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # FIRST PASS: Apply maximum allocation filter (EXCLUDE CASH from max_allocation limit)
@@ -5226,29 +5190,19 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 # CASH is exempt from max_allocation limit to prevent money loss
                 if ticker == 'CASH':
                     capped_allocations[ticker] = allocation
+                elif allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
                 else:
-                    # Use individual cap if available, otherwise use global cap
-                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                    
-                    if allocation > ticker_cap:
-                        # Cap the allocation and collect excess
-                        capped_allocations[ticker] = ticker_cap
-                        excess_allocation += (allocation - ticker_cap)
-                    else:
-                        # Keep original allocation
-                        capped_allocations[ticker] = allocation
+                    # Keep original allocation
+                    capped_allocations[ticker] = allocation
             
             # Redistribute excess allocation proportionally among stocks that are below the cap
             if excess_allocation > 0:
-                # Find stocks that can receive more allocation (below their individual cap) - include CASH as eligible
-                eligible_stocks = {}
-                for ticker, allocation in capped_allocations.items():
-                    if ticker == 'CASH':
-                        eligible_stocks[ticker] = allocation
-                    else:
-                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                        if allocation < ticker_cap:
-                            eligible_stocks[ticker] = allocation
+                # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
+                eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                 if ticker == 'CASH' or allocation < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total allocation of eligible stocks
@@ -5265,9 +5219,8 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             if ticker == 'CASH':
                                 capped_allocations[ticker] = new_allocation
                             else:
-                                # Make sure we don't exceed the individual ticker's cap
-                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                                capped_allocations[ticker] = min(new_allocation, ticker_cap)
+                                # Make sure we don't exceed the cap
+                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
             
             current_allocations = capped_allocations
         
@@ -5294,7 +5247,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 current_allocations = current_allocations
         
         # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-        if (use_max_allocation or individual_caps) and current_allocations:
+        if use_max_allocation and current_allocations:
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # Check if any stocks exceed the cap after threshold filtering and normalization
@@ -5305,29 +5258,19 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 # CASH is exempt from max_allocation limit to prevent money loss
                 if ticker == 'CASH':
                     capped_allocations[ticker] = allocation
+                elif allocation > max_allocation_decimal:
+                    # Cap the allocation and collect excess
+                    capped_allocations[ticker] = max_allocation_decimal
+                    excess_allocation += (allocation - max_allocation_decimal)
                 else:
-                    # Use individual cap if available, otherwise use global cap
-                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                    
-                    if allocation > ticker_cap:
-                        # Cap the allocation and collect excess
-                        capped_allocations[ticker] = ticker_cap
-                        excess_allocation += (allocation - ticker_cap)
-                    else:
-                        # Keep original allocation
-                        capped_allocations[ticker] = allocation
+                    # Keep original allocation
+                    capped_allocations[ticker] = allocation
             
             # Redistribute excess allocation proportionally among stocks that are below the cap
             if excess_allocation > 0:
-                # Find stocks that can receive more allocation (below their individual cap) - include CASH as eligible
-                eligible_stocks = {}
-                for ticker, allocation in capped_allocations.items():
-                    if ticker == 'CASH':
-                        eligible_stocks[ticker] = allocation
-                    else:
-                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                        if allocation < ticker_cap:
-                            eligible_stocks[ticker] = allocation
+                # Find stocks that can receive more allocation (below the cap) - include CASH as eligible
+                eligible_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
+                                 if ticker == 'CASH' or allocation < max_allocation_decimal}
                 
                 if eligible_stocks:
                     # Calculate total allocation of eligible stocks
@@ -5344,9 +5287,8 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                             if ticker == 'CASH':
                                 capped_allocations[ticker] = new_allocation
                             else:
-                                # Make sure we don't exceed the individual ticker's cap
-                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                                capped_allocations[ticker] = min(new_allocation, ticker_cap)
+                                # Make sure we don't exceed the cap
+                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
             
             current_allocations = capped_allocations
     else:
@@ -5678,16 +5620,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                         use_max_allocation = config.get('use_max_allocation', False)
                         max_allocation_percent = config.get('max_allocation_percent', 10.0)
                         
-                        # Build dictionary of individual ticker caps from stock configs
-                        individual_caps = {}
-                        for stock in config.get('stocks', []):
-                            ticker = stock.get('ticker', '')
-                            individual_cap = stock.get('max_allocation_percent', None)
-                            if individual_cap is not None and individual_cap > 0:
-                                individual_caps[ticker] = individual_cap / 100.0
-                        
-                        # Apply caps if either global cap is enabled OR any individual caps exist
-                        if (use_max_allocation or individual_caps) and weights:
+                        if use_max_allocation and weights:
                             max_allocation_decimal = max_allocation_percent / 100.0
                             
                             # Apply maximum allocation filter to momentum weights (EXCLUDE CASH from max_allocation limit)
@@ -5698,29 +5631,19 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                                 # CASH is exempt from max_allocation limit to prevent money loss
                                 if ticker == 'CASH':
                                     capped_weights[ticker] = weight
+                                elif weight > max_allocation_decimal:
+                                    # Cap the weight and collect excess
+                                    capped_weights[ticker] = max_allocation_decimal
+                                    excess_weight += (weight - max_allocation_decimal)
                                 else:
-                                    # Use individual cap if available, otherwise use global cap
-                                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                                    
-                                    if weight > ticker_cap:
-                                        # Cap the weight and collect excess
-                                        capped_weights[ticker] = ticker_cap
-                                        excess_weight += (weight - ticker_cap)
-                                    else:
-                                        # Keep original weight
-                                        capped_weights[ticker] = weight
+                                    # Keep original weight
+                                    capped_weights[ticker] = weight
                             
                             # Redistribute excess weight proportionally among stocks that are below the cap
                             if excess_weight > 0:
-                                # Find stocks that can receive more weight (below their individual cap) - include CASH as eligible
-                                eligible_stocks = {}
-                                for ticker, weight in capped_weights.items():
-                                    if ticker == 'CASH':
-                                        eligible_stocks[ticker] = weight
-                                    else:
-                                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                                        if weight < ticker_cap:
-                                            eligible_stocks[ticker] = weight
+                                # Find stocks that can receive more weight (below the cap) - include CASH as eligible
+                                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
+                                                 if ticker == 'CASH' or weight < max_allocation_decimal}
                                 
                                 if eligible_stocks:
                                     # Calculate total weight of eligible stocks
@@ -5737,9 +5660,8 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                                             if ticker == 'CASH':
                                                 capped_weights[ticker] = new_weight
                                             else:
-                                                # Make sure we don't exceed the individual ticker's cap
-                                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
-                                                capped_weights[ticker] = min(new_weight, ticker_cap)
+                                                # Make sure we don't exceed the cap
+                                                capped_weights[ticker] = min(new_weight, max_allocation_decimal)
                             
                             weights = capped_weights
                             
@@ -6127,8 +6049,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     results['Portfolio_Value_No_Additions'] = portfolio_no_additions
 
     return results["Total_with_dividends_plus_cash"], results['Portfolio_Value_No_Additions'], historical_allocations, historical_metrics
-
-def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version="v2_year_aware"):
+def single_backtest_year_aware(config, sim_index, reindexed_data):
     """
     Year-aware backtest that treats dynamic tickers EXACTLY like regular tickers
     but with year-specific ticker selection based on CSV data
@@ -6310,6 +6231,166 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
             total_filtered = sum(filtered.values())
             if total_filtered > 0:
                 weights = {t: filtered[t] / total_filtered for t in filtered}
+
+        # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
+        use_max_allocation = config.get('use_max_allocation', False)
+        max_allocation_percent = config.get('max_allocation_percent', 10.0)
+        use_threshold = config.get('use_minimal_threshold', False)
+        threshold_percent = config.get('minimal_threshold_percent', 2.0)
+        
+        # Build dictionary of individual ticker caps from stock configs
+        individual_caps = {}
+        for stock in config.get('stocks', []):
+            ticker = stock.get('ticker', '')
+            individual_cap = stock.get('max_allocation_percent', None)
+            if individual_cap is not None and individual_cap > 0:
+                individual_caps[ticker] = individual_cap / 100.0
+        
+        # Apply caps if either global cap is enabled OR any individual caps exist
+        if (use_max_allocation or individual_caps) and weights:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # FIRST PASS: Apply maximum allocation filter (EXCLUDE CASH from max_allocation limit)
+            capped_weights = {}
+            excess_weight = 0.0
+            
+            for ticker, weight in weights.items():
+                # CASH is exempt from max_allocation limit to prevent money loss
+                if ticker == 'CASH':
+                    capped_weights[ticker] = weight
+                else:
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if weight > ticker_cap:
+                        # Cap the weight and collect excess
+                        capped_weights[ticker] = ticker_cap
+                        excess_weight += (weight - ticker_cap)
+                    else:
+                        # Keep original weight
+                        capped_weights[ticker] = weight
+            
+            # Redistribute excess weight proportionally among stocks that are below the cap
+            if excess_weight > 0:
+                # Find stocks that can receive more weight (below their individual cap) - include CASH as eligible
+                eligible_stocks = {}
+                for ticker, weight in capped_weights.items():
+                    if ticker == 'CASH':
+                        eligible_stocks[ticker] = weight
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if weight < ticker_cap:
+                            eligible_stocks[ticker] = weight
+                
+                if eligible_stocks:
+                    # Calculate total weight of eligible stocks
+                    total_eligible_weight = sum(eligible_stocks.values())
+                    
+                    if total_eligible_weight > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_weight
+                            additional_weight = excess_weight * proportion
+                            new_weight = capped_weights[ticker] + additional_weight
+                            
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the individual ticker's cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_weights[ticker] = min(new_weight, ticker_cap)
+            
+            weights = capped_weights
+            
+            # Final normalization to 100% in case not enough stocks to distribute excess
+            total_weight = sum(weights.values())
+            if total_weight > 0:
+                weights = {ticker: weight / total_weight for ticker, weight in weights.items()}
+        
+        # Apply minimal threshold filter if enabled
+        if use_threshold and weights:
+            threshold_decimal = threshold_percent / 100.0
+            
+            # Check which stocks are below threshold after max allocation redistribution
+            filtered_weights = {}
+            for ticker, weight in weights.items():
+                if weight >= threshold_decimal:
+                    # Keep stocks above or equal to threshold (remove stocks below threshold)
+                    filtered_weights[ticker] = weight
+            
+            # Normalize remaining stocks to sum to 1.0
+            if filtered_weights:
+                total_weight = sum(filtered_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in filtered_weights.items()}
+                else:
+                    weights = {}
+            else:
+                # If no stocks meet threshold, keep original weights
+                weights = weights
+        
+        # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
+        if (use_max_allocation or individual_caps) and weights:
+            max_allocation_decimal = max_allocation_percent / 100.0
+            
+            # Check if any stocks exceed the cap after threshold filtering and normalization
+            capped_weights = {}
+            excess_weight = 0.0
+            
+            for ticker, weight in weights.items():
+                # CASH is exempt from max_allocation limit to prevent money loss
+                if ticker == 'CASH':
+                    capped_weights[ticker] = weight
+                else:
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if weight > ticker_cap:
+                        # Cap the weight and collect excess
+                        capped_weights[ticker] = ticker_cap
+                        excess_weight += (weight - ticker_cap)
+                    else:
+                        # Keep original weight
+                        capped_weights[ticker] = weight
+            
+            # Redistribute excess weight proportionally among stocks that are below the cap
+            if excess_weight > 0:
+                # Find stocks that can receive more weight (below their individual cap) - include CASH as eligible
+                eligible_stocks = {}
+                for ticker, weight in capped_weights.items():
+                    if ticker == 'CASH':
+                        eligible_stocks[ticker] = weight
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if weight < ticker_cap:
+                            eligible_stocks[ticker] = weight
+                
+                if eligible_stocks:
+                    # Calculate total weight of eligible stocks
+                    total_eligible_weight = sum(eligible_stocks.values())
+                    
+                    if total_eligible_weight > 0:
+                        # Redistribute excess proportionally
+                        for ticker in eligible_stocks:
+                            proportion = eligible_stocks[ticker] / total_eligible_weight
+                            additional_weight = excess_weight * proportion
+                            new_weight = capped_weights[ticker] + additional_weight
+                            
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the individual ticker's cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_weights[ticker] = min(new_weight, ticker_cap)
+            
+            weights = capped_weights
+            
+            # Final normalization to 100% in case not enough stocks to distribute excess
+            total_weight = sum(weights.values())
+            if total_weight > 0:
+                weights = {ticker: weight / total_weight for ticker, weight in weights.items()}
 
         return weights, metrics
     import numpy as np
@@ -6764,10 +6845,12 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
     if 'ma_type' not in portfolio:
         portfolio['ma_type'] = 'SMA'
     
-    # Ensure all stocks have include_in_sma_filter setting
+    # Ensure all stocks have include_in_sma_filter and ma_reference_ticker settings
     for stock in portfolio.get('stocks', []):
         if 'include_in_sma_filter' not in stock:
             stock['include_in_sma_filter'] = True
+        if 'ma_reference_ticker' not in stock:
+            stock['ma_reference_ticker'] = ''  # Empty = use ticker's own MA
 
 if 'multi_backtest_paste_json_text' not in st.session_state:
     st.session_state.multi_backtest_paste_json_text = ""
@@ -7857,13 +7940,6 @@ def paste_json_callback():
             # Debug output
             st.info(f"Converted {len(stocks)} stocks from legacy format: {[s['ticker'] for s in stocks]}")
         
-        # Ensure all stocks have max_allocation_percent field
-        for stock in stocks:
-            if 'max_allocation_percent' not in stock:
-                stock['max_allocation_percent'] = None
-            if 'include_in_sma_filter' not in stock:
-                stock['include_in_sma_filter'] = True
-        
         # Sanitize momentum window weights to prevent StreamlitValueAboveMaxError
         momentum_windows = json_data.get('momentum_windows', [])
         for window in momentum_windows:
@@ -8224,41 +8300,6 @@ def update_use_sma_filter():
         
         st.session_state.multi_backtest_rerun_flag = True
 
-def update_ma_reference_ticker(stock_index):
-    """Callback function when MA reference ticker changes"""
-    ma_ref_key = f"multi_backtest_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}_{stock_index}"
-    new_value = st.session_state.get(ma_ref_key, '').strip()
-    
-    # Apply EXACTLY the same transformations as regular tickers
-    # Convert commas to dots for decimal separators
-    new_value = new_value.replace(",", ".")
-    
-    # Convert to uppercase
-    new_value = new_value.upper()
-    
-    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
-    if new_value == 'BRK.B':
-        new_value = 'BRK-B'
-    elif new_value == 'BRK.A':
-        new_value = 'BRK-A'
-    
-    # CRITICAL: Resolve ticker alias (GOLDX → GOLD_COMPLETE, SPYTR → ^SP500TR, etc.)
-    if new_value:  # Only resolve if not empty
-        resolved_value = resolve_ticker_alias(new_value)
-    else:
-        resolved_value = new_value
-    
-    # Update session state with resolved value for display
-    st.session_state[ma_ref_key] = resolved_value
-    
-    # Update the stock config
-    portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
-    if stock_index < len(portfolio['stocks']):
-        old_value = portfolio['stocks'][stock_index].get('ma_reference_ticker', '')
-        if resolved_value != old_value:
-            portfolio['stocks'][stock_index]['ma_reference_ticker'] = resolved_value
-            st.session_state.multi_backtest_rerun_flag = True
-
 def update_use_targeted_rebalancing():
     """Callback function for targeted rebalancing checkbox"""
     current_val = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index].get('use_targeted_rebalancing', False)
@@ -8484,7 +8525,7 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="multi_backtest_clear_a
     # Clear all portfolios and create a single blank portfolio
     st.session_state.multi_backtest_portfolio_configs = [{
         'name': 'New Portfolio 1',
-        'stocks': [{'ticker': '', 'allocation': 0.0, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None}],
+        'stocks': [{'ticker': '', 'allocation': 0.0, 'include_dividends': True}],
         'benchmark_ticker': '^GSPC',
         'initial_value': 10000,
         'added_amount': 0,
@@ -10475,7 +10516,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1 and st.session_sta
         if 'exclude_from_rebalancing_sync' not in active_portfolio:
             active_portfolio['exclude_from_rebalancing_sync'] = False
         
-        # Rebalancing sync exclusion - use direct portfolio value to avoid caching issues
+        # Rebalancing sync exclusion - use direct portfolio value to avoid processing issues
         exclude_rebalancing = st.checkbox(
             "Exclude from Rebalancing Sync", 
             value=active_portfolio['exclude_from_rebalancing_sync'],
@@ -10492,7 +10533,7 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1 and st.session_sta
             st.session_state.multi_backtest_rerun_flag = True
     
     with col_sync2:
-        # Cash flow sync exclusion - use direct portfolio value to avoid caching issues
+        # Cash flow sync exclusion - use direct portfolio value to avoid processing issues
         exclude_cashflow = st.checkbox(
             "Exclude from Cash Flow Sync", 
             value=active_portfolio['exclude_from_cashflow_sync'],
@@ -10604,6 +10645,43 @@ def update_stock_dividends(index):
     except Exception:
         return
 
+
+def update_ma_reference_ticker(stock_index):
+    """Callback function when MA reference ticker changes"""
+    ma_ref_key = f"multi_backtest_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}_{stock_index}"
+    new_value = st.session_state.get(ma_ref_key, '').strip()
+    
+    # Apply EXACTLY the same transformations as regular tickers
+    # Convert commas to dots for decimal separators
+    new_value = new_value.replace(",", ".")
+    
+    # Convert to uppercase
+    new_value = new_value.upper()
+    
+    # Special conversion for Berkshire Hathaway tickers for Yahoo Finance compatibility
+    if new_value == 'BRK.B':
+        new_value = 'BRK-B'
+    elif new_value == 'BRK.A':
+        new_value = 'BRK-A'
+    
+    # CRITICAL: Resolve ticker alias (GOLDX → GOLD_COMPLETE, SPYTR → ^SP500TR, etc.)
+    if new_value:  # Only resolve if not empty
+        resolved_value = resolve_ticker_alias(new_value)
+    else:
+        resolved_value = new_value
+    
+    # Update session state with resolved value for display
+    st.session_state[ma_ref_key] = resolved_value
+    
+    # Update the stock config
+    portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+    if stock_index < len(portfolio['stocks']):
+        old_value = portfolio['stocks'][stock_index].get('ma_reference_ticker', '')
+        if resolved_value != old_value:
+            portfolio['stocks'][stock_index]['ma_reference_ticker'] = resolved_value
+            st.session_state.multi_backtest_rerun_flag = True
+
+
 # Update active_portfolio
 active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
 
@@ -10699,6 +10777,9 @@ for i in range(len(active_portfolio['stocks'])):
             if 'ma_reference_ticker' not in stock:
                 stock['ma_reference_ticker'] = ""  # Empty = use own ticker
             
+            if ma_ref_key not in st.session_state:
+                st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
+            
             # Always sync the session state with the portfolio config to show resolved ticker
             st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
             
@@ -10711,6 +10792,9 @@ for i in range(len(active_portfolio['stocks'])):
                 on_change=update_ma_reference_ticker,
                 args=(i,)
             )
+            
+            if st.session_state[ma_ref_key] != stock.get('ma_reference_ticker', ''):
+                st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['ma_reference_ticker'] = st.session_state[ma_ref_key]
             
         else:
             st.write("")
@@ -10945,10 +11029,10 @@ with st.expander("📈 Broad Long-Term Tickers", expanded=False):
 
 # Special Tickers Section
 # Use session state to control expander state
-if 'special_tickers_expanded' not in st.session_state:
-    st.session_state.special_tickers_expanded = False
+if 'no_cache_special_tickers_expanded' not in st.session_state:
+    st.session_state.no_cache_special_tickers_expanded = False
 
-with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.special_tickers_expanded):
+with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_cache_special_tickers_expanded):
     st.markdown("**Quick access to ticker aliases that the system accepts:**")
     
     # Get the actual ticker aliases from the function
@@ -10983,7 +11067,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.spe
                     'include_dividends': True
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.special_tickers_expanded = True
+                st.session_state.no_cache_special_tickers_expanded = True
                 st.rerun()
     
     with col2:
@@ -11019,7 +11103,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.spe
                     'include_dividends': True
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.special_tickers_expanded = True
+                st.session_state.no_cache_special_tickers_expanded = True
                 st.rerun()
     
     with col3:
@@ -11087,7 +11171,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.spe
                     'include_in_sma_filter': True
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.special_tickers_expanded = True
+                st.session_state.no_cache_special_tickers_expanded = True
                 st.rerun()
     
     st.markdown("---")
@@ -11765,11 +11849,6 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
     cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
     
-    # Update custom dates from global session state if enabled
-    if st.session_state.get('multi_backtest_use_custom_dates', False):
-        cleaned_config['start_date_user'] = st.session_state.get('multi_backtest_start_date')
-        cleaned_config['end_date_user'] = st.session_state.get('multi_backtest_end_date')
-    
     # Update targeted rebalancing settings from session state
     cleaned_config['use_targeted_rebalancing'] = st.session_state.get('multi_backtest_active_use_targeted_rebalancing', False)
     cleaned_config['targeted_rebalancing_settings'] = active_portfolio.get('targeted_rebalancing_settings', {})
@@ -12097,7 +12176,6 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             if ma_ref_ticker not in all_tickers:
                 all_tickers.append(ma_ref_ticker)
         
-        
         # BULLETPROOF VALIDATION: Check for empty ticker list first
         if not all_tickers:
             st.error("❌ **No valid tickers found!** Please add at least one ticker to your portfolios before running the backtest.")
@@ -12308,7 +12386,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO_CACHE VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -12321,7 +12399,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability & caching...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO_CACHE)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -13339,7 +13417,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             st.session_state.multi_backtest_portfolio_key_map = portfolio_key_map
             st.session_state.multi_backtest_ran = True
             
-            # OPTIMIZATION: Pre-compute and cache allocation evolution charts for all portfolios
+            # OPTIMIZATION: Pre-compute allocation evolution charts for all portfolios (stored in session_state)
             st.info("🔄 Pre-computing charts for instant portfolio selection...")
             progress_bar = st.progress(0)
             
@@ -13369,7 +13447,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             allocs_data = filtered_allocs_data
                         
                         if allocs_data:
-                            # Use cached function to create chart
+                            # Create chart (NO_CACHE version)
                             fig_evolution = create_allocation_evolution_chart(portfolio_name, allocs_data)
                             if fig_evolution:
                                 st.session_state[f'multi_allocation_evolution_chart_{portfolio_name}'] = fig_evolution
@@ -13700,11 +13778,6 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             # Update global settings from session state
             cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
             cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
-            
-            # Update custom dates from global session state if enabled
-            if st.session_state.get('multi_backtest_use_custom_dates', False):
-                cleaned_config['start_date_user'] = st.session_state.get('multi_backtest_start_date')
-                cleaned_config['end_date_user'] = st.session_state.get('multi_backtest_end_date')
             
             # Ensure threshold settings are included (read from current config)
             cleaned_config['use_minimal_threshold'] = config.get('use_minimal_threshold', False)
@@ -14385,7 +14458,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     all_tickers = sorted(list(all_tickers))
                     
                     if all_tickers:
-                        # Fetch PE data for all tickers (cached per portfolio)
+                        # Fetch PE data for all tickers (stored in session_state per portfolio)
                         pe_data = {}
                         for ticker in all_tickers:
                             try:
@@ -16062,39 +16135,39 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             if view_clicked:
                 # No-op here; the detail panels below will render based on selected_portfolio_detail. Keep a small indicator
                 st.success(f"Loaded details for {selected_portfolio_detail}")
-            # Table 1: Historical Allocations - OPTIMIZED with session state caching
+            # Table 1: Historical Allocations - OPTIMIZED with session state storage
             if selected_portfolio_detail in st.session_state.multi_all_allocations:
                 st.markdown("---")
                 st.markdown(f"**Historical Allocations for {selected_portfolio_detail}**")
                 
-                # Check if processed DataFrame is already cached in session state
-                df_cache_key = f'processed_allocations_df_{selected_portfolio_detail}'
-                tickers_cache_key = f'processed_allocations_tickers_{selected_portfolio_detail}'
+                # Check if processed DataFrame is already in session state
+                df_session_key = f'processed_allocations_df_{selected_portfolio_detail}'
+                tickers_session_key = f'processed_allocations_tickers_{selected_portfolio_detail}'
                 
-                # Clear cache to force recalculation with fixed logic
-                if df_cache_key in st.session_state:
-                    del st.session_state[df_cache_key]
-                if tickers_cache_key in st.session_state:
-                    del st.session_state[tickers_cache_key]
+                # Clear session state to force recalculation with fixed logic
+                if df_session_key in st.session_state:
+                    del st.session_state[df_session_key]
+                if tickers_session_key in st.session_state:
+                    del st.session_state[tickers_session_key]
                 
-                if df_cache_key not in st.session_state or tickers_cache_key not in st.session_state:
-                    # Process allocation data and cache it
+                if df_session_key not in st.session_state or tickers_session_key not in st.session_state:
+                    # Process allocation data and store in session_state
                     allocation_data = st.session_state.multi_all_allocations[selected_portfolio_detail]
                     allocations_df_raw, all_tickers = process_allocation_dataframe(selected_portfolio_detail, allocation_data)
                     
                     if allocations_df_raw is not None:
                         allocations_df_raw.index.name = "Date"
                         allocations_df_raw = allocations_df_raw.sort_index(ascending=True)
-                        # Cache the processed data
-                        st.session_state[df_cache_key] = allocations_df_raw
-                        st.session_state[tickers_cache_key] = all_tickers
+                        # Store the processed data in session_state
+                        st.session_state[df_session_key] = allocations_df_raw
+                        st.session_state[tickers_session_key] = all_tickers
                     else:
                         st.warning("Could not process allocation data")
                         st.stop()
                 else:
-                    # Use cached data
-                    allocations_df_raw = st.session_state[df_cache_key]
-                    all_tickers = st.session_state[tickers_cache_key]
+                    # Use data from session_state
+                    allocations_df_raw = st.session_state[df_session_key]
+                    all_tickers = st.session_state[tickers_session_key]
                 
                 # Corrected styling logic for alternating row colors (no green background for Historical Allocations)
                 def highlight_rows_by_index(s):
@@ -16844,7 +16917,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             sim_index = portfolio_results.index
                                 
                                 if sim_index is not None:
-                                    # Use cached rebalancing dates for better performance
+                                    # Use session_state stored rebalancing dates for better performance
                                     portfolio_rebalancing_dates = get_cached_rebalancing_dates(selected_portfolio_detail, rebalancing_frequency, sim_index)
                                     if portfolio_rebalancing_dates:
                                         # Find the last rebalancing date before or on the final date
@@ -16984,7 +17057,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             sim_index = portfolio_results.index
                                 
                                 if sim_index is not None:
-                                    # Use cached rebalancing dates for better performance
+                                    # Use session_state stored rebalancing dates for better performance
                                     portfolio_rebalancing_dates = get_cached_rebalancing_dates(selected_portfolio_detail, rebalancing_frequency, sim_index)
                                     if portfolio_rebalancing_dates:
                                         # Find the last rebalancing date before or on the final date
@@ -18501,21 +18574,21 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
     if st.session_state.get('multi_backtest_ran', False):
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔄 Clear Cache", help="Clear all cached charts and data"):
-                # Clear all cached data
+            if st.button("🔄 Clear Session State", help="Clear all stored charts and data from session state"):
+                # Clear all stored data from session_state
                 keys_to_clear = [key for key in st.session_state.keys() if key.startswith(('multi_allocation_evolution_chart_', 'processed_allocations_df_', 'processed_allocations_tickers_', 'pie_chart_'))]
                 for key in keys_to_clear:
                     del st.session_state[key]
-                st.success("Cache cleared! Charts will be recreated on next selection.")
+                st.success("Session state cleared! Charts will be recreated on next selection.")
                 st.rerun()
         
         with col2:
-            cached_charts = len([key for key in st.session_state.keys() if key.startswith('multi_allocation_evolution_chart_')])
-            st.metric("Cached Charts", cached_charts)
+            stored_charts = len([key for key in st.session_state.keys() if key.startswith('multi_allocation_evolution_chart_')])
+            st.metric("Stored Charts", stored_charts)
         
         with col3:
-            cached_dfs = len([key for key in st.session_state.keys() if key.startswith('processed_allocations_df_')])
-            st.metric("Cached DataFrames", cached_dfs)
+            stored_dfs = len([key for key in st.session_state.keys() if key.startswith('processed_allocations_df_')])
+            st.metric("Stored DataFrames", stored_dfs)
     
     # NEW: Individual Ticker Analysis with MA from Backtest - INDEPENDENT SECTION
     if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
