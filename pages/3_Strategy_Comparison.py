@@ -7378,7 +7378,11 @@ with st.sidebar.expander("📈 Broad Long-Term Tickers", expanded=False):
     """)
 
 # Special Tickers Section
-with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
+# Use session state to control expander state
+if 'no_cache_strategy_special_tickers_expanded' not in st.session_state:
+    st.session_state.no_cache_strategy_special_tickers_expanded = False
+
+with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_cache_strategy_special_tickers_expanded):
     st.markdown("**Quick access to ticker aliases that the system accepts:**")
     
     # Get the actual ticker aliases from the function
@@ -7416,6 +7420,8 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                 })
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
+                # Keep expander open and rerun immediately
+                st.session_state.no_cache_strategy_special_tickers_expanded = True
                 st.rerun()
     
     with col2:
@@ -7454,6 +7460,8 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                 })
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
+                # Keep expander open and rerun immediately
+                st.session_state.no_cache_strategy_special_tickers_expanded = True
                 st.rerun()
     
     with col3:
@@ -7529,6 +7537,8 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=False):
                 })
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
+                # Keep expander open and rerun immediately
+                st.session_state.no_cache_strategy_special_tickers_expanded = True
                 st.rerun()
     
     st.markdown("---")
