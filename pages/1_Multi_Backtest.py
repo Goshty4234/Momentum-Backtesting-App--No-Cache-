@@ -3399,6 +3399,11 @@ if 'multi_backtest_portfolio_configs' in st.session_state:
     for config in st.session_state.multi_backtest_portfolio_configs:
         config.pop('use_relative_momentum', None)
         config.pop('equal_if_all_negative', None)
+        
+        # Ensure all stocks have max_allocation_percent field
+        for stock in config.get('stocks', []):
+            if 'max_allocation_percent' not in stock:
+                stock['max_allocation_percent'] = None
 
 st.set_page_config(layout="wide", page_title="Multi-Portfolio Analysis", page_icon="📈")
 
@@ -7375,7 +7380,7 @@ def bulk_delete_portfolios_callback(portfolio_names_to_delete):
     st.session_state.multi_backtest_rerun_flag = True
 
 def add_stock_callback():
-    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'].append({'ticker': '', 'allocation': 0.0, 'include_dividends': True, 'include_in_sma_filter': True})
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'].append({'ticker': '', 'allocation': 0.0, 'include_dividends': True, 'include_in_sma_filter': True, 'max_allocation_percent': None})
     # Removed rerun flag - no need to refresh entire page for adding a stock
 
 def remove_stock_callback(index):
@@ -10513,7 +10518,31 @@ for i in range(len(active_portfolio['stocks'])):
             if st.session_state[alloc_key] != int(stock['allocation'] * 100):
                 st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['allocation'] = st.session_state[alloc_key] / 100.0
         else:
-            st.write("")
+            # Show Max Cap % field when momentum is active
+            max_cap_key = f"multi_backtest_max_cap_{st.session_state.multi_backtest_active_portfolio_index}_{i}"
+            # Ensure max_allocation_percent key exists
+            if 'max_allocation_percent' not in stock:
+                stock['max_allocation_percent'] = None
+            
+            if max_cap_key not in st.session_state:
+                st.session_state[max_cap_key] = int(stock['max_allocation_percent']) if stock['max_allocation_percent'] is not None else 0
+            
+            max_cap_value = st.number_input(
+                "Max Cap %", 
+                min_value=0, 
+                max_value=100,
+                step=1, 
+                format="%d", 
+                key=max_cap_key, 
+                label_visibility="visible",
+                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled)"
+            )
+            
+            # Update the portfolio config
+            if max_cap_value > 0:
+                st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['max_allocation_percent'] = float(max_cap_value)
+            else:
+                st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['stocks'][i]['max_allocation_percent'] = None
     with col_d:
         div_key = f"multi_backtest_div_{st.session_state.multi_backtest_active_portfolio_index}_{i}"
         # Ensure include_dividends key exists with default value
