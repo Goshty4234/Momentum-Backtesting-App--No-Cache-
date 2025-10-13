@@ -9841,6 +9841,19 @@ if st.session_state.get('alloc_backtest_run', False):
                     '6M': 180,    # ~180 calendar days per half year
                     '1Y': 365     # ~365 calendar days per year
                 }
+                
+                def _get_value_days_ago(series, days):
+                    """Return value at or before last_date - days from a datetime-indexed Series."""
+                    if series is None or len(series) == 0:
+                        return None
+                    last_date = pd.to_datetime(series.index[-1])
+                    target_date = last_date - pd.Timedelta(days=days)
+                    # Ensure datetime index
+                    series.index = pd.to_datetime(series.index)
+                    prior = series.loc[:target_date]
+                    if len(prior) == 0:
+                        return series.iloc[0]
+                    return prior.iloc[-1]
 
                 def get_value_days_ago(series, days):
                     """Return the series value at or before (last_date - days)."""
@@ -10052,14 +10065,16 @@ if st.session_state.get('alloc_backtest_run', False):
                                     continue
                                 
                                 try:
+                                    # Ensure datetime index
+                                    df.index = pd.to_datetime(df.index)
                                     current_price = df['Close'].iloc[-1]
-                                    past_price = df['Close'].iloc[-(days + 1)]
+                                    past_price = _get_value_days_ago(df['Close'], days)
                                     
-                                    if past_price > 0:
+                                    if past_price is not None and past_price > 0:
                                         return_pct = ((current_price - past_price) / past_price) * 100
                                         weighted_return += return_pct * weight
                                         total_weight += weight
-                                except (IndexError, KeyError):
+                                except Exception:
                                     continue
                         
                         if total_weight > 0:
