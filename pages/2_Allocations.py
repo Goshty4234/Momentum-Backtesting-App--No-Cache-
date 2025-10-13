@@ -5812,11 +5812,11 @@ def paste_json_callback():
         if 'use_minimal_threshold' not in json_data:
             json_data['use_minimal_threshold'] = False
         if 'minimal_threshold_percent' not in json_data:
-            json_data['minimal_threshold_percent'] = 2.0
+            json_data['minimal_threshold_percent'] = 4.0
         if 'use_max_allocation' not in json_data:
             json_data['use_max_allocation'] = False
         if 'max_allocation_percent' not in json_data:
-            json_data['max_allocation_percent'] = 10.0
+            json_data['max_allocation_percent'] = 20.0
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -5946,9 +5946,9 @@ def paste_json_callback():
             'negative_momentum_strategy': negative_momentum_strategy,
             'momentum_windows': momentum_windows,
             'use_minimal_threshold': json_data.get('use_minimal_threshold', False),
-            'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 2.0),
+            'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 4.0),
             'use_max_allocation': json_data.get('use_max_allocation', False),
-            'max_allocation_percent': json_data.get('max_allocation_percent', 10.0),
+            'max_allocation_percent': json_data.get('max_allocation_percent', 20.0),
             'calc_beta': json_data.get('calc_beta', True),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -5966,9 +5966,9 @@ def paste_json_callback():
         
         # Update session state for threshold settings
         st.session_state['alloc_active_use_threshold'] = allocations_config.get('use_minimal_threshold', False)
-        st.session_state['alloc_active_threshold_percent'] = allocations_config.get('minimal_threshold_percent', 2.0)
+        st.session_state['alloc_active_threshold_percent'] = allocations_config.get('minimal_threshold_percent', 4.0)
         st.session_state['alloc_active_use_max_allocation'] = allocations_config.get('use_max_allocation', False)
-        st.session_state['alloc_active_max_allocation_percent'] = allocations_config.get('max_allocation_percent', 10.0)
+        st.session_state['alloc_active_max_allocation_percent'] = allocations_config.get('max_allocation_percent', 20.0)
         
         # Update session state for MA filter settings
         st.session_state['alloc_active_use_sma_filter'] = allocations_config.get('use_sma_filter', False)
@@ -7073,11 +7073,11 @@ if "alloc_active_use_momentum" not in st.session_state:
 if "alloc_active_use_threshold" not in st.session_state:
     st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
 if "alloc_active_threshold_percent" not in st.session_state:
-    st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+    st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 4.0)
 if "alloc_active_use_max_allocation" not in st.session_state:
     st.session_state["alloc_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
 if "alloc_active_max_allocation_percent" not in st.session_state:
-    st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
+    st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 20.0)
 # Only show momentum strategy if targeted rebalancing is disabled
 if not active_portfolio.get('use_targeted_rebalancing', False):
     st.checkbox("Use Momentum Strategy", key="alloc_active_use_momentum", on_change=update_use_momentum, help="Enables momentum-based weighting of stocks.")
@@ -7251,7 +7251,7 @@ if active_portfolio['use_momentum']:
     # Only sync if session state doesn't exist or if we're not in the middle of an import
     if "alloc_active_use_threshold" not in st.session_state or not st.session_state.get('alloc_rerun_flag', False):
         st.session_state["alloc_active_use_threshold"] = active_portfolio.get('use_minimal_threshold', False)
-        st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 2.0)
+        st.session_state["alloc_active_threshold_percent"] = active_portfolio.get('minimal_threshold_percent', 4.0)
 
     st.checkbox(
         "Enable Minimal Threshold Filter", 
@@ -7279,7 +7279,7 @@ if active_portfolio['use_momentum']:
     # Only sync if session state doesn't exist or if we're not in the middle of an import
     if "alloc_active_use_max_allocation" not in st.session_state or not st.session_state.get('alloc_rerun_flag', False):
         st.session_state["alloc_active_use_max_allocation"] = active_portfolio.get('use_max_allocation', False)
-        st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 10.0)
+        st.session_state["alloc_active_max_allocation_percent"] = active_portfolio.get('max_allocation_percent', 20.0)
 
     st.checkbox(
         "Enable Maximum Allocation Filter", 
@@ -7775,9 +7775,9 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
     # Update active portfolio config with current session state values before running backtest
     active_portfolio = st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]
     active_portfolio['use_minimal_threshold'] = st.session_state.get('alloc_active_use_threshold', False)
-    active_portfolio['minimal_threshold_percent'] = st.session_state.get('alloc_active_threshold_percent', 2.0)
+    active_portfolio['minimal_threshold_percent'] = st.session_state.get('alloc_active_threshold_percent', 4.0)
     active_portfolio['use_max_allocation'] = st.session_state.get('alloc_active_use_max_allocation', False)
-    active_portfolio['max_allocation_percent'] = st.session_state.get('alloc_active_max_allocation_percent', 10.0)
+    active_portfolio['max_allocation_percent'] = st.session_state.get('alloc_active_max_allocation_percent', 20.0)
     
     # Debug output
     print(f"[THRESHOLD DEBUG] Before backtest - Portfolio: {active_portfolio.get('name', 'Unknown')}")
