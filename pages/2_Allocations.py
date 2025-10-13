@@ -11426,6 +11426,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     data=st.session_state.get('pdf_buffer', b''),
                     file_name=filename,
                     mime="application/pdf",
+                    use_container_width=True
                 )
             else:
                 st.error("❌ Failed to generate PDF report")
