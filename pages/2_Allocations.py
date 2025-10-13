@@ -124,6 +124,9 @@ def get_ticker_aliases():
         'PLATINUM': 'PL=F',      # Platinum Futures (1997+) - No dividends
         'PALLADIUM': 'PA=F',     # Palladium Futures (1998+) - No dividends
         
+        # Cryptocurrency
+        'BITCOIN': 'BTC-USD',    # Bitcoin (2014+) - No dividends
+        
         # Leveraged & Inverse ETFs (Synthetic Aliases)
         'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
         'TQQQND': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
@@ -322,7 +325,7 @@ def get_custom_sector_for_ticker(ticker):
         'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
         'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
         '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
-        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
         'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
         'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
         'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
@@ -338,7 +341,7 @@ def get_custom_sector_for_ticker(ticker):
     # If ticker has leverage parameter AND is in our index/ETF list, return appropriate leveraged sector
     if has_leverage and base_ticker in index_etf_tickers:
         # Check for gold/precious metals tickers
-        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF', 'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF', 'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
             return 'LEVERAGED PRECIOUS METALS'
         
         # Check for treasury/bond tickers
@@ -521,6 +524,7 @@ def get_custom_sector_for_ticker(ticker):
         'GOLDX': 'GOLD',
         'GOLDSIM': 'GOLD',
         'IAU': 'GOLD',
+        'IAUM': 'GOLD',
         'GLDM': 'GOLD',
         'SGOL': 'GOLD',
         'GOLD_COMPLETE': 'GOLD',
@@ -578,6 +582,19 @@ def get_custom_sector_for_ticker(ticker):
         'ETHE': 'CRYPTOCURRENCY',
         'BITCOINX': 'CRYPTOCURRENCY',
         'BTC_COMPLETE': 'CRYPTOCURRENCY',
+        'BITCOIN': 'CRYPTOCURRENCY',
+        
+        # Bitcoin ETFs
+        'IBIT': 'CRYPTOCURRENCY',      # iShares Bitcoin Trust (BlackRock)
+        'FBTC': 'CRYPTOCURRENCY',      # Fidelity Wise Origin Bitcoin Fund
+        'BITB': 'CRYPTOCURRENCY',      # Bitwise Bitcoin ETF Trust
+        'ARKB': 'CRYPTOCURRENCY',      # ARK 21Shares Bitcoin ETF
+        'BTCO': 'CRYPTOCURRENCY',      # Invesco Galaxy Bitcoin ETF
+        'HODL': 'CRYPTOCURRENCY',      # 21Shares Crypto Basket 10 ETP
+        'EZBC': 'CRYPTOCURRENCY',      # ETC Group Bitcoin ETP
+        'XBTF': 'CRYPTOCURRENCY',      # ProShares Bitcoin Futures Strategy ETF
+        'BTF': 'CRYPTOCURRENCY',       # Valkyrie Bitcoin Strategy ETF
+        'BTCC': 'CRYPTOCURRENCY',      # Purpose Bitcoin ETF (Canada)
         
         # Technology
         'XLK': 'TECHNOLOGY INDEX',
@@ -656,7 +673,7 @@ def get_custom_industry_for_ticker(ticker):
         'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
         'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
         '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
-        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
         'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
         'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
         'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
@@ -676,7 +693,7 @@ def get_custom_industry_for_ticker(ticker):
             return 'LEVERAGED SEMICONDUCTORS'
         
         # Check for gold/precious metals tickers
-        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF']:
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF']:
             return 'LEVERAGED GOLD'
         if base_ticker in ['GDX', 'GDXJ']:
             return 'LEVERAGED GOLD MINERS'
@@ -890,6 +907,7 @@ def get_custom_industry_for_ticker(ticker):
         'GOLDX': 'PRECIOUS METALS',
         'GOLDSIM': 'PRECIOUS METALS',
         'IAU': 'PRECIOUS METALS',
+        'IAUM': 'PRECIOUS METALS',
         'GLDM': 'PRECIOUS METALS',
         'SGOL': 'PRECIOUS METALS',
         'GOLD_COMPLETE': 'PRECIOUS METALS',
@@ -947,6 +965,19 @@ def get_custom_industry_for_ticker(ticker):
         'ETHE': 'DIGITAL ASSETS',
         'BITCOINX': 'DIGITAL ASSETS',
         'BTC_COMPLETE': 'DIGITAL ASSETS',
+        'BITCOIN': 'DIGITAL ASSETS',
+        
+        # Bitcoin ETFs
+        'IBIT': 'DIGITAL ASSETS',      # iShares Bitcoin Trust (BlackRock)
+        'FBTC': 'DIGITAL ASSETS',      # Fidelity Wise Origin Bitcoin Fund
+        'BITB': 'DIGITAL ASSETS',      # Bitwise Bitcoin ETF Trust
+        'ARKB': 'DIGITAL ASSETS',      # ARK 21Shares Bitcoin ETF
+        'BTCO': 'DIGITAL ASSETS',      # Invesco Galaxy Bitcoin ETF
+        'HODL': 'DIGITAL ASSETS',      # 21Shares Crypto Basket 10 ETP
+        'EZBC': 'DIGITAL ASSETS',      # ETC Group Bitcoin ETP
+        'XBTF': 'DIGITAL ASSETS',      # ProShares Bitcoin Futures Strategy ETF
+        'BTF': 'DIGITAL ASSETS',       # Valkyrie Bitcoin Strategy ETF
+        'BTCC': 'DIGITAL ASSETS',      # Purpose Bitcoin ETF (Canada)
         
         # Technology
         'XLK': 'TECHNOLOGY INDEX FUND',
@@ -1309,6 +1340,13 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
             return get_zroz_complete_data(period)
         if resolved_ticker == "BTC_COMPLETE":
             return get_bitcoin_complete_data(period)
+        if resolved_ticker == "BTC-USD":
+            # Fallback: If BTC-USD fails, try BTC_COMPLETE data
+            try:
+                return get_bitcoin_complete_data(period)
+            except Exception:
+                # Final fallback: use yfinance BTC-USD
+                pass
         if resolved_ticker == "KMLM_COMPLETE":
             return get_kmlm_complete_data(period)
         if resolved_ticker == "DBMF_COMPLETE":
@@ -1506,6 +1544,13 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
             return get_tlt_complete_data(period)
         if resolved_ticker == "BTC_COMPLETE":
             return get_bitcoin_complete_data(period)
+        if resolved_ticker == "BTC-USD":
+            # Fallback: If BTC-USD fails, try BTC_COMPLETE data
+            try:
+                return get_bitcoin_complete_data(period)
+            except Exception:
+                # Final fallback: use yfinance BTC-USD
+                pass
         if resolved_ticker == "KMLM_COMPLETE":
             return get_kmlm_complete_data(period)
         if resolved_ticker == "IEF_COMPLETE":
@@ -1611,8 +1656,11 @@ def get_gold_complete_data(period="max"):
             }, index=gold_data.index)
             return result
         else:
-            return None
+            print("⚠️ WARNING: GOLD_COMPLETE ticker returned empty data, falling back to GLD")
+            ticker = yf.Ticker("GLD")
+            return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
     except Exception as e:
+        print(f"⚠️ WARNING: GOLD_COMPLETE error: {e}, falling back to GLD")
         try:
             ticker = yf.Ticker("GLD")
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
@@ -3477,6 +3525,9 @@ def generate_allocations_pdf(custom_name=""):
                     # Create figure with two subplots - square subplots to ensure circular pie charts
                     fig, (ax_sector, ax_industry) = plt.subplots(2, 1, figsize=(12, 12))
                 
+                    # Define consistent color palette for both charts
+                    consistent_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+                    
                     # Sector pie chart
                     if has_sector_data:
                         sectors = sector_data.index.tolist()
@@ -3496,7 +3547,8 @@ def generate_allocations_pdf(custom_name=""):
                             return my_autopct
                         
                         wedges_sector, texts_sector, autotexts_sector = ax_sector.pie(allocations, autopct=make_autopct(allocations), 
-                                                                                     startangle=90, textprops={'fontsize': 10})
+                                                                                     startangle=90, textprops={'fontsize': 10},
+                                                                                     colors=consistent_colors[:len(allocations)])
                         
                         # Create legend with percentages - positioned further to the right
                         legend_labels = [f"{sector} ({alloc:.1f}%)" for sector, alloc in zip(sectors, allocations)]
@@ -3543,7 +3595,8 @@ def generate_allocations_pdf(custom_name=""):
                             return my_autopct
                         
                         wedges_industry, texts_industry, autotexts_industry = ax_industry.pie(allocations, autopct=make_autopct(allocations), 
-                                                                                             startangle=90, textprops={'fontsize': 10})
+                                                                                             startangle=90, textprops={'fontsize': 10},
+                                                                                             colors=consistent_colors[:len(allocations)])
                         
                         # Create legend with percentages - positioned further to the right
                         legend_labels = [f"{industry} ({alloc:.1f}%)" for industry, alloc in zip(industries, allocations)]
@@ -4138,12 +4191,21 @@ def single_backtest(config, sim_index, reindexed_data):
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
+        # Build dictionary of individual ticker caps from stock configs
+        individual_caps = {}
+        for stock in config.get('stocks', []):
+            ticker = stock.get('ticker', '')
+            individual_cap = stock.get('max_allocation_percent', None)
+            if individual_cap is not None and individual_cap > 0:
+                individual_caps[ticker] = individual_cap / 100.0
+        
         # Debug output
         print(f"[THRESHOLD DEBUG] Non-momentum portfolio: use_threshold={use_threshold}, threshold_percent={threshold_percent}, use_max_allocation={use_max_allocation}, max_allocation_percent={max_allocation_percent}")
+        print(f"[THRESHOLD DEBUG] Individual caps: {individual_caps}")
         print(f"[THRESHOLD DEBUG] Original allocations: {allocations}")
         
         # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
-        if use_max_allocation:
+        if (use_max_allocation or individual_caps):
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # FIRST PASS: Apply maximum allocation filter (EXCLUDE CASH from max_allocation limit)
@@ -4154,18 +4216,28 @@ def single_backtest(config, sim_index, reindexed_data):
                 # CASH is exempt from max_allocation limit to prevent money loss
                 if ticker == 'CASH':
                     capped_allocations[ticker] = allocation
-                elif allocation > max_allocation_decimal:
-                    # Cap the allocation and collect excess
-                    capped_allocations[ticker] = max_allocation_decimal
-                    excess_allocation += (allocation - max_allocation_decimal)
                 else:
-                    capped_allocations[ticker] = allocation
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if allocation > ticker_cap:
+                        # Cap the allocation and collect excess
+                        capped_allocations[ticker] = ticker_cap
+                        excess_allocation += (allocation - ticker_cap)
+                    else:
+                        capped_allocations[ticker] = allocation
             
             # Redistribute excess allocation proportionally to stocks below the cap
             if excess_allocation > 0:
                 # Find stocks below the cap (include CASH as eligible for redistribution)
-                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                  if ticker == 'CASH' or allocation < max_allocation_decimal}
+                below_cap_stocks = {}
+                for ticker, allocation in capped_allocations.items():
+                    if ticker == 'CASH':
+                        below_cap_stocks[ticker] = allocation
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if allocation < ticker_cap:
+                            below_cap_stocks[ticker] = allocation
                 
                 if below_cap_stocks:
                     total_below_cap = sum(below_cap_stocks.values())
@@ -4178,7 +4250,8 @@ def single_backtest(config, sim_index, reindexed_data):
                             if ticker == 'CASH':
                                 capped_allocations[ticker] = new_allocation
                             else:
-                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_allocations[ticker] = min(new_allocation, ticker_cap)
             
             allocations = capped_allocations
         
@@ -4205,7 +4278,8 @@ def single_backtest(config, sim_index, reindexed_data):
                 pass  # allocations remain unchanged
         
         # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-        if use_max_allocation:
+        # Run if global cap is enabled OR any individual caps exist (parity with Page 1)
+        if (use_max_allocation or individual_caps):
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # Check if any stocks exceed the cap after threshold filtering and normalization (EXCLUDE CASH)
@@ -4216,18 +4290,28 @@ def single_backtest(config, sim_index, reindexed_data):
                 # CASH is exempt from max_allocation limit to prevent money loss
                 if ticker == 'CASH':
                     capped_allocations[ticker] = allocation
-                elif allocation > max_allocation_decimal:
-                    # Cap the allocation and collect excess
-                    capped_allocations[ticker] = max_allocation_decimal
-                    excess_allocation += (allocation - max_allocation_decimal)
                 else:
-                    capped_allocations[ticker] = allocation
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if allocation > ticker_cap:
+                        # Cap the allocation and collect excess
+                        capped_allocations[ticker] = ticker_cap
+                        excess_allocation += (allocation - ticker_cap)
+                    else:
+                        capped_allocations[ticker] = allocation
             
             # Redistribute excess allocation proportionally to stocks below the cap
             if excess_allocation > 0:
                 # Find stocks below the cap (include CASH as eligible for redistribution)
-                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                  if ticker == 'CASH' or allocation < max_allocation_decimal}
+                below_cap_stocks = {}
+                for ticker, allocation in capped_allocations.items():
+                    if ticker == 'CASH':
+                        below_cap_stocks[ticker] = allocation
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if allocation < ticker_cap:
+                            below_cap_stocks[ticker] = allocation
                 
                 if below_cap_stocks:
                     total_below_cap = sum(below_cap_stocks.values())
@@ -4240,7 +4324,8 @@ def single_backtest(config, sim_index, reindexed_data):
                             if ticker == 'CASH':
                                 capped_allocations[ticker] = new_allocation
                             else:
-                                capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_allocations[ticker] = min(new_allocation, ticker_cap)
             
             allocations = capped_allocations
             
@@ -4497,7 +4582,16 @@ def single_backtest(config, sim_index, reindexed_data):
         use_threshold = config.get('use_minimal_threshold', False)
         threshold_percent = config.get('minimal_threshold_percent', 2.0)
         
-        if use_max_allocation and weights:
+        # Build dictionary of individual ticker caps from stock configs
+        individual_caps = {}
+        for stock in config.get('stocks', []):
+            ticker = stock.get('ticker', '')
+            individual_cap = stock.get('max_allocation_percent', None)
+            if individual_cap is not None and individual_cap > 0:
+                individual_caps[ticker] = individual_cap / 100.0
+        
+        # Apply caps if either global cap is enabled OR any individual caps exist
+        if (use_max_allocation or individual_caps) and weights:
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # FIRST PASS: Apply maximum allocation filter
@@ -4505,19 +4599,32 @@ def single_backtest(config, sim_index, reindexed_data):
             excess_weight = 0.0
             
             for ticker, weight in weights.items():
-                if weight > max_allocation_decimal:
-                    # Cap the weight and collect excess
-                    capped_weights[ticker] = max_allocation_decimal
-                    excess_weight += (weight - max_allocation_decimal)
-                else:
-                    # Keep original weight
+                # CASH is exempt from max_allocation limit
+                if ticker == 'CASH':
                     capped_weights[ticker] = weight
+                else:
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if weight > ticker_cap:
+                        # Cap the weight and collect excess
+                        capped_weights[ticker] = ticker_cap
+                        excess_weight += (weight - ticker_cap)
+                    else:
+                        # Keep original weight
+                        capped_weights[ticker] = weight
             
             # Redistribute excess weight proportionally among stocks that are below the cap
             if excess_weight > 0:
-                # Find stocks that can receive more weight (below the cap)
-                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
-                                 if weight < max_allocation_decimal}
+                # Find stocks that can receive more weight (below their individual cap) - include CASH as eligible
+                eligible_stocks = {}
+                for ticker, weight in capped_weights.items():
+                    if ticker == 'CASH':
+                        eligible_stocks[ticker] = weight
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if weight < ticker_cap:
+                            eligible_stocks[ticker] = weight
                 
                 if eligible_stocks:
                     # Calculate total weight of eligible stocks
@@ -4530,8 +4637,13 @@ def single_backtest(config, sim_index, reindexed_data):
                             additional_weight = excess_weight * proportion
                             new_weight = capped_weights[ticker] + additional_weight
                             
-                            # Make sure we don't exceed the cap
-                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the individual ticker's cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_weights[ticker] = min(new_weight, ticker_cap)
             
             weights = capped_weights
             
@@ -4563,7 +4675,7 @@ def single_backtest(config, sim_index, reindexed_data):
                 weights = weights
         
         # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-        if use_max_allocation and weights:
+        if (use_max_allocation or individual_caps) and weights:
             max_allocation_decimal = max_allocation_percent / 100.0
             
             # Check if any stocks exceed the cap after threshold filtering and normalization
@@ -4571,19 +4683,32 @@ def single_backtest(config, sim_index, reindexed_data):
             excess_weight = 0.0
             
             for ticker, weight in weights.items():
-                if weight > max_allocation_decimal:
-                    # Cap the weight and collect excess
-                    capped_weights[ticker] = max_allocation_decimal
-                    excess_weight += (weight - max_allocation_decimal)
-                else:
-                    # Keep original weight
+                # CASH is exempt from max_allocation limit
+                if ticker == 'CASH':
                     capped_weights[ticker] = weight
+                else:
+                    # Use individual cap if available, otherwise use global cap
+                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                    
+                    if weight > ticker_cap:
+                        # Cap the weight and collect excess
+                        capped_weights[ticker] = ticker_cap
+                        excess_weight += (weight - ticker_cap)
+                    else:
+                        # Keep original weight
+                        capped_weights[ticker] = weight
             
             # Redistribute excess weight proportionally among stocks that are below the cap
             if excess_weight > 0:
-                # Find stocks that can receive more weight (below the cap)
-                eligible_stocks = {ticker: weight for ticker, weight in capped_weights.items() 
-                                 if weight < max_allocation_decimal}
+                # Find stocks that can receive more weight (below their individual cap) - include CASH as eligible
+                eligible_stocks = {}
+                for ticker, weight in capped_weights.items():
+                    if ticker == 'CASH':
+                        eligible_stocks[ticker] = weight
+                    else:
+                        ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                        if weight < ticker_cap:
+                            eligible_stocks[ticker] = weight
                 
                 if eligible_stocks:
                     # Calculate total weight of eligible stocks
@@ -4596,8 +4721,13 @@ def single_backtest(config, sim_index, reindexed_data):
                             additional_weight = excess_weight * proportion
                             new_weight = capped_weights[ticker] + additional_weight
                             
-                            # Make sure we don't exceed the cap
-                            capped_weights[ticker] = min(new_weight, max_allocation_decimal)
+                            # CASH can receive unlimited weight, other stocks are capped
+                            if ticker == 'CASH':
+                                capped_weights[ticker] = new_weight
+                            else:
+                                # Make sure we don't exceed the individual ticker's cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                capped_weights[ticker] = min(new_weight, ticker_cap)
             
             weights = capped_weights
             
@@ -5988,7 +6118,6 @@ def update_use_threshold():
 
 def update_threshold_percent():
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['minimal_threshold_percent'] = st.session_state.alloc_active_threshold_percent
-
 def update_use_max_allocation():
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['use_max_allocation'] = st.session_state.alloc_active_use_max_allocation
 
@@ -6073,6 +6202,7 @@ def update_stock_ticker(index):
             # key not yet initialized (race condition). Skip update; the widget's key will be present on next rerender.
             return
         
+        
         # Convert commas to dots for decimal separators (like case conversion)
         converted_val = val.replace(",", ".")
         
@@ -6107,17 +6237,6 @@ def update_stock_ticker(index):
         st.session_state.alloc_rerun_flag = True
     except Exception:
         # Defensive: if portfolio index or structure changed, skip silently
-        return
-
-
-def update_stock_dividends(index):
-    try:
-        key = f"alloc_div_{st.session_state.alloc_active_portfolio_index}_{index}"
-        val = st.session_state.get(key, None)
-        if val is None:
-            return
-        st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][index]['include_dividends'] = bool(val)
-    except Exception:
         return
 
 
@@ -6156,6 +6275,16 @@ def update_ma_reference_ticker(stock_index):
             portfolio['stocks'][stock_index]['ma_reference_ticker'] = resolved_value
             st.session_state.alloc_rerun_flag = True
 
+
+def update_stock_dividends(index):
+    try:
+        key = f"alloc_div_{st.session_state.alloc_active_portfolio_index}_{index}"
+        val = st.session_state.get(key, None)
+        if val is None:
+            return
+        st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][index]['include_dividends'] = bool(val)
+    except Exception:
+        return
 
 # Update active_portfolio
 active_portfolio = st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]
@@ -6500,10 +6629,10 @@ with st.expander("📈 Broad Long-Term Tickers", expanded=False):
 
 # Special Tickers Section
 # Use session state to control expander state
-if 'no_cache_alloc_special_tickers_expanded' not in st.session_state:
-    st.session_state.no_cache_alloc_special_tickers_expanded = False
+if 'alloc_special_tickers_expanded' not in st.session_state:
+    st.session_state.alloc_special_tickers_expanded = False
 
-with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_cache_alloc_special_tickers_expanded):
+with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.alloc_special_tickers_expanded):
     st.markdown("**Quick access to ticker aliases that the system accepts:**")
     
     # Get the actual ticker aliases from the function
@@ -6540,7 +6669,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_
                     'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.no_cache_alloc_special_tickers_expanded = True
+                st.session_state.alloc_special_tickers_expanded = True
                 st.rerun()
     
     with col2:
@@ -6649,7 +6778,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_
                     'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.no_cache_alloc_special_tickers_expanded = True
+                st.session_state.alloc_special_tickers_expanded = True
                 st.rerun()
     
     st.markdown("---")
@@ -8676,10 +8805,18 @@ if st.session_state.get('alloc_backtest_run', False):
                         print(f"[THRESHOLD DEBUG] Rebalance as of Today - use_threshold: {use_threshold}, threshold_percent: {threshold_percent}, use_max_allocation: {use_max_allocation}, max_allocation_percent: {max_allocation_percent}")
                         print(f"[THRESHOLD DEBUG] Raw allocations: {raw_allocations}")
                         
+                        # Build dictionary of individual ticker caps from stock configs
+                        individual_caps = {}
+                        for stock in active_portfolio.get('stocks', []):
+                            ticker = stock.get('ticker', '')
+                            individual_cap = stock.get('max_allocation_percent', None)
+                            if individual_cap is not None and individual_cap > 0:
+                                individual_caps[ticker] = individual_cap / 100.0
+                        
                         # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
                         filtered_allocations = raw_allocations.copy()
                         
-                        if use_max_allocation:
+                        if (use_max_allocation or individual_caps):
                             max_allocation_decimal = max_allocation_percent / 100.0
                             
                             # FIRST PASS: Apply maximum allocation filter
@@ -8687,18 +8824,24 @@ if st.session_state.get('alloc_backtest_run', False):
                             excess_allocation = 0.0
                             
                             for ticker, allocation in filtered_allocations.items():
-                                if allocation > max_allocation_decimal:
+                                # Use individual cap if available, otherwise use global cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                
+                                if allocation > ticker_cap:
                                     # Cap the allocation and collect excess
-                                    capped_allocations[ticker] = max_allocation_decimal
-                                    excess_allocation += (allocation - max_allocation_decimal)
+                                    capped_allocations[ticker] = ticker_cap
+                                    excess_allocation += (allocation - ticker_cap)
                                 else:
                                     capped_allocations[ticker] = allocation
                             
                             # Redistribute excess allocation proportionally to stocks below the cap
                             if excess_allocation > 0:
-                                # Find stocks below the cap
-                                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                                  if allocation < max_allocation_decimal}
+                                # Find stocks below the cap (using individual caps)
+                                below_cap_stocks = {}
+                                for ticker, allocation in capped_allocations.items():
+                                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                    if allocation < ticker_cap:
+                                        below_cap_stocks[ticker] = allocation
                                 
                                 if below_cap_stocks:
                                     total_below_cap = sum(below_cap_stocks.values())
@@ -8707,7 +8850,8 @@ if st.session_state.get('alloc_backtest_run', False):
                                         for ticker in below_cap_stocks:
                                             proportion = below_cap_stocks[ticker] / total_below_cap
                                             new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
-                                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                            ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                            capped_allocations[ticker] = min(new_allocation, ticker_cap)
                             
                             filtered_allocations = capped_allocations
                         
@@ -8734,7 +8878,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 pass  # filtered_allocations remain unchanged
                         
                         # SECOND PASS: Apply maximum allocation filter again (in case normalization created new excess)
-                        if use_max_allocation:
+                        if (use_max_allocation or individual_caps):
                             max_allocation_decimal = max_allocation_percent / 100.0
                             
                             # Check if any stocks exceed the cap after threshold filtering and normalization
@@ -8742,18 +8886,24 @@ if st.session_state.get('alloc_backtest_run', False):
                             excess_allocation = 0.0
                             
                             for ticker, allocation in filtered_allocations.items():
-                                if allocation > max_allocation_decimal:
+                                # Use individual cap if available, otherwise use global cap
+                                ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                
+                                if allocation > ticker_cap:
                                     # Cap the allocation and collect excess
-                                    capped_allocations[ticker] = max_allocation_decimal
-                                    excess_allocation += (allocation - max_allocation_decimal)
+                                    capped_allocations[ticker] = ticker_cap
+                                    excess_allocation += (allocation - ticker_cap)
                                 else:
                                     capped_allocations[ticker] = allocation
                             
                             # Redistribute excess allocation proportionally to stocks below the cap
                             if excess_allocation > 0:
-                                # Find stocks below the cap
-                                below_cap_stocks = {ticker: allocation for ticker, allocation in capped_allocations.items() 
-                                                  if allocation < max_allocation_decimal}
+                                # Find stocks below the cap (using individual caps)
+                                below_cap_stocks = {}
+                                for ticker, allocation in capped_allocations.items():
+                                    ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                    if allocation < ticker_cap:
+                                        below_cap_stocks[ticker] = allocation
                                 
                                 if below_cap_stocks:
                                     total_below_cap = sum(below_cap_stocks.values())
@@ -8762,7 +8912,8 @@ if st.session_state.get('alloc_backtest_run', False):
                                         for ticker in below_cap_stocks:
                                             proportion = below_cap_stocks[ticker] / total_below_cap
                                             new_allocation = capped_allocations[ticker] + (excess_allocation * proportion)
-                                            capped_allocations[ticker] = min(new_allocation, max_allocation_decimal)
+                                            ticker_cap = individual_caps.get(ticker, max_allocation_decimal if use_max_allocation else float('inf'))
+                                            capped_allocations[ticker] = min(new_allocation, ticker_cap)
                             
                             filtered_allocations = capped_allocations
                         
@@ -9133,7 +9284,7 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         # Fix for dual-class shares - detect and adjust for share class differences
                         # This handles cases where Yahoo Finance returns same per-share data for different share classes
-                        if current_price > 0:
+                        if current_price and current_price > 0:
                             # Store the current row data for comparison with other shares of same company
                             company_base = ticker.split('-')[0] if '-' in ticker else ticker
                             if company_base not in st.session_state:
@@ -9155,7 +9306,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                     # Use the higher-priced share class as reference to avoid scaling issues
                                     if price_ratio > 10 or price_ratio < 0.1:
                                         # Only adjust if current share class has lower price (use higher price as reference)
-                                        if current_price < other_data['price']:
+                                        if current_price and other_data['price'] and current_price < other_data['price']:
                                             for field in per_share_fields:
                                                 if row[field] and other_data['per_share_data'].get(field):
                                                     # Use the price ratio to adjust the per-share values
@@ -9297,15 +9448,16 @@ if st.session_state.get('alloc_backtest_run', False):
                     st.session_state.portfolio_enterprise_value = portfolio_enterprise_value
                     st.session_state.portfolio_forward_pe = portfolio_forward_pe
                     
-                    # Calculate sector and industry breakdowns BEFORE formatting
+                    # Calculate sector and industry breakdowns using ACTUAL portfolio allocations, not market values
                     sector_data = pd.Series(dtype=float)
                     industry_data = pd.Series(dtype=float)
                     
-                    if 'Sector' in df_comprehensive.columns and '% of Portfolio' in df_comprehensive.columns:
-                        sector_data = df_comprehensive.groupby('Sector')['% of Portfolio'].sum().sort_values(ascending=False)
+                    # Use 'Allocation %' column instead of '% of Portfolio' for accurate sector/industry breakdown
+                    if 'Sector' in df_comprehensive.columns and 'Allocation %' in df_comprehensive.columns:
+                        sector_data = df_comprehensive.groupby('Sector')['Allocation %'].sum().sort_values(ascending=False)
                     
-                    if 'Industry' in df_comprehensive.columns and '% of Portfolio' in df_comprehensive.columns:
-                        industry_data = df_comprehensive.groupby('Industry')['% of Portfolio'].sum().sort_values(ascending=False)
+                    if 'Industry' in df_comprehensive.columns and 'Allocation %' in df_comprehensive.columns:
+                        industry_data = df_comprehensive.groupby('Industry')['Allocation %'].sum().sort_values(ascending=False)
                     
                     # Store sector and industry data in session state for PDF generation
                     st.session_state.sector_data = sector_data
@@ -9680,14 +9832,28 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 today = pd.Timestamp.now().date()
                 
-                # Calculate different period returns (using trading days approximation)
+                # Calculate different period returns using calendar-day lookbacks
+                # This ensures assets that trade 7 days/week (e.g., BITCOIN) are correct
                 periods = {
-                    '1W': 5,      # 5 trading days
-                    '1M': 21,     # ~21 trading days per month
-                    '3M': 63,     # ~63 trading days per quarter
-                    '6M': 126,    # ~126 trading days per half year
-                    '1Y': 252     # ~252 trading days per year
+                    '1W': 7,      # 7 calendar days
+                    '1M': 30,     # ~30 calendar days per month
+                    '3M': 90,     # ~90 calendar days per quarter
+                    '6M': 180,    # ~180 calendar days per half year
+                    '1Y': 365     # ~365 calendar days per year
                 }
+
+                def get_value_days_ago(series, days):
+                    """Return the series value at or before (last_date - days)."""
+                    if series is None or len(series) == 0:
+                        return None
+                    last_date = series.index[-1]
+                    target_date = last_date - pd.Timedelta(days=days)
+                    # Slice up to target_date, pick last available
+                    prior = series.loc[:target_date]
+                    if len(prior) == 0:
+                        # Not enough history; return first value
+                        return series.iloc[0]
+                    return prior.iloc[-1]
                 
                 
                 portfolio_data = []
@@ -9981,7 +10147,7 @@ if st.session_state.get('alloc_backtest_run', False):
         
         # Prepare available_data for both portfolio and benchmark calculations
         available_data = {}
-        benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD']
+        benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
         
         for ticker in benchmark_tickers:
             if raw_data and ticker in raw_data and not raw_data[ticker].empty:
@@ -9991,14 +10157,27 @@ if st.session_state.get('alloc_backtest_run', False):
         missing_tickers = [ticker for ticker in benchmark_tickers if ticker not in available_data]
         if missing_tickers:
             try:
-                import yfinance as yf
-                batch_data = yf.download(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
-                if not batch_data.empty:
-                    for ticker in missing_tickers:
-                        if ticker in batch_data.columns.get_level_values(0):
-                            df = batch_data[ticker].copy()
-                            if df is not None and not df.empty and 'Close' in df.columns:
-                                available_data[ticker] = df
+                # Handle BITCOIN specially
+                if 'BITCOIN' in missing_tickers:
+                    try:
+                        from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
+                        bitcoin_data = create_bitcoin_complete_ticker()
+                        if bitcoin_data is not None and not bitcoin_data.empty:
+                            available_data['BITCOIN'] = bitcoin_data
+                        missing_tickers.remove('BITCOIN')
+                    except Exception:
+                        pass
+                
+                # Download other missing tickers
+                if missing_tickers:
+                    import yfinance as yf
+                    batch_data = yf.download(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
+                    if not batch_data.empty:
+                        for ticker in missing_tickers:
+                            if ticker in batch_data.columns.get_level_values(0):
+                                df = batch_data[ticker].copy()
+                                if df is not None and not df.empty and 'Close' in df.columns:
+                                    available_data[ticker] = df
             except Exception:
                 pass
         
@@ -10084,6 +10263,8 @@ if st.session_state.get('alloc_backtest_run', False):
         
         # Add Benchmark Comparison Table
         st.markdown("### 📊 **Benchmark Comparison**")
+        # Clarify that figures are approximate snapshots
+        st.caption("Approximate price-return snapshots using calendar lookbacks; may differ from total-return or month-end sources.")
         
         # PE is now calculated directly and always up-to-date - no warning needed
         
@@ -10099,18 +10280,31 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 today = pd.Timestamp.now().date()
                 
-                # Calculate different period returns (using trading days approximation)
+                # Calculate different period returns using calendar-day lookbacks
                 periods = {
-                    '1W': 5,      # 5 trading days
-                    '1M': 21,     # ~21 trading days per month
-                    '3M': 63,     # ~63 trading days per quarter
-                    '6M': 126,    # ~126 trading days per half year
-                    '1Y': 252     # ~252 trading days per year
+                    '1W': 7,      # 7 calendar days
+                    '1M': 30,     # ~30 calendar days per month
+                    '3M': 90,     # ~90 calendar days per quarter
+                    '6M': 180,    # ~180 calendar days per half year
+                    '1Y': 365     # ~365 calendar days per year
                 }
-                
-                
+
+                def get_value_days_ago(series, days):
+                    """Return the value at or before last_date - days from a datetime-indexed Series/DataFrame column."""
+                    if series is None or len(series) == 0:
+                        return None
+                    last_date = pd.to_datetime(series.index[-1])
+                    target_date = last_date - pd.Timedelta(days=days)
+                    # Ensure datetime index
+                    idx = pd.to_datetime(series.index)
+                    series.index = idx
+                    prior = series.loc[:target_date]
+                    if len(prior) == 0:
+                        return series.iloc[0]
+                    return prior.iloc[-1]
+
                 # Benchmark tickers to compare (in specific order)
-                benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD']
+                benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
                 
                 # Use preloaded info if available (for performance)
                 if preloaded_info is None:
@@ -10134,24 +10328,20 @@ if st.session_state.get('alloc_backtest_run', False):
                         if 'no_additions' in portfolio_result:
                             portfolio_values = portfolio_result['no_additions']
                             
-                            # Calculate period returns directly from portfolio values
+                            # Calculate period returns using calendar-day lookbacks
+                            # Ensure index is datetime
+                            pv = portfolio_values.copy()
+                            pv.index = pd.to_datetime(pv.index)
                             for period_name, days in periods.items():
                                 try:
-                                    if len(portfolio_values) < days + 1:
-                                        portfolio_returns_dict[period_name] = 'N/A'
-                                        continue
-                                    
-                                    # Get current and past portfolio values
-                                    current_value = portfolio_values.iloc[-1]
-                                    past_value = portfolio_values.iloc[-(days + 1)]
-                                    
-                                    if past_value > 0:
+                                    current_value = pv.iloc[-1]
+                                    past_value = get_value_days_ago(pv, days)
+                                    if past_value is not None and past_value > 0:
                                         return_pct = ((current_value - past_value) / past_value) * 100
                                         portfolio_returns_dict[period_name] = f"{return_pct:+.2f}%"
                                     else:
                                         portfolio_returns_dict[period_name] = 'N/A'
-                                        
-                                except (IndexError, KeyError):
+                                except Exception:
                                     portfolio_returns_dict[period_name] = 'N/A'
                         else:
                             # Fallback: all N/A if no portfolio data
@@ -10256,17 +10446,21 @@ if st.session_state.get('alloc_backtest_run', False):
                 portfolio_volatility_calculated = 'N/A'
                 portfolio_beta_calculated = 'N/A'
                 
-                # Get Volatility and Beta from historical portfolio results (last 252 trading days / ~1 year)
+                # Get Volatility and Beta from historical portfolio results (last 365 calendar days)
                 try:
                     all_results = st.session_state.get('alloc_all_results', {})
                     if active_name and active_name in all_results:
                         portfolio_result = all_results[active_name]
                         if 'no_additions' in portfolio_result:
                             portfolio_values = portfolio_result['no_additions']
-                            if len(portfolio_values) >= 252:
-                                # Use only last 252 trading days
-                                portfolio_values_1y = portfolio_values.iloc[-252:]
+                            if len(portfolio_values) >= 60:
+                                # Use last 365 calendar days for the volatility/beta window
+                                pv = portfolio_values.copy()
+                                pv.index = pd.to_datetime(pv.index)
+                                start_date = pv.index[-1] - pd.Timedelta(days=365)
+                                portfolio_values_1y = pv.loc[start_date:]
                                 portfolio_returns = portfolio_values_1y.pct_change().dropna()
+                                # Annualize using 252 trading days convention
                                 volatility = portfolio_returns.std() * np.sqrt(252) * 100
                                 portfolio_volatility_calculated = f"{volatility:.2f}%"
                                 
@@ -10274,15 +10468,16 @@ if st.session_state.get('alloc_backtest_run', False):
                                 try:
                                     if 'SPY' in available_data and not available_data['SPY'].empty:
                                         spy_data = available_data['SPY'].copy()
-                                        if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                            spy_close = spy_data['Close'].iloc[-252:]
-                                            spy_returns = spy_close.pct_change().dropna()
-                                            
-                                            # Take same length for both
-                                            min_len = min(len(portfolio_returns), len(spy_returns))
-                                            if min_len >= 200:
-                                                port_ret = portfolio_returns.iloc[-min_len:]
-                                                spy_ret = spy_returns.iloc[-min_len:]
+                                        if 'Close' in spy_data.columns and len(spy_data) >= 60:
+                                            spy_data.index = pd.to_datetime(spy_data.index)
+                                            spy_close = spy_data['Close']
+                                            spy_ret_window = spy_close.loc[start_date:]
+                                            spy_returns = spy_ret_window.pct_change().dropna()
+                                            # Align on common dates
+                                            common_idx = portfolio_returns.index.intersection(spy_returns.index)
+                                            if len(common_idx) >= 60:
+                                                port_ret = portfolio_returns.reindex(common_idx).dropna()
+                                                spy_ret = spy_returns.reindex(common_idx).dropna()
                                                 
                                                 # Simple beta = correlation * (portfolio_vol / market_vol)
                                                 correlation = port_ret.corr(spy_ret)
@@ -10330,47 +10525,52 @@ if st.session_state.get('alloc_backtest_run', False):
                     
                     ticker_returns['PE'] = ticker_pe
                     
+                    # Ensure datetime index
+                    df_local = df.copy()
+                    df_local.index = pd.to_datetime(df_local.index)
                     for period_name, days in periods.items():
                         try:
-                            if len(df) < days + 1:
-                                ticker_returns[period_name] = 'N/A'
-                                continue
-                            
-                            current_price = df['Close'].iloc[-1]
-                            past_price = df['Close'].iloc[-(days + 1)]
-                            
-                            if past_price > 0:
+                            current_price = df_local['Close'].iloc[-1]
+                            past_price = get_value_days_ago(df_local['Close'], days)
+                            if past_price is not None and past_price > 0:
                                 return_pct = ((current_price - past_price) / past_price) * 100
                                 ticker_returns[period_name] = f"{return_pct:+.2f}%"
                             else:
                                 ticker_returns[period_name] = 'N/A'
-                        except (IndexError, KeyError):
+                        except Exception:
                             ticker_returns[period_name] = 'N/A'
                     
-                    # Calculate Volatility and Beta for this ticker (last 252 trading days / ~1 year)
+                    # Calculate Volatility and Beta for this ticker (last 365 calendar days)
                     ticker_volatility = 'N/A'
                     ticker_beta = 'N/A'
                     try:
-                        if len(df) >= 252:
-                            # Use only last 252 trading days
-                            ticker_returns_series = df['Close'].iloc[-252:].pct_change().dropna()
-                            if len(ticker_returns_series) >= 200:  # Allow some flexibility
-                                ticker_vol = ticker_returns_series.std() * np.sqrt(252) * 100
+                        if len(df) >= 60:
+                            # Use last 365 calendar days
+                            df_local = df.copy()
+                            df_local.index = pd.to_datetime(df_local.index)
+                            start_date = df_local.index[-1] - pd.Timedelta(days=365)
+                            ticker_window = df_local['Close'].loc[start_date:]
+                            ticker_returns_series = ticker_window.pct_change().dropna()
+                            if len(ticker_returns_series) >= 60:  # Allow some flexibility
+                                # Annualize using 252 for weekdays assets, 365 for always-open (BITCOIN)
+                                annualize_days = 365 if ticker == 'BITCOIN' else 252
+                                ticker_vol = ticker_returns_series.std() * np.sqrt(annualize_days) * 100
                                 ticker_volatility = f"{ticker_vol:.2f}%"
                                 
                                 if ticker == 'SPY':
                                     ticker_beta = "1.00"
                                 elif 'SPY' in available_data and not available_data['SPY'].empty:
                                     spy_data = available_data['SPY'].copy()
-                                    if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                        spy_close = spy_data['Close'].iloc[-252:]
-                                        spy_returns = spy_close.pct_change().dropna()
-                                        
-                                        # Take same length for both
-                                        min_len = min(len(ticker_returns_series), len(spy_returns))
-                                        if min_len >= 200:
-                                            ticker_ret = ticker_returns_series.iloc[-min_len:]
-                                            spy_ret = spy_returns.iloc[-min_len:]
+                                    if 'Close' in spy_data.columns and len(spy_data) >= 60:
+                                        spy_data.index = pd.to_datetime(spy_data.index)
+                                        spy_close = spy_data['Close']
+                                        spy_ret_window = spy_close.loc[start_date:]
+                                        spy_returns = spy_ret_window.pct_change().dropna()
+                                        # Align on common dates
+                                        common_idx = ticker_returns_series.index.intersection(spy_returns.index)
+                                        if len(common_idx) >= 60:
+                                            ticker_ret = ticker_returns_series.reindex(common_idx).dropna()
+                                            spy_ret = spy_returns.reindex(common_idx).dropna()
                                             
                                             # Simple beta = correlation * (ticker_vol / market_vol)
                                             correlation = ticker_ret.corr(spy_ret)
@@ -10403,7 +10603,7 @@ if st.session_state.get('alloc_backtest_run', False):
         
         # Preload benchmark ticker info BEFORE calculating returns to ensure PE ratios are available immediately
         # NUCLEAR OPTION: Portfolio PE is already calculated and stored in session state, no need to preload portfolio tickers!
-        benchmark_tickers_to_preload = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD']
+        benchmark_tickers_to_preload = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
         preloaded_benchmark_info = get_multiple_tickers_info_batch(benchmark_tickers_to_preload)
         
         benchmark_df = calculate_benchmark_returns(available_data, preloaded_benchmark_info)
@@ -10950,32 +11150,42 @@ if st.session_state.get('alloc_backtest_run', False):
                             if 'Close' not in df.columns:
                                 continue
                             
-                            # Calculate different period returns (using trading days approximation - same as Benchmark Comparison)
+                            # Calculate different period returns using calendar-day lookbacks (same as Benchmark Comparison)
                             periods = {
-                                '1W': 5,      # 5 trading days
-                                '1M': 21,     # ~21 trading days per month
-                                '3M': 63,     # ~63 trading days per quarter
-                                '6M': 126,    # ~126 trading days per half year
-                                '1Y': 252     # ~252 trading days per year
+                                '1W': 7,
+                                '1M': 30,
+                                '3M': 90,
+                                '6M': 180,
+                                '1Y': 365
                             }
+                            
+                            def _get_value_days_ago(series, days):
+                                """Return value at or before last_date - days from a datetime-indexed Series."""
+                                if series is None or len(series) == 0:
+                                    return None
+                                last_date = pd.to_datetime(series.index[-1])
+                                target_date = last_date - pd.Timedelta(days=days)
+                                # Ensure datetime index
+                                series.index = pd.to_datetime(series.index)
+                                prior = series.loc[:target_date]
+                                if len(prior) == 0:
+                                    return series.iloc[0]
+                                return prior.iloc[-1]
                             
                             current_price = df['Close'].iloc[-1]
                             ticker_returns = {'Ticker': ticker}
                             
+                            # Ensure datetime index
+                            df.index = pd.to_datetime(df.index)
                             for period_name, days in periods.items():
                                 try:
-                                    if days > len(df):
-                                        # Not enough data
-                                        ticker_returns[period_name] = 'N/A'
-                                        continue
-                                    
-                                    past_price = df['Close'].iloc[-days-1]
-                                    if past_price > 0:
-                                        return_pct = ((current_price - past_price) / past_price) * 100
+                                    past_val = _get_value_days_ago(df['Close'], days)
+                                    if past_val is not None and past_val > 0:
+                                        return_pct = ((current_price - past_val) / past_val) * 100
                                         ticker_returns[period_name] = f"{return_pct:+.2f}%"
                                     else:
                                         ticker_returns[period_name] = 'N/A'
-                                except (IndexError, KeyError):
+                                except Exception:
                                     ticker_returns[period_name] = 'N/A'
                             
                             returns_data.append(ticker_returns)
