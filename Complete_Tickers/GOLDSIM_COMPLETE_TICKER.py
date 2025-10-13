@@ -1,129 +1,111 @@
+#!/usr/bin/env python3
+"""
+GOLDSIM Complete Ticker - Ultra Optimized
+Combines historical GOLD data with live GLD ETF data
+"""
+
 import pandas as pd
 import yfinance as yf
-import numpy as np
-from datetime import datetime
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+def load_historical_goldsim_data():
+    """Load historical GOLDSIM data from CSV"""
+    try:
+        df = pd.read_csv('Complete_Tickers/Historical CSV/GOLD Historical Data Monthly.csv', 
+                        sep='\t', header=None)
+        
+        # Parse dates (add '-01' for day of month)
+        df[0] = pd.to_datetime(df[0] + '-01')
+        df.set_index(0, inplace=True)
+        
+        # Clean price column
+        df[2] = df[2].str.replace('$', '').str.replace(',', '').astype(float)
+        
+        # Rename columns to match expected format
+        df.columns = ['Change', 'Close']
+        
+        return df
+    except Exception as e:
+        print(f"Error loading historical GOLDSIM data: {e}")
+        return None
+
+def get_gld_data():
+    """Get recent GLD ETF data"""
+    try:
+        gld_ticker = yf.Ticker("GLD")
+        gld_data = gld_ticker.history(period="max", auto_adjust=True)
+        
+        if not gld_data.empty:
+            # Make timezone-naive for comparison
+            gld_data.index = gld_data.index.tz_localize(None)
+            return gld_data
+        else:
+            return None
+    except Exception as e:
+        print(f"Error fetching GLD data: {e}")
+        return None
 
 def create_goldsim_complete_ticker():
-    """
-    Create a complete GOLDSIM ticker combining new historical CSV data with existing GOLDX ticker data.
-    GOLDSIM = Complete Gold Simulation (1968+) - New Historical + GOLDX
-    """
+    """Create complete GOLDSIM ticker combining historical and GLD data"""
     try:
-        print("Loading new GOLD historical data...")
-        
-        # Load new historical GOLD data from CSV (no header)
-        historical_data = pd.read_csv('Complete_Tickers/Historical CSV/GOLD Historical Data Monthly.csv', 
-                                    sep='\t', header=None)
-        
-        # Parse dates manually to ensure they're all datetime
-        historical_data[0] = pd.to_datetime(historical_data[0], errors='coerce')
-        historical_data = historical_data.set_index(0).dropna()
-        
-        # Clean and convert price column (remove $, % signs, and commas)
-        historical_data[2] = historical_data[2].astype(str).str.replace('$', '').str.replace(',', '')
-        historical_prices = pd.to_numeric(historical_data[2], errors='coerce')
-        
-        print(f"CSV columns: {historical_data.columns.tolist()}")
-        print(f"CSV shape: {historical_data.shape}")
-        
-        # Create historical price series
-        historical_series = pd.Series(historical_prices.values, index=historical_data.index)
-        historical_series = historical_series.dropna()
-        historical_series.index = pd.to_datetime(historical_series.index)  # Ensure datetime index
-        
-        print(f"Historical GOLD data: {len(historical_series)} records")
-        print(f"Date range: {historical_series.index[0]} to {historical_series.index[-1]}")
-        print(f"Price range: ${float(historical_series.min()):.2f} to ${float(historical_series.max()):.2f}")
-        
-        # Fetch existing GOLDX data (which combines Gold_Futures_Complete.csv + GLD)
-        print("Fetching existing GOLDX data...")
-        try:
-            from GOLD_COMPLETE_TICKER import create_gold_complete_ticker
-        except ImportError:
-            from Complete_Tickers.GOLD_COMPLETE_TICKER import create_gold_complete_ticker
-        goldx_data = create_gold_complete_ticker()
-        
-        if goldx_data is None or goldx_data.empty:
-            print("No GOLDX data available, using historical data only")
-            return historical_series
-        
-        # GOLDX data is already a pandas Series
-        goldx_data.index = goldx_data.index.tz_localize(None)  # Remove timezone for compatibility
-        goldx_data.index = pd.to_datetime(goldx_data.index)  # Ensure datetime index
-        
-        print(f"GOLDX data: {len(goldx_data)} records")
-        print(f"Date range: {goldx_data.index[0]} to {goldx_data.index[-1]}")
-        
-        print(f"Historical CSV data: {len(historical_series)} records")
-        print(f"GOLDX data: {len(goldx_data)} records")
-        print(f"GOLDX starts: {goldx_data.index[0]}")
-        
-        # Find overlap period and calculate scaling factor
-        overlap_start = max(historical_series.index[0], goldx_data.index[0])
-        overlap_end = min(historical_series.index[-1], goldx_data.index[-1])
-        
-        if overlap_start <= overlap_end:
-            # Find the last historical date before GOLDX data starts
-            historical_before_goldx = historical_series[historical_series.index < goldx_data.index[0]]
-            
-            if len(historical_before_goldx) > 0:
-                # Use the last historical price before GOLDX starts
-                last_historical_price = historical_before_goldx.iloc[-1]
-                first_goldx_price = goldx_data.iloc[0]
-                
-                # Calculate scaling factor to match prices at transition
-                scaling_factor = float(first_goldx_price) / float(last_historical_price)
-                
-                print(f"Using {len(historical_before_goldx)} historical records before GOLDX")
-                print(f"Scaling factor: {scaling_factor:.6f}")
-                print(f"Last historical: ${float(last_historical_price):.2f}")
-                print(f"First GOLDX price: ${float(first_goldx_price):.2f}")
-                print(f"Scaled historical: ${float(last_historical_price * scaling_factor):.2f}")
-                
-                # Scale historical data to match GOLDX at transition point
-                # Create a clean copy to avoid index corruption
-                scaled_values = historical_before_goldx.values * scaling_factor
-                scaled_index = historical_before_goldx.index.copy()
-                
-                # Create clean series with proper datetime indexes
-                scaled_series = pd.Series(scaled_values, index=scaled_index)
-                goldx_series = pd.Series(goldx_data.values.flatten(), index=pd.to_datetime(goldx_data.index))
-                
-                # Combine scaled historical data with GOLDX data
-                complete_series = pd.concat([scaled_series, goldx_series])
-                # Sort by index to ensure proper chronological order
-                complete_series = complete_series.sort_index()
-                
-                print(f"Complete GOLDSIM ticker created: {len(complete_series)} total records")
-                print(f"Full date range: {complete_series.index[0]} to {complete_series.index[-1]}")
-                
-                return complete_series
+        # Load historical data
+        historical_data = load_historical_goldsim_data()
+        if historical_data is None:
+            gld_data = get_gld_data()
+            if gld_data is not None:
+                return gld_data[['Close']]
             else:
-                # No historical data before GOLDX, use GOLDX only
-                print("No historical data before GOLDX, using GOLDX only")
-                return goldx_data
-        else:
-            # No overlap, use GOLDX data only
-            print("No overlap period found, using GOLDX data only")
-            return goldx_data
+                return None
+        
+        # Get GLD data
+        gld_data = get_gld_data()
+        if gld_data is None:
+            return historical_data[['Close']]
+        
+        # GLD IPO date (November 18, 2004)
+        # Scale GLD to match historical data at 2004
+        try:
+            gld_start_date = pd.Timestamp('2004-11-18')
+            
+            # Find price in historical data closest to GLD start
+            historical_2004_price = historical_data[historical_data.index <= gld_start_date].iloc[-1]['Close']
+            
+            # Find first GLD price
+            gld_first_price = gld_data.iloc[0]['Close']
+            
+            # Calculate scaling factor
+            scaling_factor = historical_2004_price / gld_first_price
+            
+            # Scale GLD data
+            gld_scaled = gld_data.copy()
+            gld_scaled['Close'] = gld_scaled['Close'] * scaling_factor
+            gld_scaled['Open'] = gld_scaled['Open'] * scaling_factor
+            gld_scaled['High'] = gld_scaled['High'] * scaling_factor
+            gld_scaled['Low'] = gld_scaled['Low'] * scaling_factor
+            
+            # Get historical data before GLD starts
+            historical_before = historical_data[historical_data.index < gld_data.index.min()]
+            
+            # Combine data
+            combined_data = pd.concat([historical_before, gld_scaled])
+            combined_data = combined_data[~combined_data.index.duplicated(keep='last')]
+            combined_data = combined_data.sort_index()
+            
+            return combined_data[['Close']]
+            
+        except Exception as e:
+            print(f"Error scaling GLD data: {e}")
+            return historical_data[['Close']]
             
     except Exception as e:
-        import traceback
         print(f"Error creating GOLDSIM complete ticker: {e}")
-        print(f"Traceback: {traceback.format_exc()}")
         return None
 
 if __name__ == "__main__":
-    # Test the ticker
-    print("Testing GOLDSIM Complete Ticker...")
-    goldsim_data = create_goldsim_complete_ticker()
-    
-    if goldsim_data is not None and not goldsim_data.empty:
-        print(f"\nGOLDSIM ticker test successful!")
-        print(f"Total records: {len(goldsim_data)}")
-        print(f"Date range: {goldsim_data.index[0]} to {goldsim_data.index[-1]}")
-        
-        # Transition plot would be created here if needed
-        print("Transition plot would show seamless blend from 1968 to 2025")
-    else:
-        print("GOLDSIM ticker test failed!")
+    data = create_goldsim_complete_ticker()
+    if data is not None:
+        print(f"SUCCESS! Shape: {data.shape}")
+        print(f"Date range: {data.index.min()} to {data.index.max()}")
