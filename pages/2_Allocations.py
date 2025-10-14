@@ -76,7 +76,7 @@ def emergency_kill():
 
 def get_ticker_aliases():
     """Define ticker aliases for easier entry"""
-    return {
+    aliases = {
         # Stock Market Indices
         'SPX': '^GSPC',           # S&P 500 (price only, no dividends) - 1927+
         'SPXTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
@@ -153,15 +153,45 @@ def get_ticker_aliases():
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         
-        # Canadian Ticker Mappings (USD OTC -> Canadian Exchange)
+        # Canadian Ticker Mappings (USD OTC/NYSE -> Canadian Exchange for better data)
         'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX
         'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture
         'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX
         'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture
         'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture
         'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX
+        'LBLCF': 'L.TO',            # Loblaw Companies - USD OTC -> Canadian TSX
+        'ANCTF': 'ATD.TO',          # Alimentation Couche-Tard - USD OTC -> Canadian TSX
+        'MRU': 'MRU.TO',            # Metro Inc - NYSE -> Canadian TSX
+        'CLS': 'CLS.TO',            # Celestica Inc - NYSE -> Canadian TSX
+        'CGI': 'GIB-A.TO',          # CGI Inc - NYSE -> Canadian TSX
+        'DSGX': 'DSG.TO',           # Descartes Systems Group - NASDAQ -> Canadian TSX
+        'BITF': 'BITF.TO',          # Bitfarms - NASDAQ -> Canadian TSX (Bitcoin Mining)
+        'BN': 'BN.TO',              # Brookfield Corporation - NYSE -> Canadian TSX
+        'BAM': 'BAM.TO',            # Brookfield Asset Management - NYSE -> Canadian TSX
         'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX
+        'POW': 'POW.TO',            # Power Corporation - TSX
+        'PWCDF': 'POW.TO',          # Power Corporation - USD OTC -> Canadian TSX
+        'ENB': 'ENB.TO',            # Enbridge Inc - NYSE -> Canadian TSX
+        'TRP': 'TRP.TO',            # TC Energy (TransCanada) - NYSE -> Canadian TSX
+        'CNQ': 'CNQ.TO',            # Canadian Natural Resources - NYSE -> Canadian TSX
+        'SU': 'SU.TO',              # Suncor Energy - NYSE -> Canadian TSX
+        'CP': 'CP.TO',              # Canadian Pacific Railway - NYSE -> Canadian TSX
+        'CNI': 'CNR.TO',            # Canadian National Railway - NYSE -> Canadian TSX
+        # Canadian Big 5 Banks
+        'RY': 'RY.TO',              # Royal Bank of Canada - NYSE -> Canadian TSX
+        'TD': 'TD.TO',              # Toronto-Dominion Bank - NYSE -> Canadian TSX
+        'BNS': 'BNS.TO',            # Bank of Nova Scotia (Scotiabank) - NYSE -> Canadian TSX
+        'BMO': 'BMO.TO',            # Bank of Montreal - NYSE -> Canadian TSX
+        'CM': 'CM.TO',              # Canadian Imperial Bank of Commerce - NYSE -> Canadian TSX
+        'NA': 'NA.TO',              # National Bank of Canada - TSX only
     }
+    
+    # Add custom mappings from session state if they exist
+    if 'alloc_custom_ticker_mappings' in st.session_state:
+        aliases.update(st.session_state.alloc_custom_ticker_mappings)
+    
+    return aliases
 
 def get_leveraged_ticker_underlying():
     """Map leveraged tickers to their underlying tickers for valuation
@@ -6648,36 +6678,72 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
 
 
 # Special tickers and leverage guide sections
-with st.expander("📈 Broad Long-Term Tickers", expanded=False):
+with st.expander("🍁 Canadian Tickers & Custom Mappings", expanded=False):
+    st.markdown("### 🍁 Compatible Canadian Tickers (30+ companies)")
     st.markdown("""
-    **Recommended tickers for long-term strategies:**
+    **Retail & Food:**
+    - **DLMAF** → DOL.TO (Dollarama), **LBLCF** → L.TO (Loblaw)
+    - **ANCTF** → ATD.TO (Couche-Tard), **MRU** → MRU.TO (Metro)
     
-    **Core ETFs:**
-    - **SPY** - S&P 500 (0.09% expense ratio)
-    - **QQQ** - NASDAQ-100 (0.20% expense ratio)  
-    - **VTI** - Total Stock Market (0.03% expense ratio)
-    - **VEA** - Developed Markets (0.05% expense ratio)
-    - **VWO** - Emerging Markets (0.10% expense ratio)
+    **Tech & Software:**
+    - **CNSWF** → CSU.TO (Constellation), **TOITF** → TOI.V (Topicus), **LMGIF** → LMN.V (Lumine)
+    - **CLS** → CLS.TO (Celestica), **CGI** → GIB-A.TO (CGI), **DSGX** → DSG.TO (Descartes)
+    - **MDALF** → MDA.TO (MDA)
     
-    **Sector ETFs:**
-    - **XLK** - Technology (0.10% expense ratio)
-    - **XLF** - Financials (0.10% expense ratio)
-    - **XLE** - Energy (0.10% expense ratio)
-    - **XLV** - Healthcare (0.10% expense ratio)
-    - **XLI** - Industrials (0.10% expense ratio)
+    **Finance & Investment:**
+    - **BN** → BN.TO (Brookfield Corp), **BAM** → BAM.TO (Brookfield Asset Mgmt)
+    - **FRFHF** → FFH.TO (Fairfax), **POW/PWCDF** → POW.TO (Power Corp)
     
-    **Bond ETFs:**
-    - **TLT** - 20+ Year Treasury (0.15% expense ratio)
-    - **IEF** - 7-10 Year Treasury (0.15% expense ratio)
-    - **LQD** - Investment Grade Corporate (0.14% expense ratio)
-    - **HYG** - High Yield Corporate (0.49% expense ratio)
+    **Energy & Infrastructure:**
+    - **ENB** → ENB.TO (Enbridge), **TRP** → TRP.TO (TC Energy)
+    - **CNQ** → CNQ.TO (Canadian Natural), **SU** → SU.TO (Suncor)
     
-    **Commodity ETFs:**
-    - **GLD** - Gold (0.40% expense ratio)
-    - **SLV** - Silver (0.50% expense ratio)
-    - **DBA** - Agriculture (0.93% expense ratio)
-    - **USO** - Oil (0.60% expense ratio)
+    **Transportation:**
+    - **CP** → CP.TO (Canadian Pacific), **CNI** → CNR.TO (Canadian National)
+    
+    **Crypto Mining:**
+    - **BITF** → BITF.TO (Bitfarms)
+    
+    **Big 6 Banks:**
+    - **RY** → RY.TO (Royal), **TD** → TD.TO (TD Bank), **BNS** → BNS.TO (Scotiabank)
+    - **BMO** → BMO.TO (BMO), **CM** → CM.TO (CIBC), **NA** → NA.TO (National Bank)
     """)
+    
+    st.markdown("---")
+    st.markdown("### ➕ Add Custom Canadian Ticker Mapping")
+    st.markdown("Add a ticker mapping for this backtest session (e.g., Power Corp: POW.TO)")
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        custom_usd = st.text_input("USD/OTC Ticker (e.g., PWCDF or POW)", key="alloc_custom_usd_ticker", help="Ticker you'll use in portfolio")
+    with col2:
+        custom_cad = st.text_input("TSX Ticker (e.g., POW.TO)", key="alloc_custom_cad_ticker", help="Corresponding TSX ticker for data")
+    with col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Add Mapping", key="alloc_add_custom_mapping", type="primary"):
+            if custom_usd and custom_cad:
+                # Initialize custom mappings in session state if not exists
+                if 'alloc_custom_ticker_mappings' not in st.session_state:
+                    st.session_state.alloc_custom_ticker_mappings = {}
+                
+                # Add the mapping
+                st.session_state.alloc_custom_ticker_mappings[custom_usd.upper()] = custom_cad.upper()
+                st.success(f"✅ Added: {custom_usd.upper()} → {custom_cad.upper()}")
+                st.rerun()
+            else:
+                st.warning("⚠️ Please fill both fields")
+    
+    # Display current custom mappings
+    if 'alloc_custom_ticker_mappings' in st.session_state and st.session_state.alloc_custom_ticker_mappings:
+        st.markdown("**Current Custom Mappings:**")
+        for usd_tick, cad_tick in st.session_state.alloc_custom_ticker_mappings.items():
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                st.text(f"• {usd_tick} → {cad_tick}")
+            with col_b:
+                if st.button("🗑️", key=f"alloc_remove_{usd_tick}", help="Remove mapping"):
+                    del st.session_state.alloc_custom_ticker_mappings[usd_tick]
+                    st.rerun()
 
 # Special Tickers Section
 # Use session state to control expander state
@@ -6844,11 +6910,14 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.all
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1960+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLDX` → `GC=F` (Gold Futures, 2000+), `XAU` → `^XAU` (Gold & Silver Index, 1983+)")
-    st.markdown("**🇨🇦 Canadian Ticker Mappings:** USD OTC → Canadian TSX (for better data quality):")
-    st.markdown("- `MDALF` → `MDA.TO` (MDA Ltd), `KRKNF` → `PNG.TO` (Kraken Robotics)")
-    st.markdown("- `CNSWF` → `TOI.TO` (Constellation Software), `TOITF` → `TOI.TO` (Constellation Software)")
-    st.markdown("- `LMGIF` → `LMN.TO` (Lumine Group), `DLMAF` → `DOL.TO` (Dollarama)")
+    st.markdown("**🍁 Canadian Ticker Mappings:** Auto-map to TSX for better data quality:")
+    st.markdown("- `MDALF` → `MDA.TO` (MDA Ltd), `KRKNF` → `PNG.V` (Kraken Robotics)")
+    st.markdown("- `CNSWF` → `CSU.TO` (Constellation Software), `TOITF` → `TOI.V` (Topicus)")
+    st.markdown("- `LMGIF` → `LMN.V` (Lumine Group), `DLMAF` → `DOL.TO` (Dollarama)")
+    st.markdown("- `LBLCF` → `L.TO` (Loblaw), `ANCTF` → `ATD.TO` (Couche-Tard), `MRU` → `MRU.TO` (Metro)")
+    st.markdown("- `BN` → `BN.TO` (Brookfield Corp), `BAM` → `BAM.TO` (Brookfield Asset Mgmt)")
     st.markdown("- `FRFHF` → `FFH.TO` (Fairfax Financial)")
+    st.markdown("- **Big 5 Banks:** `RY` (Royal), `TD` (TD), `BNS` (Scotiabank), `BMO` (BMO), `CM` (CIBC), `NA` (National Bank)")
 
 
 with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
