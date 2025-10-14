@@ -735,25 +735,25 @@ def get_custom_industry_for_ticker(ticker):
         # Check if it's inverse leverage (negative L value)
         if '?L=-' in ticker.upper():
             # Determine specific inverse type based on base ticker
-            if base_ticker in ['^IXIC', '^NDX']:
+            if base_ticker in ['^IXIC', '^NDX', 'QQQ', 'QQQM']:
                 return 'INVERSE LEVERAGED NASDAQ'
             else:
                 return 'INVERSE LEVERAGED INDEX'
         else:
             # Determine specific leveraged type based on base ticker
-            if base_ticker in ['^IXIC', '^NDX']:
+            if base_ticker in ['^IXIC', '^NDX', 'QQQ', 'QQQM']:
                 return 'LEVERAGED NASDAQ INDEX'
-            elif base_ticker in ['^GSPC', '^SP500TR']:
-                return 'LEVERAGED SP500 INDEX'
+            elif base_ticker in ['^GSPC', '^SP500TR', 'SPY', 'VOO', 'IVV']:
+                return 'LEVERAGED S&P 500 INDEX'
             else:
                 return 'LEVERAGED INDEX FUND'
     
     # Custom industry mappings for ETFs and special tickers
     custom_industries = {
         # Broad Market Index ETFs
-        'SPY': 'BROAD MARKET INDEX',
-        'VOO': 'BROAD MARKET INDEX',
-        'IVV': 'BROAD MARKET INDEX',
+        'SPY': 'S&P 500 INDEX',
+        'VOO': 'S&P 500 INDEX',
+        'IVV': 'S&P 500 INDEX',
         'VTI': 'BROAD MARKET INDEX',
         'ITOT': 'BROAD MARKET INDEX',
         'SCHB': 'BROAD MARKET INDEX',
@@ -761,8 +761,8 @@ def get_custom_industry_for_ticker(ticker):
         'VXUS': 'BROAD MARKET INDEX',
         'IXUS': 'BROAD MARKET INDEX',
         'DIA': 'BROAD MARKET INDEX',
-        '^GSPC': 'BROAD MARKET INDEX',
-        '^SP500TR': 'BROAD MARKET INDEX',
+        '^GSPC': 'S&P 500 INDEX',
+        '^SP500TR': 'S&P 500 INDEX',
         '^DJI': 'BROAD MARKET INDEX',
         'SPYSIM': 'SP500 SIMULATION',
         'SPYSIM_COMPLETE': 'SP500 SIMULATION',
@@ -840,11 +840,11 @@ def get_custom_industry_for_ticker(ticker):
         'XLG': 'GROWTH INDEX',
         
         # Leveraged Index ETFs
-        'SSO': 'LEVERAGED INDEX FUND',
-        'QLD': 'LEVERAGED INDEX FUND',
-        'SPXL': 'LEVERAGED INDEX FUND',
-        'UPRO': 'LEVERAGED INDEX FUND',
-        'TQQQ': 'LEVERAGED INDEX FUND',
+        'SSO': 'LEVERAGED S&P 500 INDEX',
+        'QLD': 'LEVERAGED NASDAQ INDEX',
+        'SPXL': 'LEVERAGED S&P 500 INDEX',
+        'UPRO': 'LEVERAGED S&P 500 INDEX',
+        'TQQQ': 'LEVERAGED NASDAQ INDEX',
         'TMF': 'LEVERAGED INDEX FUND',
         'SOXL': 'LEVERAGED INDEX FUND',
         'TNA': 'LEVERAGED INDEX FUND',
@@ -852,11 +852,11 @@ def get_custom_industry_for_ticker(ticker):
         'FAS': 'LEVERAGED INDEX FUND',
         'LABU': 'LEVERAGED INDEX FUND',
         'TECL': 'LEVERAGED INDEX FUND',
-        'TQQQTR': 'LEVERAGED INDEX FUND',
-        'SPXLTR': 'LEVERAGED INDEX FUND',
-        'UPROTR': 'LEVERAGED INDEX FUND',
-        'QLDTR': 'LEVERAGED INDEX FUND',
-        'SSOTR': 'LEVERAGED INDEX FUND',
+        'TQQQTR': 'LEVERAGED NASDAQ INDEX',
+        'SPXLTR': 'LEVERAGED S&P 500 INDEX',
+        'UPROTR': 'LEVERAGED S&P 500 INDEX',
+        'QLDTR': 'LEVERAGED NASDAQ INDEX',
+        'SSOTR': 'LEVERAGED S&P 500 INDEX',
         'SHTR': 'INVERSE LEVERAGED INDEX',
         'PSQTR': 'INVERSE LEVERAGED INDEX',
         'SDSTR': 'INVERSE LEVERAGED INDEX',
@@ -2912,7 +2912,10 @@ def generate_allocations_pdf(custom_name=""):
             ['Volatility Lookback', f"{active_portfolio.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
             ['Volatility Exclude', f"{active_portfolio.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
             ['Minimal Threshold', f"{active_portfolio.get('minimal_threshold_percent', 2.0):.1f}%" if active_portfolio.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
-            ['Max Allocation', f"{active_portfolio.get('max_allocation_percent', 10.0):.1f}%" if active_portfolio.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
+            ['Max Allocation', f"{active_portfolio.get('max_allocation_percent', 10.0):.1f}%" if active_portfolio.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock'],
+            ['MA Filter', 'Yes' if active_portfolio.get('use_sma_filter', False) else 'No', 'Filter assets below moving average'],
+            ['MA Type', active_portfolio.get('ma_type', 'SMA'), 'Type of moving average (SMA or EMA)'],
+            ['MA Window', f"{active_portfolio.get('sma_window', 200)} days", 'Moving average calculation window']
         ]
         
         # Add momentum windows if they exist
@@ -2927,14 +2930,28 @@ def generate_allocations_pdf(custom_name=""):
                     f"Lookback: {lookback} days, Weight: {weight:.2f}"
                 ])
         
-        # Add tickers with enhanced information
-        tickers_data = [['Ticker', 'Allocation %', 'Reinvest Dividends']]
-        for ticker_config in active_portfolio.get('stocks', []):
-            tickers_data.append([
-                ticker_config['ticker'],
-                f"{ticker_config['allocation']*100:.1f}%",
-                "✓" if ticker_config['include_dividends'] else "✗"
-            ])
+        # Add tickers with enhanced information (without momentum - conditional columns based on MA filter)
+        if active_portfolio.get('use_sma_filter', False):
+            tickers_data = [['Ticker', 'Allocation\n%', 'Reinvest\nDividends', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+            for ticker_config in active_portfolio.get('stocks', []):
+                include_ma = "✓" if ticker_config.get('include_in_sma_filter', True) else "✗"
+                ma_ref = ticker_config.get('ma_reference_ticker', '')
+                ma_ref_str = ma_ref if ma_ref else ticker_config['ticker']  # Use own ticker if no custom reference
+                tickers_data.append([
+                    ticker_config['ticker'],
+                    f"{ticker_config['allocation']*100:.1f}%",
+                    "✓" if ticker_config['include_dividends'] else "✗",
+                    include_ma,
+                    ma_ref_str
+                ])
+        else:
+            tickers_data = [['Ticker', 'Allocation\n%', 'Reinvest\nDividends']]
+            for ticker_config in active_portfolio.get('stocks', []):
+                tickers_data.append([
+                    ticker_config['ticker'],
+                    f"{ticker_config['allocation']*100:.1f}%",
+                    "✓" if ticker_config['include_dividends'] else "✗"
+                ])
         
         # Create tables with proper column widths to prevent text overflow
         config_table = Table(config_data, colWidths=[2.2*inch, 1.8*inch, 2.5*inch])
@@ -2954,7 +2971,11 @@ def generate_allocations_pdf(custom_name=""):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 3)
         ]))
         
-        tickers_table = Table(tickers_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
+        # Adjust column widths based on number of columns
+        if active_portfolio.get('use_sma_filter', False):
+            tickers_table = Table(tickers_data, colWidths=[1.2*inch, 1.0*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+        else:
+            tickers_table = Table(tickers_data, colWidths=[2.0*inch, 1.5*inch, 2.0*inch])
         tickers_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
             ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -2962,7 +2983,15 @@ def generate_allocations_pdf(custom_name=""):
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
-            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98))
+            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+            ('WORDWRAP', (0, 0), (-1, -1), True),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('WORDWRAP', (0, 0), (-1, -1), True),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8)
         ]))
         
         story.append(config_table)
@@ -2977,15 +3006,38 @@ def generate_allocations_pdf(custom_name=""):
             story.append(Paragraph("Initial Ticker Allocations:", styles['Heading3']))
             story.append(Paragraph("Note: Momentum strategy is enabled - ticker allocations are calculated dynamically based on momentum scores.", styles['Normal']))
             
-            # Create modified table without Allocation % column for momentum strategies
-            tickers_data_momentum = [['Ticker', 'Reinvest Dividends']]
-            for ticker_config in active_portfolio.get('stocks', []):
-                tickers_data_momentum.append([
-                    ticker_config['ticker'],
-                    "✓" if ticker_config['include_dividends'] else "✗"
-                ])
+            # Create modified table with conditional columns for momentum strategies
+            if active_portfolio.get('use_sma_filter', False):
+                tickers_data_momentum = [['Ticker', 'Reinvest\nDividends', 'Max Allocation\n%', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+                for ticker_config in active_portfolio.get('stocks', []):
+                    max_alloc = ticker_config.get('max_allocation_percent')
+                    max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
+                    include_ma = "✓" if ticker_config.get('include_in_sma_filter', True) else "✗"
+                    ma_ref = ticker_config.get('ma_reference_ticker', '')
+                    ma_ref_str = ma_ref if ma_ref else ticker_config['ticker']  # Use own ticker if no custom reference
+                    tickers_data_momentum.append([
+                        ticker_config['ticker'],
+                        "✓" if ticker_config['include_dividends'] else "✗",
+                        max_alloc_str,
+                        include_ma,
+                        ma_ref_str
+                    ])
+            else:
+                tickers_data_momentum = [['Ticker', 'Reinvest\nDividends', 'Max Allocation\n%']]
+                for ticker_config in active_portfolio.get('stocks', []):
+                    max_alloc = ticker_config.get('max_allocation_percent')
+                    max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
+                    tickers_data_momentum.append([
+                        ticker_config['ticker'],
+                        "✓" if ticker_config['include_dividends'] else "✗",
+                        max_alloc_str
+                    ])
             
-            tickers_table_momentum = Table(tickers_data_momentum, colWidths=[2.25*inch, 2.25*inch])
+            # Adjust column widths based on number of columns for momentum table
+            if active_portfolio.get('use_sma_filter', False):
+                tickers_table_momentum = Table(tickers_data_momentum, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+            else:
+                tickers_table_momentum = Table(tickers_data_momentum, colWidths=[2.0*inch, 2.0*inch, 2.0*inch])
             tickers_table_momentum.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                 ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
