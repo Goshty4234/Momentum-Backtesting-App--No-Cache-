@@ -9419,9 +9419,9 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             rebalance_options.append("Weekly")
         if st.checkbox("Biweekly", key="strategy_rebalance_biweekly"):
             rebalance_options.append("Biweekly")
-        if st.checkbox("Monthly", key="strategy_rebalance_monthly"):
+        if st.checkbox("Monthly", value=True, key="strategy_rebalance_monthly"):
             rebalance_options.append("Monthly")
-        if st.checkbox("Quarterly", value=True, key="strategy_rebalance_quarterly"):
+        if st.checkbox("Quarterly", key="strategy_rebalance_quarterly"):
             rebalance_options.append("Quarterly")
         if st.checkbox("Semiannually", key="strategy_rebalance_semiannually"):
             rebalance_options.append("Semiannually")
@@ -10436,12 +10436,16 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 if not keep_current_portfolio:
                     if len(st.session_state.multi_backtest_portfolio_configs) > 1:
                         # Use exact same logic as remove_portfolio_callback
-                        st.session_state.multi_backtest_portfolio_configs.pop(st.session_state.multi_backtest_active_portfolio_index)
+                        st.session_state.multi_backtest_portfolio_configs.pop(portfolio_index)
                         st.session_state.multi_backtest_active_portfolio_index = max(0, st.session_state.multi_backtest_active_portfolio_index - 1)
+                        
+                        # CRITICAL: Delete the name widget state to force recreation with new portfolio's name
+                        if "multi_backtest_active_name" in st.session_state:
+                            del st.session_state["multi_backtest_active_name"]
                         
                         # CRITICAL: Force a proper portfolio switch to update all UI widgets
                         # This ensures the portfolio name text box and other widgets show the new portfolio's data
-                        st.session_state.strategy_comparison_rerun_flag = True
+                        st.session_state.multi_backtest_rerun_flag = True
                         
                         st.success("🗑️ Removed original portfolio - Active portfolio updated")
                     else:
