@@ -74,8 +74,8 @@ def emergency_kill():
 # TICKER ALIASES FUNCTIONS
 # =============================================================================
 
-def get_ticker_aliases():
-    """Define ticker aliases for easier entry"""
+def get_ticker_aliases_for_backtest():
+    """Define ticker aliases for backtest data - NO Canadian mappings to preserve USD data"""
     aliases = {
         # Stock Market Indices
         'SPX': '^GSPC',           # S&P 500 (price only, no dividends) - 1927+
@@ -153,38 +153,6 @@ def get_ticker_aliases():
         'DBMFX': 'DBMF_COMPLETE',  # Complete DBMF Dataset (2000+) - Historical + DBMF
         'TBILL': 'TBILL_COMPLETE',  # Complete TBILL Dataset (1948+) - Historical + SGOV
         
-        # Canadian Ticker Mappings (USD OTC/NYSE -> Canadian Exchange for better data)
-        'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX
-        'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture
-        'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX
-        'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture
-        'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture
-        'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX
-        'LBLCF': 'L.TO',            # Loblaw Companies - USD OTC -> Canadian TSX
-        'ANCTF': 'ATD.TO',          # Alimentation Couche-Tard - USD OTC -> Canadian TSX
-        'MRU': 'MRU.TO',            # Metro Inc - NYSE -> Canadian TSX
-        'CLS': 'CLS.TO',            # Celestica Inc - NYSE -> Canadian TSX
-        'CGI': 'GIB-A.TO',          # CGI Inc - NYSE -> Canadian TSX
-        'DSGX': 'DSG.TO',           # Descartes Systems Group - NASDAQ -> Canadian TSX
-        'BITF': 'BITF.TO',          # Bitfarms - NASDAQ -> Canadian TSX (Bitcoin Mining)
-        'BN': 'BN.TO',              # Brookfield Corporation - NYSE -> Canadian TSX
-        'BAM': 'BAM.TO',            # Brookfield Asset Management - NYSE -> Canadian TSX
-        'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX
-        'POW': 'POW.TO',            # Power Corporation - TSX
-        'PWCDF': 'POW.TO',          # Power Corporation - USD OTC -> Canadian TSX
-        'ENB': 'ENB.TO',            # Enbridge Inc - NYSE -> Canadian TSX
-        'TRP': 'TRP.TO',            # TC Energy (TransCanada) - NYSE -> Canadian TSX
-        'CNQ': 'CNQ.TO',            # Canadian Natural Resources - NYSE -> Canadian TSX
-        'SU': 'SU.TO',              # Suncor Energy - NYSE -> Canadian TSX
-        'CP': 'CP.TO',              # Canadian Pacific Railway - NYSE -> Canadian TSX
-        'CNI': 'CNR.TO',            # Canadian National Railway - NYSE -> Canadian TSX
-        # Canadian Big 5 Banks
-        'RY': 'RY.TO',              # Royal Bank of Canada - NYSE -> Canadian TSX
-        'TD': 'TD.TO',              # Toronto-Dominion Bank - NYSE -> Canadian TSX
-        'BNS': 'BNS.TO',            # Bank of Nova Scotia (Scotiabank) - NYSE -> Canadian TSX
-        'BMO': 'BMO.TO',            # Bank of Montreal - NYSE -> Canadian TSX
-        'CM': 'CM.TO',              # Canadian Imperial Bank of Commerce - NYSE -> Canadian TSX
-        'NA': 'NA.TO',              # National Bank of Canada - TSX only
     }
     
     # Add custom mappings from session state if they exist
@@ -192,6 +160,42 @@ def get_ticker_aliases():
         aliases.update(st.session_state.alloc_custom_ticker_mappings)
     
     return aliases
+
+def get_ticker_aliases_for_stats():
+    """Define ticker aliases for stats - INCLUDES Canadian mappings for better data quality"""
+    base_aliases = get_ticker_aliases_for_backtest()
+    
+    # Add Canadian mappings for stats (better data quality)
+    stats_aliases = base_aliases.copy()
+    stats_aliases.update({
+        # Canadian Ticker Mappings for Stats (NYSE/NASDAQ -> Canadian Exchange for better data)
+        'MRU': 'MRU.TO',            # Metro Inc - NYSE -> Canadian TSX
+        'CLS': 'CLS.TO',            # Celestica Inc - NYSE -> Canadian TSX
+        'DSGX': 'DSG.TO',           # Descartes Systems Group - NASDAQ -> Canadian TSX
+        'BITF': 'BITF.TO',          # Bitfarms - NASDAQ -> Canadian TSX (Bitcoin Mining)
+        'BN': 'BN.TO',              # Brookfield Corporation - NYSE -> Canadian TSX
+        'BAM': 'BAM.TO',            # Brookfield Asset Management - NYSE -> Canadian TSX
+        'POW': 'POW.TO',            # Power Corporation - TSX
+        'ENB': 'ENB.TO',            # Enbridge Inc - NYSE -> Canadian TSX
+        'TRP': 'TRP.TO',            # TC Energy (TransCanada) - NYSE -> Canadian TSX
+        'CNQ': 'CNQ.TO',            # Canadian Natural Resources - NYSE -> Canadian TSX
+        'SU': 'SU.TO',              # Suncor Energy - NYSE -> Canadian TSX
+        'CP': 'CP.TO',              # Canadian Pacific Railway - NYSE -> Canadian TSX
+        'CNI': 'CNR.TO',            # Canadian National Railway - NYSE -> Canadian TSX
+        # Canadian Big 6 Banks
+        'RY': 'RY.TO',              # Royal Bank of Canada - NYSE -> Canadian TSX
+        'TD': 'TD.TO',              # Toronto-Dominion Bank - NYSE -> Canadian TSX
+        'BNS': 'BNS.TO',            # Bank of Nova Scotia (Scotiabank) - NYSE -> Canadian TSX
+        'BMO': 'BMO.TO',            # Bank of Montreal - NYSE -> Canadian TSX
+        'CM': 'CM.TO',              # Canadian Imperial Bank of Commerce - NYSE -> Canadian TSX
+        'NA': 'NA.TO',              # National Bank of Canada - TSX only
+    })
+    
+    return stats_aliases
+
+def get_ticker_aliases():
+    """Legacy function - now redirects to backtest aliases to maintain compatibility"""
+    return get_ticker_aliases_for_backtest()
 
 def get_leveraged_ticker_underlying():
     """Map leveraged tickers to their underlying tickers for valuation
@@ -263,9 +267,18 @@ def get_leveraged_ticker_underlying():
         'AAPU': 'AAPL',           # 1.5x Apple
     }
 
-def resolve_ticker_alias(ticker):
-    """Resolve ticker alias to actual ticker symbol"""
-    aliases = get_ticker_aliases()
+def resolve_ticker_alias(ticker, for_stats=False):
+    """Resolve ticker alias to actual ticker symbol
+    
+    Args:
+        ticker: The ticker symbol to resolve
+        for_stats: If True, use stats aliases (includes Canadian mappings). 
+                  If False, use backtest aliases (preserves USD tickers)
+    """
+    if for_stats:
+        aliases = get_ticker_aliases_for_stats()
+    else:
+        aliases = get_ticker_aliases_for_backtest()
     
     # Extract base ticker before any parameters (e.g., CNSWF?L=2?E=1 -> CNSWF)
     base_ticker = ticker.split('?')[0].upper()
@@ -1351,7 +1364,7 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
             resolved_ticker = underlying_ticker
         else:
             # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange, indices to ETFs)
-            resolved_ticker = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker))
+            resolved_ticker = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
         
         # Special handling for synthetic complete tickers
         if resolved_ticker == "ZEROX":
@@ -1445,7 +1458,7 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                     except:
                         pass
         
-        resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker))
+        resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=False))
         print(f"[BATCH DEBUG] {ticker_symbol} -> base={base_ticker}, resolved={resolved}, L={leverage}, E={expense_ratio}")
         yahoo_tickers.append((ticker_symbol, resolved, leverage, expense_ratio))
     
@@ -1855,7 +1868,7 @@ def get_ticker_info(ticker_symbol):
             resolved_ticker = underlying_ticker
         else:
             # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange, indices to ETFs)
-            resolved_ticker = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker))
+            resolved_ticker = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
         
         stock = yf.Ticker(resolved_ticker)
         info = stock.info
@@ -1893,7 +1906,7 @@ def get_multiple_tickers_info_batch(ticker_list):
         if base_ticker.upper() in leveraged_map:
             resolved = leveraged_map[base_ticker.upper()]
         else:
-            resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker))
+            resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
         
         resolved_map[ticker_symbol] = resolved
     
