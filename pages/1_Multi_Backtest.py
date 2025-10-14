@@ -1923,7 +1923,10 @@ def generate_simple_pdf_report(custom_name=""):
                 ['Volatility Lookback', f"{config.get('vol_window_days', 0)} days", 'Days for volatility calculation'],
                 ['Volatility Exclude', f"{config.get('exclude_days_vol', 0)} days", 'Days excluded from volatility calculation'],
                 ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 2.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
-                ['Maximum Allocation', f"{config.get('max_allocation_percent', 10.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock']
+                ['Maximum Allocation', f"{config.get('max_allocation_percent', 10.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock'],
+                ['MA Filter', 'Yes' if config.get('use_sma_filter', False) else 'No', 'Filter assets below moving average'],
+                ['MA Type', config.get('ma_type', 'SMA'), 'Type of moving average (SMA or EMA)'],
+                ['MA Window', f"{config.get('sma_window', 200)} days", 'Moving average calculation window']
             ]
             
             # Add momentum windows if they exist
@@ -1963,16 +1966,34 @@ def generate_simple_pdf_report(custom_name=""):
                 story.append(Paragraph("Initial Ticker Allocations (Entered by User):", styles['Heading3']))
                 story.append(Paragraph("Note: These are the initial allocations entered by the user, not rebalanced allocations.", styles['Normal']))
                 
-                # Create full table with Allocation % column for non-momentum strategies
-                stocks_data = [['Ticker', 'Allocation %', 'Include Dividends']]
-                for stock in active_portfolio['stocks']:
-                    stocks_data.append([
-                        stock['ticker'],
-                        f"{stock['allocation']*100:.1f}%",
-                        "✓" if stock['include_dividends'] else "✗"
-                    ])
+                # Create full table with conditional columns for non-momentum strategies
+                if active_portfolio.get('use_sma_filter', False):
+                    stocks_data = [['Ticker', 'Allocation\n%', 'Include\nDividends', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+                    for stock in active_portfolio['stocks']:
+                        include_ma = "✓" if stock.get('include_in_sma_filter', True) else "✗"
+                        ma_ref = stock.get('ma_reference_ticker', '')
+                        ma_ref_str = ma_ref if ma_ref else stock['ticker']  # Use own ticker if no custom reference
+                        stocks_data.append([
+                            stock['ticker'],
+                            f"{stock['allocation']*100:.1f}%",
+                            "✓" if stock['include_dividends'] else "✗",
+                            include_ma,
+                            ma_ref_str
+                        ])
+                else:
+                    stocks_data = [['Ticker', 'Allocation\n%', 'Include\nDividends']]
+                    for stock in active_portfolio['stocks']:
+                        stocks_data.append([
+                            stock['ticker'],
+                            f"{stock['allocation']*100:.1f}%",
+                            "✓" if stock['include_dividends'] else "✗"
+                        ])
                 
-                stocks_table = Table(stocks_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
+                # Adjust column widths based on number of columns
+                if active_portfolio.get('use_sma_filter', False):
+                    stocks_table = Table(stocks_data, colWidths=[1.2*inch, 1.0*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+                else:
+                    stocks_table = Table(stocks_data, colWidths=[2.0*inch, 1.5*inch, 2.0*inch])
                 stocks_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                     ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -1980,7 +2001,11 @@ def generate_simple_pdf_report(custom_name=""):
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                     ('FONTSIZE', (0, 0), (-1, -1), 10),
                     ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
-                    ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98))
+                    ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                    ('WORDWRAP', (0, 0), (-1, -1), True),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8)
                 ]))
                 
                 story.append(stocks_table)
@@ -1989,15 +2014,38 @@ def generate_simple_pdf_report(custom_name=""):
                 story.append(Paragraph("Initial Ticker Allocations:", styles['Heading3']))
                 story.append(Paragraph("Note: Momentum strategy is enabled - ticker allocations are calculated dynamically based on momentum scores.", styles['Normal']))
                 
-                # Create modified table without Allocation % column for momentum strategies
-                stocks_data_momentum = [['Ticker', 'Include Dividends']]
-                for stock in active_portfolio['stocks']:
-                    stocks_data_momentum.append([
-                        stock['ticker'],
-                        "✓" if stock['include_dividends'] else "✗"
-                    ])
+                # Create modified table with conditional columns for momentum strategies
+                if active_portfolio.get('use_sma_filter', False):
+                    stocks_data_momentum = [['Ticker', 'Include\nDividends', 'Max Allocation\n%', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+                    for stock in active_portfolio['stocks']:
+                        max_alloc = stock.get('max_allocation_percent')
+                        max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
+                        include_ma = "✓" if stock.get('include_in_sma_filter', True) else "✗"
+                        ma_ref = stock.get('ma_reference_ticker', '')
+                        ma_ref_str = ma_ref if ma_ref else stock['ticker']  # Use own ticker if no custom reference
+                        stocks_data_momentum.append([
+                            stock['ticker'],
+                            "✓" if stock['include_dividends'] else "✗",
+                            max_alloc_str,
+                            include_ma,
+                            ma_ref_str
+                        ])
+                else:
+                    stocks_data_momentum = [['Ticker', 'Include\nDividends', 'Max Allocation\n%']]
+                    for stock in active_portfolio['stocks']:
+                        max_alloc = stock.get('max_allocation_percent')
+                        max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
+                        stocks_data_momentum.append([
+                            stock['ticker'],
+                            "✓" if stock['include_dividends'] else "✗",
+                            max_alloc_str
+                        ])
                 
-                stocks_table_momentum = Table(stocks_data_momentum, colWidths=[2.25*inch, 2.25*inch])
+                # Adjust column widths based on number of columns for momentum table
+                if active_portfolio.get('use_sma_filter', False):
+                    stocks_table_momentum = Table(stocks_data_momentum, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+                else:
+                    stocks_table_momentum = Table(stocks_data_momentum, colWidths=[2.0*inch, 2.0*inch, 2.0*inch])
                 stocks_table_momentum.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
                     ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
@@ -2005,7 +2053,11 @@ def generate_simple_pdf_report(custom_name=""):
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                     ('FONTSIZE', (0, 0), (-1, -1), 10),
                     ('GRID', (0, 0), (-1, -1), 1, reportlab_colors.black),
-                    ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98))
+                    ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                    ('WORDWRAP', (0, 0), (-1, -1), True),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8)
                 ]))
                 
                 story.append(stocks_table_momentum)
