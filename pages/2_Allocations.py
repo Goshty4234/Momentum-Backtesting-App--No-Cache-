@@ -9705,7 +9705,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             # Display table
                             st.dataframe(sector_df, hide_index=True)
                             
-                            # Create pie chart for sectors (filter out 0% allocations)
+                            # Create modern donut chart for sectors (filter out 0% allocations)
                             if len(sector_data) > 0:
                                 # Filter out sectors with 0% allocation
                                 sector_data_filtered = sector_data[sector_data > 0]
@@ -9713,15 +9713,38 @@ if st.session_state.get('alloc_backtest_run', False):
                                 if len(sector_data_filtered) > 0:
                                     fig_sector = go.Figure(data=[go.Pie(
                                         labels=sector_data_filtered.index,
-                                        values=sector_data_filtered.values
+                                        values=sector_data_filtered.values,
+                                        hole=0.45,  # Donut hole
+                                        marker=dict(
+                                            colors=['#2E5090', '#4A90E2', '#7CB342', '#FFA726', '#5C6BC0', 
+                                                   '#26A69A', '#AB47BC', '#FF7043', '#66BB6A', '#42A5F5',
+                                                   '#8D6E63', '#78909C', '#EC407A', '#9CCC65', '#FFCA28'],
+                                            line=dict(color='#37474F', width=1.5)
+                                        ),
+                                        textposition='auto',
+                                        textfont=dict(size=11, color='white', family='Segoe UI'),
+                                        hovertemplate='<b>%{label}</b><br>%{value:.2f}%<br><extra></extra>'
                                     )])
                                     fig_sector.update_traces(textinfo='percent+label')
                                     fig_sector.update_layout(
-                                        title="Sector Distribution",
-                                        height=400,
+                                        title=dict(
+                                            text="Sector Distribution",
+                                            font=dict(size=16, color='white')
+                                        ),
+                                        height=450,
                                         showlegend=True,
-                                        margin=dict(t=50, b=50),
-                                        template='plotly_dark'
+                                        legend=dict(
+                                            orientation="v",
+                                            yanchor="middle",
+                                            y=0.5,
+                                            xanchor="left",
+                                            x=1.05,
+                                            font=dict(size=11)
+                                        ),
+                                        margin=dict(t=60, b=40, l=20, r=120),
+                                        template='plotly_dark',
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)'
                                     )
                                     st.plotly_chart(fig_sector, )
                     
@@ -9739,7 +9762,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             # Display table
                             st.dataframe(industry_df, hide_index=True)
                             
-                            # Create pie chart for industries (filter out 0% allocations)
+                            # Create modern donut chart for industries (filter out 0% allocations)
                             if len(industry_data) > 0:
                                 # Filter out industries with 0% allocation
                                 industry_data_filtered = industry_data[industry_data > 0]
@@ -9747,15 +9770,40 @@ if st.session_state.get('alloc_backtest_run', False):
                                 if len(industry_data_filtered) > 0:
                                     fig_industry = go.Figure(data=[go.Pie(
                                         labels=industry_data_filtered.index,
-                                        values=industry_data_filtered.values
+                                        values=industry_data_filtered.values,
+                                        hole=0.45,  # Donut hole
+                                        marker=dict(
+                                            colors=['#2E5090', '#4A90E2', '#7CB342', '#FFA726', '#5C6BC0', 
+                                                   '#26A69A', '#AB47BC', '#FF7043', '#66BB6A', '#42A5F5',
+                                                   '#8D6E63', '#78909C', '#EC407A', '#9CCC65', '#FFCA28',
+                                                   '#5D4037', '#546E7A', '#8E24AA', '#43A047', '#FB8C00',
+                                                   '#3949AB', '#00897B', '#E53935', '#6D4C41', '#00ACC1'],
+                                            line=dict(color='#37474F', width=1.5)
+                                        ),
+                                        textposition='auto',
+                                        textfont=dict(size=11, color='white', family='Segoe UI'),
+                                        hovertemplate='<b>%{label}</b><br>%{value:.2f}%<br><extra></extra>'
                                     )])
                                     fig_industry.update_traces(textinfo='percent+label')
                                     fig_industry.update_layout(
-                                        title="Industry Distribution",
-                                        height=400,
+                                        title=dict(
+                                            text="Industry Distribution",
+                                            font=dict(size=16, color='white')
+                                        ),
+                                        height=450,
                                         showlegend=True,
-                                        margin=dict(t=50, b=50),
-                                        template='plotly_dark'
+                                        legend=dict(
+                                            orientation="v",
+                                            yanchor="middle",
+                                            y=0.5,
+                                            xanchor="left",
+                                            x=1.05,
+                                            font=dict(size=11)
+                                        ),
+                                        margin=dict(t=60, b=40, l=20, r=120),
+                                        template='plotly_dark',
+                                        paper_bgcolor='rgba(0,0,0,0)',
+                                        plot_bgcolor='rgba(0,0,0,0)'
                                     )
                                     st.plotly_chart(fig_industry, )
                     
