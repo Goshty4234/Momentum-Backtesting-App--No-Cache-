@@ -905,9 +905,12 @@ if ticker_symbol:
                         with col2:
                             st.caption(f"📅 Data valid as of: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                         
-                        # Select columns to display
-                        display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
-                                       'volume', 'openInterest', 'impliedVolatility']
+                        # Select columns to display - only include columns that exist
+                        base_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
+                                   'volume', 'openInterest', 'impliedVolatility']
+                        display_cols = [col for col in base_cols if col in calls_combined.columns]
+                        
+                        # Add optional columns if they exist
                         if 'moneyness' in calls_combined.columns:
                             display_cols.insert(3, 'moneyness')
                         if 'itm' in calls_combined.columns:
@@ -954,9 +957,12 @@ if ticker_symbol:
                         with col2:
                             st.caption(f"📅 Data valid as of: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                         
-                        # Select columns to display
-                        display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
-                                       'volume', 'openInterest', 'impliedVolatility']
+                        # Select columns to display - only include columns that exist
+                        base_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
+                                   'volume', 'openInterest', 'impliedVolatility']
+                        display_cols = [col for col in base_cols if col in puts_combined.columns]
+                        
+                        # Add optional columns if they exist
                         if 'moneyness' in puts_combined.columns:
                             display_cols.insert(3, 'moneyness')
                         if 'itm' in puts_combined.columns:
