@@ -1,34 +1,37 @@
 # Core Streamlit and Data Science Libraries
-streamlit==1.47.1
-pandas==2.3.1
-numpy==2.3.2
-yfinance==0.2.66
-requests==2.32.4
+streamlit>=1.47.1
+pandas>=2.3.1
+numpy>=2.3.2
+yfinance>=0.2.66
+requests>=2.32.4
 
 # Performance Optimization
 numba==0.62.1
 
 # Financial and Statistical Libraries
-scipy==1.16.2
-pandas-market-calendars==5.1.1
+scipy>=1.16.2
+pandas-market-calendars>=5.1.1
 
 # Visualization Libraries
-plotly==6.3.1
-matplotlib==3.10.6
+plotly>=6.3.1
+matplotlib>=3.10.6
 
 # Additional useful libraries for financial analysis
-scikit-learn==1.7.2
+scikit-learn>=1.7.2
 
 # PDF Generation and Image Processing
-reportlab==4.4.3
-Pillow==11.3.0
-kaleido==1.0.0
-PyPDF2==3.0.1
-pdfplumber==0.11.7
+reportlab>=4.4.3
+Pillow>=11.3.0
+kaleido>=1.0.0
+PyPDF2>=3.0.1
+pdfplumber>=0.11.7
 
 # Date and Time Handling
-python-dateutil==2.9.0.post0
+python-dateutil>=2.9.0.post0
 
 # Excel and Data Import Support
-openpyxl==3.1.5
-xlrd==2.0.2
+openpyxl>=3.1.5
+xlrd>=2.0.2
+
+# Arrow compatibility for Streamlit Cloud
+pyarrow>=10.0.0
