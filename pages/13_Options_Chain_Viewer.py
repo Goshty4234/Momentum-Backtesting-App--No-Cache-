@@ -784,8 +784,7 @@ if ticker_symbol:
                             # Apply advanced styling with colors
                             styled_df = merged_df_clean.style.apply(highlight_options_table, axis=1)
                             
-                            # Display styled table with increased height
-                            # Use st.dataframe with styling for better visual presentation
+                            # Display styled table with maximum possible width
                             st.dataframe(styled_df, width='stretch', height=800)
                             
                             # Add note about MID price usage
@@ -858,7 +857,7 @@ if ticker_symbol:
                     # Sort by expiration and strike
                     calls_display = calls_display.sort_values(['expiration', 'strike'])
                     
-                    # Display (cleaned for Arrow compatibility)
+                    # Display (cleaned for Arrow compatibility) with maximum width
                     calls_display_clean = clean_dataframe_for_arrow(calls_display)
                     st.dataframe(calls_display_clean, width='stretch', height=300)
                 
@@ -882,7 +881,7 @@ if ticker_symbol:
                     # Sort by expiration and strike
                     puts_display = puts_display.sort_values(['expiration', 'strike'])
                     
-                    # Display (cleaned for Arrow compatibility)
+                    # Display (cleaned for Arrow compatibility) with maximum width
                     puts_display_clean = clean_dataframe_for_arrow(puts_display)
                     st.dataframe(puts_display_clean, width='stretch', height=300)
             
@@ -920,7 +919,7 @@ if ticker_symbol:
                         # Sort by expiration and strike
                         calls_display = calls_display.sort_values(['expiration', 'strike'])
                         
-                        # Display (cleaned for Arrow compatibility)
+                        # Display (cleaned for Arrow compatibility) with maximum width
                         calls_display_clean = clean_dataframe_for_arrow(calls_display)
                         st.dataframe(calls_display_clean, width='stretch', height=600)
                         
@@ -969,7 +968,7 @@ if ticker_symbol:
                         # Sort by expiration and strike
                         puts_display = puts_display.sort_values(['expiration', 'strike'])
                         
-                        # Display (cleaned for Arrow compatibility)
+                        # Display (cleaned for Arrow compatibility) with maximum width
                         puts_display_clean = clean_dataframe_for_arrow(puts_display)
                         st.dataframe(puts_display_clean, width='stretch', height=600)
                         
@@ -1235,11 +1234,25 @@ if ticker_symbol:
                                 chart_data = []
                                 for _, row in evolution_df.iterrows():
                                     # Use MID price for calls if available, otherwise last price
+                                    call_price = None
                                     if row['Call MID'] != '-' and pd.notna(row['Call MID']):
                                         call_price = float(row['Call MID'])
+                                    elif row['Call Last'] != '-' and pd.notna(row['Call Last']):
+                                        call_price = float(row['Call Last'])
+                                    
+                                    if call_price is not None:
                                         safe_price = safe_float_price(current_price)
                                         call_intrinsic = max(0, safe_price - selected_strike)
                                         call_extrinsic = call_price - call_intrinsic
+                                        
+                                        # Get Call Price % from existing data if available
+                                        call_price_pct = None
+                                        if 'Call Price %' in row and row['Call Price %'] != '-':
+                                            try:
+                                                # Extract percentage from string like "9.64%"
+                                                call_price_pct = float(row['Call Price %'].replace('%', ''))
+                                            except:
+                                                call_price_pct = None
                                         
                                         chart_data.append({
                                             'Expiration': row['Expiration'],
@@ -1250,14 +1263,29 @@ if ticker_symbol:
                                             'Intrinsic': call_intrinsic,
                                             'Extrinsic': call_extrinsic,
                                             'Intrinsic %': (call_intrinsic / call_price * 100) if call_price > 0 else 0,
-                                            'Extrinsic %': (call_extrinsic / call_price * 100) if call_price > 0 else 0
+                                            'Extrinsic %': (call_extrinsic / call_price * 100) if call_price > 0 else 0,
+                                            'Call Price %': call_price_pct
                                         })
                                     # Use MID price for puts if available, otherwise last price
+                                    put_price = None
                                     if row['Put MID'] != '-' and pd.notna(row['Put MID']):
                                         put_price = float(row['Put MID'])
+                                    elif row['Put Last'] != '-' and pd.notna(row['Put Last']):
+                                        put_price = float(row['Put Last'])
+                                    
+                                    if put_price is not None:
                                         safe_price = safe_float_price(current_price)
                                         put_intrinsic = max(0, selected_strike - safe_price)
                                         put_extrinsic = put_price - put_intrinsic
+                                        
+                                        # Get Put Price % from existing data if available
+                                        put_price_pct = None
+                                        if 'Put Price %' in row and row['Put Price %'] != '-':
+                                            try:
+                                                # Extract percentage from string like "6.51%"
+                                                put_price_pct = float(row['Put Price %'].replace('%', ''))
+                                            except:
+                                                put_price_pct = None
                                         
                                         chart_data.append({
                                             'Expiration': row['Expiration'],
@@ -1268,7 +1296,8 @@ if ticker_symbol:
                                             'Intrinsic': put_intrinsic,
                                             'Extrinsic': put_extrinsic,
                                             'Intrinsic %': (put_intrinsic / put_price * 100) if put_price > 0 else 0,
-                                            'Extrinsic %': (put_extrinsic / put_price * 100) if put_price > 0 else 0
+                                            'Extrinsic %': (put_extrinsic / put_price * 100) if put_price > 0 else 0,
+                                            'Put Price %': put_price_pct
                                         })
                                 
                                 if chart_data:
@@ -1327,10 +1356,16 @@ if ticker_symbol:
                                                             'Extrinsic': orig_data['Extrinsic'],
                                                             'Intrinsic %': orig_data['Intrinsic %'],
                                                             'Extrinsic %': orig_data['Extrinsic %'],
+                                                            'Call Price %': orig_data.get('Call Price %', None),
                                                             'IsInterpolated': False
                                                         })
                                                     else:
                                                         # Use interpolated data point
+                                                        # Calculate Call Price % for interpolated points
+                                                        interpolated_call_price_pct = None
+                                                        if interpolated_calls[i] is not None and current_price > 0:
+                                                            interpolated_call_price_pct = (interpolated_calls[i] / current_price) * 100
+                                                        
                                                         interpolated_calls_data.append({
                                                             'Days to Exp': days,
                                                             'Price': interpolated_calls[i],
@@ -1339,6 +1374,7 @@ if ticker_symbol:
                                                             'Extrinsic': interpolated_calls[i],
                                                             'Intrinsic %': 0,
                                                             'Extrinsic %': 100,
+                                                            'Call Price %': interpolated_call_price_pct,
                                                             'IsInterpolated': True
                                                         })
                                                 
@@ -1386,10 +1422,16 @@ if ticker_symbol:
                                                             'Extrinsic': orig_data['Extrinsic'],
                                                             'Intrinsic %': orig_data['Intrinsic %'],
                                                             'Extrinsic %': orig_data['Extrinsic %'],
+                                                            'Put Price %': orig_data.get('Put Price %', None),
                                                             'IsInterpolated': False
                                                         })
                                                     else:
                                                         # Use interpolated data point
+                                                        # Calculate Put Price % for interpolated points
+                                                        interpolated_put_price_pct = None
+                                                        if interpolated_puts[i] is not None and current_price > 0:
+                                                            interpolated_put_price_pct = (interpolated_puts[i] / current_price) * 100
+                                                        
                                                         interpolated_puts_data.append({
                                                             'Days to Exp': days,
                                                             'Price': interpolated_puts[i],
@@ -1398,6 +1440,7 @@ if ticker_symbol:
                                                             'Extrinsic': interpolated_puts[i],
                                                             'Intrinsic %': 0,
                                                             'Extrinsic %': 100,
+                                                            'Put Price %': interpolated_put_price_pct,
                                                             'IsInterpolated': True
                                                         })
                                                 
@@ -1427,12 +1470,13 @@ if ticker_symbol:
                                                 hovertemplate='<b>Call Options</b><br>' +
                                                             'Days to Expiration: %{x}<br>' +
                                                             'Option Price: $%{y:.2f}<br>' +
-                                                            'Intrinsic Value: $%{customdata[0]:.2f}<br>' +
-                                                            'Extrinsic Value: $%{customdata[1]:.2f}<br>' +
-                                                            'Intrinsic %: %{customdata[2]:.1f}%<br>' +
-                                                            'Extrinsic %: %{customdata[3]:.1f}%<br>' +
+                                                            'Call Price %: %{customdata[0]:.2f}%<br>' +
+                                                            'Intrinsic Value: $%{customdata[1]:.2f}<br>' +
+                                                            'Extrinsic Value: $%{customdata[2]:.2f}<br>' +
+                                                            'Intrinsic %: %{customdata[3]:.1f}%<br>' +
+                                                            'Extrinsic %: %{customdata[4]:.1f}%<br>' +
                                                             '<extra></extra>',
-                                                customdata=original_calls[['Intrinsic', 'Extrinsic', 'Intrinsic %', 'Extrinsic %']].values
+                                                customdata=original_calls[['Call Price %', 'Intrinsic', 'Extrinsic', 'Intrinsic %', 'Extrinsic %']].values
                                             ))
                                         
                                         # Add interpolated data points (lighter, dashed)
@@ -1447,7 +1491,9 @@ if ticker_symbol:
                                                 hovertemplate='<b>Call Options (Interpolated)</b><br>' +
                                                             'Days to Expiration: %{x}<br>' +
                                                             'Option Price: $%{y:.2f}<br>' +
-                                                            '<extra></extra>'
+                                                            'Call Price %: %{customdata[0]:.2f}%<br>' +
+                                                            '<extra></extra>',
+                                                customdata=interpolated_calls[['Call Price %']].values
                                             ))
                                     
                                     # Add Put line with enhanced tooltip
@@ -1468,12 +1514,13 @@ if ticker_symbol:
                                                 hovertemplate='<b>Put Options</b><br>' +
                                                             'Days to Expiration: %{x}<br>' +
                                                             'Option Price: $%{y:.2f}<br>' +
-                                                            'Intrinsic Value: $%{customdata[0]:.2f}<br>' +
-                                                            'Extrinsic Value: $%{customdata[1]:.2f}<br>' +
-                                                            'Intrinsic %: %{customdata[2]:.1f}%<br>' +
-                                                            'Extrinsic %: %{customdata[3]:.1f}%<br>' +
+                                                            'Put Price %: %{customdata[0]:.2f}%<br>' +
+                                                            'Intrinsic Value: $%{customdata[1]:.2f}<br>' +
+                                                            'Extrinsic Value: $%{customdata[2]:.2f}<br>' +
+                                                            'Intrinsic %: %{customdata[3]:.1f}%<br>' +
+                                                            'Extrinsic %: %{customdata[4]:.1f}%<br>' +
                                                             '<extra></extra>',
-                                                customdata=original_puts[['Intrinsic', 'Extrinsic', 'Intrinsic %', 'Extrinsic %']].values
+                                                customdata=original_puts[['Put Price %', 'Intrinsic', 'Extrinsic', 'Intrinsic %', 'Extrinsic %']].values
                                             ))
                                         
                                         # Add interpolated data points (lighter, dashed)
@@ -1488,7 +1535,9 @@ if ticker_symbol:
                                                 hovertemplate='<b>Put Options (Interpolated)</b><br>' +
                                                             'Days to Expiration: %{x}<br>' +
                                                             'Option Price: $%{y:.2f}<br>' +
-                                                            '<extra></extra>'
+                                                            'Put Price %: %{customdata[0]:.2f}%<br>' +
+                                                            '<extra></extra>',
+                                                customdata=interpolated_puts[['Put Price %']].values
                                             ))
                                     
                                     # Reverse x-axis to show time progression correctly (oldest to newest)
