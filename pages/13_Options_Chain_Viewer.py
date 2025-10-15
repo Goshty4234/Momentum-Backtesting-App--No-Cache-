@@ -1135,8 +1135,15 @@ if ticker_symbol:
                                             call_mid = None
                                             call_display_price = '-'
                                         
+                                        # Calculate Call price as % of current ticker price
+                                        call_price_pct = None
+                                        if call_mid is not None and call_mid != 0:
+                                            safe_price = safe_float_price(current_price)
+                                            call_price_pct = (call_mid / safe_price) * 100
+                                        
                                         row.update({
                                             'Call Price': call_display_price,
+                                            'Call Price %': f"{call_price_pct:.2f}%" if call_price_pct is not None else '-',
                                             'Call MID': call_mid if call_mid is not None else '-',
                                             'Call Last': call_last if call_last is not None else '-',
                                             'Call Bid': call_bid if call_bid is not None else '-',
@@ -1146,7 +1153,7 @@ if ticker_symbol:
                                         })
                                     else:
                                         row.update({
-                                            'Call Price': '-', 'Call MID': '-', 'Call Last': '-', 'Call Bid': '-', 'Call Ask': '-',
+                                            'Call Price': '-', 'Call Price %': '-', 'Call MID': '-', 'Call Last': '-', 'Call Bid': '-', 'Call Ask': '-',
                                             'Call Volume': 0, 'Call IV': '-'
                                         })
                                     
@@ -1170,8 +1177,15 @@ if ticker_symbol:
                                             put_mid = None
                                             put_display_price = '-'
                                         
+                                        # Calculate Put price as % of current ticker price
+                                        put_price_pct = None
+                                        if put_mid is not None and put_mid != 0:
+                                            safe_price = safe_float_price(current_price)
+                                            put_price_pct = (put_mid / safe_price) * 100
+                                        
                                         row.update({
                                             'Put Price': put_display_price,
+                                            'Put Price %': f"{put_price_pct:.2f}%" if put_price_pct is not None else '-',
                                             'Put MID': put_mid if put_mid is not None else '-',
                                             'Put Last': put_last if put_last is not None else '-',
                                             'Put Bid': put_bid if put_bid is not None else '-',
@@ -1181,7 +1195,7 @@ if ticker_symbol:
                                         })
                                     else:
                                         row.update({
-                                            'Put Price': '-', 'Put MID': '-', 'Put Last': '-', 'Put Bid': '-', 'Put Ask': '-',
+                                            'Put Price': '-', 'Put Price %': '-', 'Put MID': '-', 'Put Last': '-', 'Put Bid': '-', 'Put Ask': '-',
                                             'Put Volume': 0, 'Put IV': '-'
                                         })
                                     
@@ -1192,7 +1206,7 @@ if ticker_symbol:
                                 
                                 # Display table (cleaned for Arrow compatibility)
                                 st.markdown("### 📈 Strike Evolution Table")
-                                st.caption("💡 **Price Column**: Shows MID price (Bid+Ask)/2 when available, otherwise Last price marked as '(Last)'")
+                                st.caption("💡 **Price Columns**: Shows MID price (Bid+Ask)/2 when available, otherwise Last price marked as '(Last)'. **Price %** shows option price as percentage of current ticker price for relative valuation.")
                                 evolution_df_clean = clean_dataframe_for_arrow(evolution_df)
                                 st.dataframe(evolution_df_clean, width='stretch', height=400)
                                 
