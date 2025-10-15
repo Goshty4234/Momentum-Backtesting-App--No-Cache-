@@ -1085,7 +1085,8 @@ if ticker_symbol:
                                     # Check if strike exists in available options
                                     if selected_strike not in all_strikes:
                                         closest_available = min(all_strikes, key=lambda x: abs(x - selected_strike))
-                                        st.warning(f"Strike ${selected_strike:.1f} not found in available options. Using closest available strike: ${closest_available:.1f}")
+                                        warning_msg = f"Strike {selected_strike:.1f} not found in available options. Using closest available strike: {closest_available:.1f}"
+                                        st.warning(warning_msg)
                                         selected_strike = closest_available
                                     
                                     # Update session state with the final strike
