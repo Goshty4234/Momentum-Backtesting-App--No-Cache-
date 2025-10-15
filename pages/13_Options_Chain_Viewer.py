@@ -30,6 +30,81 @@ st.sidebar.header("🎛️ Controls")
 if 'current_ticker' not in st.session_state:
     st.session_state.current_ticker = ""
 
+# Utility function to clean DataFrames for Arrow serialization
+def clean_dataframe_for_arrow(df):
+    """Clean DataFrame to be Arrow-compatible by converting numpy types to Python native types"""
+    if df is None:
+        return df
+    
+    # Handle Styler objects - return them as-is for styling preservation
+    if hasattr(df, 'data'):
+        return df  # Keep Styler objects intact for colored display
+    
+    if df.empty:
+        return df
+    
+    df_clean = df.copy()
+    
+    # Convert all columns to Python native types
+    for col in df_clean.columns:
+        if df_clean[col].dtype == 'object':
+            # For object columns, try to convert numpy types
+            df_clean[col] = df_clean[col].astype(str)
+        elif 'float' in str(df_clean[col].dtype):
+            # Convert numpy floats to Python floats
+            df_clean[col] = df_clean[col].astype(float)
+        elif 'int' in str(df_clean[col].dtype):
+            # Convert numpy ints to Python ints
+            df_clean[col] = df_clean[col].astype(int)
+    
+    return df_clean
+
+# Utility function to calculate MID price (Bid + Ask) / 2, fallback to Last
+def calculate_mid_price(bid, ask, last_price):
+    """Calculate MID price from bid/ask, fallback to last price"""
+    if pd.notna(bid) and pd.notna(ask) and bid is not None and ask is not None:
+        return (bid + ask) / 2
+    elif pd.notna(last_price) and last_price is not None:
+        return last_price
+    else:
+        return None
+
+# Utility function to safely convert current_price to float
+def safe_float_price(price):
+    """Convert any price format to safe float for calculations - Cloud compatible"""
+    if price is None:
+        return 0.0
+    
+    # If already a proper float/int
+    if isinstance(price, (int, float)):
+        return float(price)
+    
+    # If string, try to convert
+    if isinstance(price, str):
+        try:
+            return float(price)
+        except ValueError:
+            return 0.0
+    
+    # If numpy/pandas types - convert to Python native
+    try:
+        if hasattr(price, 'item'):  # numpy scalar
+            return float(price.item())
+        elif hasattr(price, 'iloc'):  # pandas scalar
+            return float(price.iloc[0] if len(price) > 0 else 0.0)
+        elif str(type(price)).startswith("<class 'numpy."):
+            return float(price)
+        elif str(type(price)).startswith("<class 'pandas."):
+            return float(price)
+    except (ValueError, TypeError, AttributeError, IndexError):
+        pass
+    
+    # Final fallback - try direct conversion
+    try:
+        return float(price)
+    except (ValueError, TypeError):
+        return 0.0
+
 # Function to convert ticker (same as page 1)
 def convert_ticker_input(ticker):
     if not ticker:
@@ -250,6 +325,9 @@ if ticker_symbol:
         # Get ticker info with progress
         with st.spinner(f"🔄 Fetching {ticker_symbol} data..."):
             current_price, expirations, fetch_timestamp = get_cached_ticker_info(ticker_symbol)
+            
+        # Ensure current_price is a safe float for calculations
+        current_price = safe_float_price(current_price)
     except Exception as e:
         st.error(f"❌ **Ticker Error**: {ticker_symbol} is not a valid ticker symbol")
         st.info("💡 **Try these popular tickers:** SPY, QQQ, AAPL, TSLA, MSFT, NVDA")
@@ -493,16 +571,17 @@ if ticker_symbol:
                                     if call_bid is not None and call_ask is not None:
                                         call_mid = (call_bid + call_ask) / 2
                                     
-                                    # Calculate option price as % of current SPY price
+                                    # Calculate option price as % of current SPY price using MID price
                                     call_price_pct = None
-                                    if pd.notna(call_row['lastPrice']) and call_row['lastPrice'] != 0:
-                                        call_price_pct = (call_row['lastPrice'] / current_price) * 100
+                                    if call_mid is not None and call_mid != 0:
+                                        call_price_pct = (call_mid / current_price) * 100
                                     
                                     row.update({
                                         'call_lastPrice': call_row['lastPrice'] if pd.notna(call_row['lastPrice']) else '-',
                                         'call_bid': call_bid if call_bid is not None else '-',
                                         'call_ask': call_ask if call_ask is not None else '-',
                                         'call_mid': f"{call_mid:.2f}" if call_mid is not None else '-',
+                                        'call_mid_price': call_mid,  # Store raw MID price for calculations
                                         'call_volume': call_row['volume'] if pd.notna(call_row['volume']) else 0,
                                         'call_openInterest': call_row['openInterest'] if pd.notna(call_row['openInterest']) else 0,
                                         'call_impliedVol': f"{(call_row['impliedVolatility'] * 100):.1f}%" if pd.notna(call_row['impliedVolatility']) else '-',
@@ -524,16 +603,17 @@ if ticker_symbol:
                                     if put_bid is not None and put_ask is not None:
                                         put_mid = (put_bid + put_ask) / 2
                                     
-                                    # Calculate option price as % of current SPY price
+                                    # Calculate option price as % of current SPY price using MID price
                                     put_price_pct = None
-                                    if pd.notna(put_row['lastPrice']) and put_row['lastPrice'] != 0:
-                                        put_price_pct = (put_row['lastPrice'] / current_price) * 100
+                                    if put_mid is not None and put_mid != 0:
+                                        put_price_pct = (put_mid / current_price) * 100
                                     
                                     row.update({
                                         'put_lastPrice': put_row['lastPrice'] if pd.notna(put_row['lastPrice']) else '-',
                                         'put_bid': put_bid if put_bid is not None else '-',
                                         'put_ask': put_ask if put_ask is not None else '-',
                                         'put_mid': f"{put_mid:.2f}" if put_mid is not None else '-',
+                                        'put_mid_price': put_mid,  # Store raw MID price for calculations
                                         'put_volume': put_row['volume'] if pd.notna(put_row['volume']) else 0,
                                         'put_openInterest': put_row['openInterest'] if pd.notna(put_row['openInterest']) else 0,
                                         'put_impliedVol': f"{(put_row['impliedVolatility'] * 100):.1f}%" if pd.notna(put_row['impliedVolatility']) else '-',
@@ -561,32 +641,32 @@ if ticker_symbol:
                             # Add intrinsic and extrinsic values (both $ and %)
                             # Call intrinsic value = max(0, current_price - strike)
                             merged_df['call_intrinsic'] = np.maximum(0, current_price - merged_df['strike'])
-                            # Call intrinsic % = (intrinsic / last_price) * 100
+                            # Call intrinsic % = (intrinsic / mid_price) * 100
                             merged_df['call_intrinsic_pct'] = merged_df.apply(
-                                lambda row: f"{(row['call_intrinsic'] / float(row['call_lastPrice']) * 100):.2f}%" if row['call_lastPrice'] != '-' and pd.notna(row['call_lastPrice']) and float(row['call_lastPrice']) != 0 else '-', axis=1
+                                lambda row: f"{(row['call_intrinsic'] / row['call_mid_price'] * 100):.2f}%" if pd.notna(row['call_mid_price']) and row['call_mid_price'] != 0 else '-', axis=1
                             )
-                            # Call extrinsic = last_price - intrinsic (if last_price is available)
+                            # Call extrinsic = mid_price - intrinsic (if mid_price is available)
                             merged_df['call_extrinsic'] = merged_df.apply(
-                                lambda row: float(row['call_lastPrice']) - row['call_intrinsic'] if row['call_lastPrice'] != '-' and pd.notna(row['call_lastPrice']) else '-', axis=1
+                                lambda row: row['call_mid_price'] - row['call_intrinsic'] if pd.notna(row['call_mid_price']) else '-', axis=1
                             )
-                            # Call extrinsic % = (extrinsic / last_price) * 100
+                            # Call extrinsic % = (extrinsic / mid_price) * 100
                             merged_df['call_extrinsic_pct'] = merged_df.apply(
-                                lambda row: f"{((float(row['call_lastPrice']) - row['call_intrinsic']) / float(row['call_lastPrice']) * 100):.2f}%" if row['call_lastPrice'] != '-' and pd.notna(row['call_lastPrice']) and float(row['call_lastPrice']) != 0 else '-', axis=1
+                                lambda row: f"{((row['call_mid_price'] - row['call_intrinsic']) / row['call_mid_price'] * 100):.2f}%" if pd.notna(row['call_mid_price']) and row['call_mid_price'] != 0 else '-', axis=1
                             )
                             
                             # Put intrinsic value = max(0, strike - current_price)
                             merged_df['put_intrinsic'] = np.maximum(0, merged_df['strike'] - current_price)
-                            # Put intrinsic % = (intrinsic / last_price) * 100
+                            # Put intrinsic % = (intrinsic / mid_price) * 100
                             merged_df['put_intrinsic_pct'] = merged_df.apply(
-                                lambda row: f"{(row['put_intrinsic'] / float(row['put_lastPrice']) * 100):.2f}%" if row['put_lastPrice'] != '-' and pd.notna(row['put_lastPrice']) and float(row['put_lastPrice']) != 0 else '-', axis=1
+                                lambda row: f"{(row['put_intrinsic'] / row['put_mid_price'] * 100):.2f}%" if pd.notna(row['put_mid_price']) and row['put_mid_price'] != 0 else '-', axis=1
                             )
-                            # Put extrinsic = last_price - intrinsic (if last_price is available)
+                            # Put extrinsic = mid_price - intrinsic (if mid_price is available)
                             merged_df['put_extrinsic'] = merged_df.apply(
-                                lambda row: float(row['put_lastPrice']) - row['put_intrinsic'] if row['put_lastPrice'] != '-' and pd.notna(row['put_lastPrice']) else '-', axis=1
+                                lambda row: row['put_mid_price'] - row['put_intrinsic'] if pd.notna(row['put_mid_price']) else '-', axis=1
                             )
-                            # Put extrinsic % = (extrinsic / last_price) * 100
+                            # Put extrinsic % = (extrinsic / mid_price) * 100
                             merged_df['put_extrinsic_pct'] = merged_df.apply(
-                                lambda row: f"{((float(row['put_lastPrice']) - row['put_intrinsic']) / float(row['put_lastPrice']) * 100):.2f}%" if row['put_lastPrice'] != '-' and pd.notna(row['put_lastPrice']) and float(row['put_lastPrice']) != 0 else '-', axis=1
+                                lambda row: f"{((row['put_mid_price'] - row['put_intrinsic']) / row['put_mid_price'] * 100):.2f}%" if pd.notna(row['put_mid_price']) and row['put_mid_price'] != 0 else '-', axis=1
                             )
                             
                             # Reorder columns for better display
@@ -698,11 +778,18 @@ if ticker_symbol:
                                 
                                 return styles
                             
-                            # Apply advanced styling
-                            styled_df = merged_df.style.apply(highlight_options_table, axis=1)
+                            # Clean the DataFrame first for Arrow compatibility
+                            merged_df_clean = clean_dataframe_for_arrow(merged_df)
+                            
+                            # Apply advanced styling with colors
+                            styled_df = merged_df_clean.style.apply(highlight_options_table, axis=1)
                             
                             # Display styled table with increased height
+                            # Use st.dataframe with styling for better visual presentation
                             st.dataframe(styled_df, width='stretch', height=800)
+                            
+                            # Add note about MID price usage
+                            st.caption("💡 **Price Calculations**: All intrinsic/extrinsic values and price percentages use MID price (Bid+Ask)/2 when available, otherwise fall back to Last price for more accurate option valuation.")
                             
                             # Add legend in dropdown
                             with st.expander("📖 Legend & Color Scheme", expanded=False):
@@ -754,7 +841,7 @@ if ticker_symbol:
                 if show_calls and not calls_combined.empty:
                     st.markdown("**📈 CALL Options:**")
                     # Select columns to display
-                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
+                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'mid',
                                    'volume', 'openInterest', 'impliedVolatility']
                     if 'moneyness' in calls_combined.columns:
                         display_cols.insert(3, 'moneyness')
@@ -771,13 +858,14 @@ if ticker_symbol:
                     # Sort by expiration and strike
                     calls_display = calls_display.sort_values(['expiration', 'strike'])
                     
-                    # Display
-                    st.dataframe(calls_display, width='stretch', height=300)
+                    # Display (cleaned for Arrow compatibility)
+                    calls_display_clean = clean_dataframe_for_arrow(calls_display)
+                    st.dataframe(calls_display_clean, width='stretch', height=300)
                 
                 if show_puts and not puts_combined.empty:
                     st.markdown("**📉 PUT Options:**")
                     # Select columns to display
-                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 
+                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'mid',
                                    'volume', 'openInterest', 'impliedVolatility']
                     if 'moneyness' in puts_combined.columns:
                         display_cols.insert(3, 'moneyness')
@@ -794,8 +882,9 @@ if ticker_symbol:
                     # Sort by expiration and strike
                     puts_display = puts_display.sort_values(['expiration', 'strike'])
                     
-                    # Display
-                    st.dataframe(puts_display, width='stretch', height=300)
+                    # Display (cleaned for Arrow compatibility)
+                    puts_display_clean = clean_dataframe_for_arrow(puts_display)
+                    st.dataframe(puts_display_clean, width='stretch', height=300)
             
             # CALLS ONLY Section
             elif selected_section == "📈 CALLS ONLY":
@@ -831,8 +920,9 @@ if ticker_symbol:
                         # Sort by expiration and strike
                         calls_display = calls_display.sort_values(['expiration', 'strike'])
                         
-                        # Display
-                        st.dataframe(calls_display, width='stretch', height=600)
+                        # Display (cleaned for Arrow compatibility)
+                        calls_display_clean = clean_dataframe_for_arrow(calls_display)
+                        st.dataframe(calls_display_clean, width='stretch', height=600)
                         
                         # Download button
                         csv = calls_display.to_csv(index=False)
@@ -879,8 +969,9 @@ if ticker_symbol:
                         # Sort by expiration and strike
                         puts_display = puts_display.sort_values(['expiration', 'strike'])
                         
-                        # Display
-                        st.dataframe(puts_display, width='stretch', height=600)
+                        # Display (cleaned for Arrow compatibility)
+                        puts_display_clean = clean_dataframe_for_arrow(puts_display)
+                        st.dataframe(puts_display_clean, width='stretch', height=600)
                         
                         # Download button
                         csv = puts_display.to_csv(index=False)
@@ -1024,35 +1115,73 @@ if ticker_symbol:
                                         'Strike': selected_strike
                                     }
                                     
-                                    # Add call data
+                                    # Add call data with MID price calculation
                                     if not call_data.empty:
                                         call_row = call_data.iloc[0]
+                                        
+                                        # Calculate MID price (average of bid and ask)
+                                        call_bid = call_row['bid'] if pd.notna(call_row['bid']) else None
+                                        call_ask = call_row['ask'] if pd.notna(call_row['ask']) else None
+                                        call_last = call_row['lastPrice'] if pd.notna(call_row['lastPrice']) else None
+                                        
+                                        # Use MID price if both bid and ask are available, otherwise use last price
+                                        if call_bid is not None and call_ask is not None:
+                                            call_mid = (call_bid + call_ask) / 2
+                                            call_display_price = f"${call_mid:.2f}"
+                                        elif call_last is not None:
+                                            call_mid = call_last
+                                            call_display_price = f"${call_last:.2f} (Last)"
+                                        else:
+                                            call_mid = None
+                                            call_display_price = '-'
+                                        
                                         row.update({
-                                            'Call Last': call_row['lastPrice'] if pd.notna(call_row['lastPrice']) else '-',
-                                            'Call Bid': call_row['bid'] if pd.notna(call_row['bid']) else '-',
-                                            'Call Ask': call_row['ask'] if pd.notna(call_row['ask']) else '-',
+                                            'Call Price': call_display_price,
+                                            'Call MID': call_mid if call_mid is not None else '-',
+                                            'Call Last': call_last if call_last is not None else '-',
+                                            'Call Bid': call_bid if call_bid is not None else '-',
+                                            'Call Ask': call_ask if call_ask is not None else '-',
                                             'Call Volume': call_row['volume'] if pd.notna(call_row['volume']) else 0,
                                             'Call IV': f"{(call_row['impliedVolatility'] * 100):.1f}%" if pd.notna(call_row['impliedVolatility']) else '-'
                                         })
                                     else:
                                         row.update({
-                                            'Call Last': '-', 'Call Bid': '-', 'Call Ask': '-',
+                                            'Call Price': '-', 'Call MID': '-', 'Call Last': '-', 'Call Bid': '-', 'Call Ask': '-',
                                             'Call Volume': 0, 'Call IV': '-'
                                         })
                                     
-                                    # Add put data
+                                    # Add put data with MID price calculation
                                     if not put_data.empty:
                                         put_row = put_data.iloc[0]
+                                        
+                                        # Calculate MID price (average of bid and ask)
+                                        put_bid = put_row['bid'] if pd.notna(put_row['bid']) else None
+                                        put_ask = put_row['ask'] if pd.notna(put_row['ask']) else None
+                                        put_last = put_row['lastPrice'] if pd.notna(put_row['lastPrice']) else None
+                                        
+                                        # Use MID price if both bid and ask are available, otherwise use last price
+                                        if put_bid is not None and put_ask is not None:
+                                            put_mid = (put_bid + put_ask) / 2
+                                            put_display_price = f"${put_mid:.2f}"
+                                        elif put_last is not None:
+                                            put_mid = put_last
+                                            put_display_price = f"${put_last:.2f} (Last)"
+                                        else:
+                                            put_mid = None
+                                            put_display_price = '-'
+                                        
                                         row.update({
-                                            'Put Last': put_row['lastPrice'] if pd.notna(put_row['lastPrice']) else '-',
-                                            'Put Bid': put_row['bid'] if pd.notna(put_row['bid']) else '-',
-                                            'Put Ask': put_row['ask'] if pd.notna(put_row['ask']) else '-',
+                                            'Put Price': put_display_price,
+                                            'Put MID': put_mid if put_mid is not None else '-',
+                                            'Put Last': put_last if put_last is not None else '-',
+                                            'Put Bid': put_bid if put_bid is not None else '-',
+                                            'Put Ask': put_ask if put_ask is not None else '-',
                                             'Put Volume': put_row['volume'] if pd.notna(put_row['volume']) else 0,
                                             'Put IV': f"{(put_row['impliedVolatility'] * 100):.1f}%" if pd.notna(put_row['impliedVolatility']) else '-'
                                         })
                                     else:
                                         row.update({
-                                            'Put Last': '-', 'Put Bid': '-', 'Put Ask': '-',
+                                            'Put Price': '-', 'Put MID': '-', 'Put Last': '-', 'Put Bid': '-', 'Put Ask': '-',
                                             'Put Volume': 0, 'Put IV': '-'
                                         })
                                     
@@ -1061,12 +1190,15 @@ if ticker_symbol:
                                 # Create DataFrame
                                 evolution_df = pd.DataFrame(evolution_data)
                                 
-                                # Display table
+                                # Display table (cleaned for Arrow compatibility)
                                 st.markdown("### 📈 Strike Evolution Table")
-                                st.dataframe(evolution_df, width='stretch', height=400)
+                                st.caption("💡 **Price Column**: Shows MID price (Bid+Ask)/2 when available, otherwise Last price marked as '(Last)'")
+                                evolution_df_clean = clean_dataframe_for_arrow(evolution_df)
+                                st.dataframe(evolution_df_clean, width='stretch', height=400)
                                 
                                 # Create evolution chart
                                 st.markdown("### 📊 Price Evolution Chart")
+                                st.info("💡 **Price Calculation**: Uses MID price (average of Bid + Ask) when available, otherwise falls back to Last price for more accurate option valuation.")
                                 
                                 # Interpolation options
                                 col1, col2 = st.columns([1, 3])
@@ -1088,10 +1220,11 @@ if ticker_symbol:
                                 # Prepare data for chart with intrinsic/extrinsic values
                                 chart_data = []
                                 for _, row in evolution_df.iterrows():
-                                    if row['Call Last'] != '-':
-                                        # Calculate intrinsic/extrinsic for calls
-                                        call_price = float(row['Call Last'])
-                                        call_intrinsic = max(0, current_price - selected_strike)
+                                    # Use MID price for calls if available, otherwise last price
+                                    if row['Call MID'] != '-' and pd.notna(row['Call MID']):
+                                        call_price = float(row['Call MID'])
+                                        safe_price = safe_float_price(current_price)
+                                        call_intrinsic = max(0, safe_price - selected_strike)
                                         call_extrinsic = call_price - call_intrinsic
                                         
                                         chart_data.append({
@@ -1105,10 +1238,11 @@ if ticker_symbol:
                                             'Intrinsic %': (call_intrinsic / call_price * 100) if call_price > 0 else 0,
                                             'Extrinsic %': (call_extrinsic / call_price * 100) if call_price > 0 else 0
                                         })
-                                    if row['Put Last'] != '-':
-                                        # Calculate intrinsic/extrinsic for puts
-                                        put_price = float(row['Put Last'])
-                                        put_intrinsic = max(0, selected_strike - current_price)
+                                    # Use MID price for puts if available, otherwise last price
+                                    if row['Put MID'] != '-' and pd.notna(row['Put MID']):
+                                        put_price = float(row['Put MID'])
+                                        safe_price = safe_float_price(current_price)
+                                        put_intrinsic = max(0, selected_strike - safe_price)
                                         put_extrinsic = put_price - put_intrinsic
                                         
                                         chart_data.append({
@@ -1422,7 +1556,8 @@ if ticker_symbol:
                 vix_metrics['Max'] = vix_metrics['Max'].astype(str)
                 
                 st.markdown("**📈 VIX Historical Metrics:**")
-                st.dataframe(vix_metrics, width='stretch')
+                vix_metrics_clean = clean_dataframe_for_arrow(vix_metrics)
+                st.dataframe(vix_metrics_clean, width='stretch')
                 
                 # VIX Chart
                 st.markdown("**📊 VIX Historical Chart:**")
