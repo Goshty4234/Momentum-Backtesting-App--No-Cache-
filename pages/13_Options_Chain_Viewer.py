@@ -839,9 +839,11 @@ if ticker_symbol:
                 
                 if show_calls and not calls_combined.empty:
                     st.markdown("**📈 CALL Options:**")
-                    # Select columns to display
-                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'mid',
-                                   'volume', 'openInterest', 'impliedVolatility']
+                    # Select columns to display - only include columns that exist
+                    base_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']
+                    display_cols = [col for col in base_cols if col in calls_combined.columns]
+                    
+                    # Add optional columns if they exist
                     if 'moneyness' in calls_combined.columns:
                         display_cols.insert(3, 'moneyness')
                     if 'itm' in calls_combined.columns:
@@ -863,9 +865,11 @@ if ticker_symbol:
                 
                 if show_puts and not puts_combined.empty:
                     st.markdown("**📉 PUT Options:**")
-                    # Select columns to display
-                    display_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'mid',
-                                   'volume', 'openInterest', 'impliedVolatility']
+                    # Select columns to display - only include columns that exist
+                    base_cols = ['expiration', 'daysToExp', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']
+                    display_cols = [col for col in base_cols if col in puts_combined.columns]
+                    
+                    # Add optional columns if they exist
                     if 'moneyness' in puts_combined.columns:
                         display_cols.insert(3, 'moneyness')
                     if 'itm' in puts_combined.columns:
