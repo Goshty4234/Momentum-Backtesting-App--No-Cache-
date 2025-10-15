@@ -1038,12 +1038,13 @@ if ticker_symbol:
                             col1, col2 = st.columns([1, 1])
                             
                             with col1:
-                                # Manual input - highest priority
+                                # Manual input - highest priority with dynamic key
+                                manual_strike_key = f"manual_strike_{ticker_symbol}"
                                 manual_strike = st.text_input(
                                     "🔍 Enter Strike Price:",
                                     value=st.session_state.persistent_strike,
                                     help="Type a strike price manually (e.g., 440.0 or 440,5 - comma will be converted to dot)",
-                                    key="manual_strike_input"
+                                    key=manual_strike_key
                                 )
                             
                             with col2:
@@ -1051,11 +1052,20 @@ if ticker_symbol:
                                 closest_strike_index = min(range(len(all_strikes)), 
                                                          key=lambda i: abs(all_strikes[i] - current_price))
                                 
+                                # Function to handle dropdown change
+                                def on_dropdown_change():
+                                    new_strike = st.session_state[f"dropdown_strike_{ticker_symbol}"]
+                                    st.session_state.persistent_strike = str(new_strike)
+                                    st.session_state[f"manual_strike_{ticker_symbol}"] = str(new_strike)
+                                    st.session_state.manual_strike_entered = True
+                                
                                 dropdown_strike = st.selectbox(
                                     "📋 Or Select from List:",
                                     all_strikes,
                                     index=closest_strike_index,
-                                    help="Choose from dropdown list"
+                                    help="Choose from dropdown list - will update Enter Strike Price field",
+                                    key=f"dropdown_strike_{ticker_symbol}",
+                                    on_change=on_dropdown_change
                                 )
                             
                             # Determine final strike selection
@@ -1088,9 +1098,9 @@ if ticker_symbol:
                             else:
                                 # Priority 2: Use dropdown selection
                                 selected_strike = dropdown_strike
-                                # Update session state with dropdown selection
+                                # Update session state with dropdown selection and put it in manual field
                                 st.session_state.persistent_strike = str(selected_strike)
-                                st.session_state.manual_strike_entered = False  # Mark that user used dropdown
+                                st.session_state.manual_strike_entered = True  # Mark that user selected from dropdown
                         else:
                             selected_strike = None
                         
