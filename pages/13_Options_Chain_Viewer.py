@@ -1111,7 +1111,7 @@ if ticker_symbol:
                                     row = {
                                         'Expiration': exp,
                                         'Days to Exp': (datetime.strptime(exp, "%Y-%m-%d") - datetime.now()).days,
-                                        'Strike': selected_strike
+                                        'Strike': f"{selected_strike:.0f}" if selected_strike == int(selected_strike) else f"{selected_strike:.2f}"
                                     }
                                     
                                     # Add call data with MID price calculation
@@ -1143,17 +1143,17 @@ if ticker_symbol:
                                         row.update({
                                             'Call Price': call_display_price,
                                             'Call Price %': f"{call_price_pct:.2f}%" if call_price_pct is not None else '-',
-                                            'Call MID': call_mid if call_mid is not None else '-',
-                                            'Call Last': call_last if call_last is not None else '-',
-                                            'Call Bid': call_bid if call_bid is not None else '-',
-                                            'Call Ask': call_ask if call_ask is not None else '-',
-                                            'Call Volume': call_row['volume'] if pd.notna(call_row['volume']) else 0,
+                                            'Call MID': f"{call_mid:.2f}" if call_mid is not None else '-',
+                                            'Call Last': f"{call_last:.2f}" if call_last is not None else '-',
+                                            'Call Bid': f"{call_bid:.2f}" if call_bid is not None else '-',
+                                            'Call Ask': f"{call_ask:.2f}" if call_ask is not None else '-',
+                                            'Call Volume': f"{call_row['volume']:.0f}" if pd.notna(call_row['volume']) else '0',
                                             'Call IV': f"{(call_row['impliedVolatility'] * 100):.1f}%" if pd.notna(call_row['impliedVolatility']) else '-'
                                         })
                                     else:
                                         row.update({
                                             'Call Price': '-', 'Call Price %': '-', 'Call MID': '-', 'Call Last': '-', 'Call Bid': '-', 'Call Ask': '-',
-                                            'Call Volume': 0, 'Call IV': '-'
+                                            'Call Volume': '0', 'Call IV': '-'
                                         })
                                     
                                     # Add put data with MID price calculation
@@ -1185,17 +1185,17 @@ if ticker_symbol:
                                         row.update({
                                             'Put Price': put_display_price,
                                             'Put Price %': f"{put_price_pct:.2f}%" if put_price_pct is not None else '-',
-                                            'Put MID': put_mid if put_mid is not None else '-',
-                                            'Put Last': put_last if put_last is not None else '-',
-                                            'Put Bid': put_bid if put_bid is not None else '-',
-                                            'Put Ask': put_ask if put_ask is not None else '-',
-                                            'Put Volume': put_row['volume'] if pd.notna(put_row['volume']) else 0,
+                                            'Put MID': f"{put_mid:.2f}" if put_mid is not None else '-',
+                                            'Put Last': f"{put_last:.2f}" if put_last is not None else '-',
+                                            'Put Bid': f"{put_bid:.2f}" if put_bid is not None else '-',
+                                            'Put Ask': f"{put_ask:.2f}" if put_ask is not None else '-',
+                                            'Put Volume': f"{put_row['volume']:.0f}" if pd.notna(put_row['volume']) else '0',
                                             'Put IV': f"{(put_row['impliedVolatility'] * 100):.1f}%" if pd.notna(put_row['impliedVolatility']) else '-'
                                         })
                                     else:
                                         row.update({
                                             'Put Price': '-', 'Put Price %': '-', 'Put MID': '-', 'Put Last': '-', 'Put Bid': '-', 'Put Ask': '-',
-                                            'Put Volume': 0, 'Put IV': '-'
+                                            'Put Volume': '0', 'Put IV': '-'
                                         })
                                     
                                     evolution_data.append(row)
@@ -1203,11 +1203,67 @@ if ticker_symbol:
                                 # Create DataFrame
                                 evolution_df = pd.DataFrame(evolution_data)
                                 
-                                # Display table (cleaned for Arrow compatibility)
+                                # Add coloring function for Strike Evolution Table
+                                def highlight_evolution_table(row):
+                                    """Apply colors to distinguish calls and puts in evolution table"""
+                                    styles = []
+                                    
+                                    # Convert strike to float for comparison
+                                    try:
+                                        strike = float(row['Strike'])
+                                    except (ValueError, TypeError):
+                                        strike = 0.0
+                                    
+                                    # Determine ITM/OTM status
+                                    call_itm = strike < current_price  # Call is ITM if strike < current price
+                                    put_itm = strike > current_price   # Put is ITM if strike > current price
+                                    
+                                    for col in evolution_df.columns:
+                                        if col.startswith('Call'):
+                                            if call_itm:
+                                                # ITM calls: Professional dark green
+                                                styles.append('background-color: #2d5a2d; color: #ffffff')
+                                            else:
+                                                # OTM calls: Professional dark blue
+                                                styles.append('background-color: #1e3a5f; color: #ffffff')
+                                        elif col in ['Expiration', 'Days to Exp', 'Strike']:
+                                            # Info columns: Neutral dark color
+                                            styles.append('background-color: #2d3748; color: #ffffff')
+                                        elif col.startswith('Put'):
+                                            if put_itm:
+                                                # ITM puts: Professional dark red
+                                                styles.append('background-color: #5a2d2d; color: #ffffff')
+                                            else:
+                                                # OTM puts: Professional dark orange
+                                                styles.append('background-color: #5a3d1a; color: #ffffff')
+                                        else:
+                                            styles.append('')
+                                    
+                                    return styles
+                                
+                                # Display table (cleaned for Arrow compatibility) with colors
                                 st.markdown("### 📈 Strike Evolution Table")
                                 st.caption("💡 **Price Columns**: Shows MID price (Bid+Ask)/2 when available, otherwise Last price marked as '(Last)'. **Price %** shows option price as percentage of current ticker price for relative valuation.")
                                 evolution_df_clean = clean_dataframe_for_arrow(evolution_df)
-                                st.dataframe(evolution_df_clean, width='stretch', height=400)
+                                
+                                # Apply coloring to evolution table
+                                styled_evolution_df = evolution_df_clean.style.apply(highlight_evolution_table, axis=1)
+                                st.dataframe(styled_evolution_df, width='stretch', height=400)
+                                
+                                # Add legend for Strike Evolution Table
+                                with st.expander("📖 Strike Evolution Color Legend", expanded=False):
+                                    st.markdown("""
+                                    **Professional Color Scheme for Strike Evolution:**
+                                    - 🔵 **Dark Blue**: OTM CALL options (strike > current price)
+                                    - 🟢 **Dark Green**: ITM CALL options (strike < current price)
+                                    - 🔴 **Dark Red**: ITM PUT options (strike > current price)
+                                    - 🟠 **Dark Orange**: OTM PUT options (strike < current price)
+                                    - ⚫ **Dark Gray**: Info columns (Expiration, Days to Exp, Strike)
+                                    
+                                    **ITM/OTM Status:**
+                                    - **ITM (In The Money)**: Option has intrinsic value
+                                    - **OTM (Out The Money)**: Option has only time value
+                                    """)
                                 
                                 # Create evolution chart
                                 st.markdown("### 📊 Price Evolution Chart")
