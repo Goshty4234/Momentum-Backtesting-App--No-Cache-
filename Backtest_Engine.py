@@ -453,9 +453,9 @@ def get_synthetic_ticker_data(ticker_symbol: str, start_date=None, end_date=None
                 return result
                 
     except ImportError as e:
-        print(f"⚠️ WARNING: Import error for {ticker_symbol}: {e}")
+        st.warning(f"⚠️ WARNING: Import error for {ticker_symbol}: {e}")
     except Exception as e:
-        print(f"⚠️ WARNING: Error creating {ticker_symbol}: {e}")
+        st.warning(f"⚠️ WARNING: Error creating {ticker_symbol}: {e}")
     
     return pd.DataFrame()
 
@@ -4961,26 +4961,26 @@ if not st.session_state.get("_run_requested", False):
             # Reset kill request when starting new backtest
             st.session_state.hard_kill_requested = False
             # --- PRE-CHECK BLOCK ---
-            print("DEBUG: Run Backtest button pressed. Checking pre-conditions...")
+            st.write("DEBUG: Run Backtest button pressed. Checking pre-conditions...")
             # Print start date of each selected ticker and benchmark for debugging
             for t in st.session_state.tickers:
                 try:
                     hist = get_cached_ticker_data(t, period="max")
                     if not hist.empty:
-                        print(f"DEBUG: Asset Ticker {t} starts on {hist.index.min().date()}")
+                        st.write(f"DEBUG: Asset Ticker {t} starts on {hist.index.min().date()}")
                     else:
-                        print(f"DEBUG: Asset Ticker {t}: No data found.")
+                        st.write(f"DEBUG: Asset Ticker {t}: No data found.")
                 except Exception as e:
-                    print(f"DEBUG: Asset Ticker {t}: Error - {e}")
+                    st.error(f"DEBUG: Asset Ticker {t}: Error - {e}")
             if benchmark_ticker:
                 try:
                     hist = get_cached_ticker_data(benchmark_ticker, period="max")
                     if not hist.empty:
-                        print(f"DEBUG: Benchmark Ticker {benchmark_ticker} starts on {hist.index.min().date()}")
+                        st.write(f"DEBUG: Benchmark Ticker {benchmark_ticker} starts on {hist.index.min().date()}")
                     else:
-                        print(f"DEBUG: Benchmark Ticker {benchmark_ticker}: No data found.")
+                        st.write(f"DEBUG: Benchmark Ticker {benchmark_ticker}: No data found.")
                 except Exception as e:
-                    print(f"DEBUG: Benchmark Ticker {benchmark_ticker}: Error - {e}")
+                    st.error(f"DEBUG: Benchmark Ticker {benchmark_ticker}: Error - {e}")
 
             # Validate basic pre-conditions; if any fail, ensure running flag is
             # not left set and abort the run immediately.
