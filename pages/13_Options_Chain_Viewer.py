@@ -107,31 +107,25 @@ def clean_dataframe_for_arrow(df):
 
 # Utility function to calculate MID price (Bid + Ask) / 2, fallback to Last
 def calculate_mid_price(bid, ask, last_price):
-    """Calculate MID price from bid/ask, fallback to last price - WITH PRICE ADJUSTMENT"""
-    try:
-        # Convert to float and handle None/NaN
-        bid_val = float(bid) if bid is not None and pd.notna(bid) else None
-        ask_val = float(ask) if ask is not None and pd.notna(ask) else None
-        last_val = float(last_price) if last_price is not None and pd.notna(last_price) else None
-        
-        # Try bid/ask first
-        if bid_val is not None and ask_val is not None and bid_val > 0 and ask_val > 0:
-            mid_price = (bid_val + ask_val) / 2
-        # Fallback to last price
-        elif last_val is not None and last_val > 0:
-            mid_price = last_val
-        else:
-            return None
-        
-        # Apply price adjustment if active
-        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
-            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
-            mid_price = mid_price * (1 + adjustment_factor)
-        
-        return mid_price
-        
-    except (ValueError, TypeError):
-        return None
+    """Calculate MID price from bid/ask, fallback to last price"""
+    if pd.notna(bid) and pd.notna(ask) and bid is not None and ask is not None:
+        mid_price = (bid + ask) / 2
+    elif pd.notna(last_price) and last_price is not None:
+        mid_price = last_price
+    else:
+        return 0.0
+    
+    # Apply Barbell price adjustment if active
+    if ('barbell_price_adjustment' in st.session_state and 
+        st.session_state.barbell_price_adjustment != 0 and
+        'selected_section' in st.session_state and 
+        (st.session_state.selected_section == "⚖️ BARBELL STRATEGY" or 
+         st.session_state.selected_section == "🎯 MULTI-STRIKE BACKTEST")):
+        adjustment = st.session_state.barbell_price_adjustment
+        adjusted_price = mid_price * (1 + adjustment / 100)
+        return max(0.01, adjusted_price)
+    
+    return mid_price
 
 # Utility function to safely convert current_price to float
 def safe_float_price(price):
@@ -2550,7 +2544,7 @@ if ticker_symbol:
                     
                     # Get option price
                     opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
-                    if opt_price and opt_price > 0:
+                    if opt_price > 0:
                         # Calculate positions
                         opts_alloc = total_capital * (options_pct / 100)
                         if use_fractional:
@@ -3154,6 +3148,7 @@ if ticker_symbol:
                             st.warning("⚠️ Not enough capital for 1 contract")
                     else:
                         st.error("❌ No valid option price")
+                        st.info("💡 Try selecting a different strike or expiration with valid option prices")
                 else:
                     st.warning(f"No {option_type} options available")
                 
@@ -3222,13 +3217,10 @@ if ticker_symbol:
                             # Display parameters
                             params = result_data['params']
                             
-                            # Check if it's a Multi-Strike, All-CALLs, or regular backtest
+                            # Check if it's a Multi-Strike result or regular backtest
                             if 'Multi-Strike' in result_key:
                                 # Multi-Strike results
                                 st.markdown(f"**Parameters:** {params['options_pct']}% options, {100-params['options_pct']}% bonds, Multi-Strike test, Expiration {params['selected_exp']} ({params['days_to_exp']} days)")
-                            elif 'All-CALLs' in result_key:
-                                # All-CALLs results
-                                st.markdown(f"**Parameters:** {params['options_pct']}% options, {100-params['options_pct']}% bonds, All-CALLs test, Min {params['days_to_exp']} days to expiration")
                             else:
                                 # Regular backtest results
                                 if 'barbell_strike' in params:
@@ -3241,7 +3233,7 @@ if ticker_symbol:
                                 st.markdown("**Performance Summary:**")
                                 summary_df = result_data['summary_df']
                                 
-                                # Check if it's a Multi-Strike, All-CALLs, or regular result
+                                # Check if it's a Multi-Strike result (different structure)
                                 if 'Multi-Strike' in result_key:
                                     # Multi-Strike results - display the full table with colors
                                     display_results = summary_df.copy()
@@ -3258,66 +3250,84 @@ if ticker_symbol:
                                         else:
                                             if display_results[col].dtype in ['float64', 'int64']:
                                                 display_results[col] = display_results[col].apply(lambda x: f"{float(x):.2f}")
-                                elif 'All-CALLs' in result_key:
-                                    # All-CALLs results - display the full table with colors
-                                    display_results = summary_df.copy()
                                     
-                                    # Apply same formatting as the original All-CALLs backtest
-                                    for col in display_results.columns:
-                                        if col == 'Strike':
-                                            display_results[col] = display_results[col].apply(lambda x: 
-                                                f"${int(float(x))}" if float(x) == int(float(x)) else f"${float(x):.2f}")
-                                        elif col in ['Positive Periods', 'Negative Periods', 'Total Periods', 'Days to Exp']:
-                                            pass
-                                        elif col in ['Option Price', 'Contracts']:
-                                            if display_results[col].dtype in ['float64', 'int64']:
-                                                display_results[col] = display_results[col].apply(lambda x: f"${float(x):.2f}")
-                                        elif col == 'Final Capital ($)':
-                                            if display_results[col].dtype in ['float64', 'int64']:
-                                                display_results[col] = display_results[col].apply(lambda x: f"${float(x):,.0f}")
-                                        elif col in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)', 'Average Return (%)', 'Median Return (%)', 'Best Period (%)', 'Worst Period (%)', '% Positive Periods']:
-                                            if display_results[col].dtype in ['float64', 'int64']:
-                                                display_results[col] = display_results[col].apply(lambda x: f"{float(x):.2f}%")
-                                    
-                                    # Apply comprehensive colors - SAME AS ORIGINAL All-CALLs
+                                    # Apply comprehensive colors - SAME AS ORIGINAL
                                     def color_comprehensive_results(val, col_name, row_index):
                                         try:
-                                            if isinstance(val, (int, float)):
-                                                if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
-                                                    if val > 20:
-                                                        return 'background-color: #004d00; color: white; font-weight: bold'
-                                                    elif val > 10:
-                                                        return 'background-color: #1e8449; color: white; font-weight: bold'
-                                                    elif val > 5:
-                                                        return 'background-color: #66bb6a; color: white'
-                                                    elif val > 0:
-                                                        return 'background-color: #ffeb3b; color: black'
-                                                    else:
-                                                        return 'background-color: #ef5350; color: white'
-                                                elif col_name == 'Final Capital ($)':
-                                                    if val > params['total_capital'] * 2:
-                                                        return 'background-color: #004d00; color: white; font-weight: bold'
-                                                    elif val > params['total_capital'] * 1.5:
-                                                        return 'background-color: #1e8449; color: white'
-                                                    elif val > params['total_capital']:
-                                                        return 'background-color: #66bb6a; color: white'
-                                                    else:
-                                                        return 'background-color: #ef5350; color: white'
-                                                elif col_name == '% Positive Periods':
-                                                    if val > 70:
-                                                        return 'background-color: #004d00; color: white; font-weight: bold'
-                                                    elif val > 50:
-                                                        return 'background-color: #66bb6a; color: white'
-                                                    elif val > 30:
-                                                        return 'background-color: #ffeb3b; color: black'
-                                                    else:
-                                                        return 'background-color: #ef5350; color: white'
+                                            if isinstance(val, str):
+                                                if col_name == 'Final Capital ($)':
+                                                    val = float(val.replace('$', '').replace(',', ''))
+                                                else:
+                                                    val = float(val)
                                         except:
                                             return ''
+                                        
+                                        if isinstance(val, (int, float)):
+                                            if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
+                                                if val > 20:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > 10:
+                                                    return 'background-color: #1e8449; color: white; font-weight: bold'
+                                                elif val > 5:
+                                                    return 'background-color: #66bb6a; color: white'
+                                                elif val > 0:
+                                                    return 'background-color: #ffeb3b; color: black'
+                                                else:
+                                                    return 'background-color: #ef5350; color: white'
+                                            elif col_name == 'Final Capital ($)':
+                                                if val > params.get('total_capital', 100000) * 2:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > params.get('total_capital', 100000) * 1.5:
+                                                    return 'background-color: #1e8449; color: white'
+                                                elif val > params.get('total_capital', 100000):
+                                                    return 'background-color: #66bb6a; color: white'
+                                                else:
+                                                    return 'background-color: #ef5350; color: white'
+                                            elif col_name == '% Positive Periods':
+                                                if val > 70:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > 50:
+                                                    return 'background-color: #66bb6a; color: white'
+                                                elif val > 30:
+                                                    return 'background-color: #ffeb3b; color: black'
+                                                else:
+                                                    return 'background-color: #ef5350; color: white'
+                                            elif col_name in ['Average Return (%)', 'Median Return (%)']:
+                                                if val > 10:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > 5:
+                                                    return 'background-color: #1e8449; color: white'
+                                                elif val > 0:
+                                                    return 'background-color: #66bb6a; color: white'
+                                                elif val > -5:
+                                                    return 'background-color: #ffeb3b; color: black'
+                                                else:
+                                                    return 'background-color: #ef5350; color: white'
+                                            elif col_name == 'Best Period (%)':
+                                                if val > 50:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > 20:
+                                                    return 'background-color: #1e8449; color: white'
+                                                elif val > 5:
+                                                    return 'background-color: #66bb6a; color: white'
+                                                elif val > 0:
+                                                    return 'background-color: #ffeb3b; color: black'
+                                                else:
+                                                    return 'background-color: #ef5350; color: white'
+                                            elif col_name == 'Worst Period (%)':
+                                                if val > 0:
+                                                    return 'background-color: #004d00; color: white; font-weight: bold'
+                                                elif val > -10:
+                                                    return 'background-color: #66bb6a; color: white'
+                                                elif val > -20:
+                                                    return 'background-color: #ffeb3b; color: black'
+                                                elif val > -50:
+                                                    return 'background-color: #ef5350; color: white'
+                                                else:
+                                                    return 'background-color: #7b0000; color: white; font-weight: bold'
                                         return ''
                                     
-                                    # Apply colors to RAW data first, then format for display
-                                    styled_results = summary_df.style.apply(
+                                    styled_results = display_results.style.apply(
                                         lambda x: [color_comprehensive_results(val, x.name, i) 
                                                  for i, val in enumerate(x)], 
                                         axis=0
@@ -3326,26 +3336,96 @@ if ticker_symbol:
                                         {'selector': 'td', 'props': [('text-align', 'center')]}
                                     ])
                                     
-                                    # Format the styled results for display - MAX 2 decimal places
-                                    styled_results = styled_results.format({
-                                        'Strike': '${:.0f}',
-                                        'Option Price': '${:.2f}',
-                                        'Contracts': '{:.2f}',
-                                        'Final Capital ($)': '${:,.0f}',
-                                        'CAGR (%)': '{:.2f}%',
-                                        'CPGR (%)': '{:.2f}%',
-                                        'MWRR (%)': '{:.2f}%',
-                                        'Average Return (%)': '{:.2f}%',
-                                        'Median Return (%)': '{:.2f}%',
-                                        'Best Period (%)': '{:.2f}%',
-                                        'Worst Period (%)': '{:.2f}%',
-                                        '% Positive Periods': '{:.2f}%'
-                                    })
-                                    
-                                    st.dataframe(styled_results, use_container_width=True, height=600)
+                                    st.dataframe(styled_results, use_container_width=True, height=450)
                                 else:
-                                    # Regular backtest results - display without colors
-                                    st.dataframe(summary_df, use_container_width=True)
+                                    # Regular backtest results - apply colors to summary table
+                                    def color_persistent_summary(val, col_name, row_index):
+                                        if isinstance(val, str) and '%' in val and col_name != 'Metric':
+                                            try:
+                                                percentage_val = float(val.replace('%', '').replace(',', '').replace(' ', ''))
+                                                metric_name = summary_df.iloc[row_index]['Metric']
+                                                
+                                                # Best Period - Shades of Green
+                                                if 'Best Period' in metric_name:
+                                                    if percentage_val > 50:
+                                                        return 'background-color: #004d00; color: white; font-weight: bold'
+                                                    elif percentage_val > 30:
+                                                        return 'background-color: #1e8449; color: white; font-weight: bold'
+                                                    elif percentage_val > 15:
+                                                        return 'background-color: #66bb6a; color: white'
+                                                    else:
+                                                        return 'background-color: #a5d6a7; color: white'
+                                                
+                                                # Worst Period - Shades of Red
+                                                elif 'Worst Period' in metric_name:
+                                                    if percentage_val < -30:
+                                                        return 'background-color: #7b0000; color: white; font-weight: bold'
+                                                    elif percentage_val < -15:
+                                                        return 'background-color: #d32f2f; color: white; font-weight: bold'
+                                                    elif percentage_val < -5:
+                                                        return 'background-color: #ef5350; color: white'
+                                                    else:
+                                                        return 'background-color: #ffab91; color: white'
+                                                
+                                                # Positive Periods - Shades of Green
+                                                elif 'Positive Periods' in metric_name:
+                                                    if percentage_val > 25:
+                                                        return 'background-color: #004d00; color: white; font-weight: bold'
+                                                    elif percentage_val > 15:
+                                                        return 'background-color: #1e8449; color: white; font-weight: bold'
+                                                    elif percentage_val > 5:
+                                                        return 'background-color: #66bb6a; color: white'
+                                                    else:
+                                                        return 'background-color: #a5d6a7; color: white'
+                                                
+                                                # Negative Periods - Shades of Red
+                                                elif 'Negative Periods' in metric_name:
+                                                    if percentage_val > 20:
+                                                        return 'background-color: #7b0000; color: white; font-weight: bold'
+                                                    elif percentage_val > 10:
+                                                        return 'background-color: #d32f2f; color: white; font-weight: bold'
+                                                    elif percentage_val > 5:
+                                                        return 'background-color: #ef5350; color: white'
+                                                    else:
+                                                        return 'background-color: #ffab91; color: white'
+                                                
+                                                # % Positive Periods - Shades of Green
+                                                elif '% Positive Periods' in metric_name:
+                                                    if percentage_val > 80:
+                                                        return 'background-color: #004d00; color: white; font-weight: bold'
+                                                    elif percentage_val > 60:
+                                                        return 'background-color: #1e8449; color: white; font-weight: bold'
+                                                    elif percentage_val > 40:
+                                                        return 'background-color: #66bb6a; color: white'
+                                                    else:
+                                                        return 'background-color: #a5d6a7; color: white'
+                                                
+                                                # Other percentage metrics (CAGR, CPGR, MWRR, Average Return, Median Return)
+                                                elif any(x in metric_name for x in ['CAGR', 'CPGR', 'MWRR', 'Average Return', 'Median Return']):
+                                                    if percentage_val > 15:
+                                                        return 'background-color: #004d00; color: white; font-weight: bold'
+                                                    elif percentage_val > 8:
+                                                        return 'background-color: #1e8449; color: white; font-weight: bold'
+                                                    elif percentage_val > 0:
+                                                        return 'background-color: #66bb6a; color: white'
+                                                    elif percentage_val > -5:
+                                                        return 'background-color: #ef5350; color: white'
+                                                    else:
+                                                        return 'background-color: #7b0000; color: white; font-weight: bold'
+                                            except:
+                                                pass
+                                        return ''
+                                    
+                                    styled_summary = summary_df.style.apply(
+                                        lambda x: [color_persistent_summary(val, x.name, i) 
+                                                 for i, val in enumerate(x)], 
+                                        axis=0
+                                    ).set_table_styles([
+                                        {'selector': 'th', 'props': [('background-color', '#2d3748'), ('color', 'white'), ('font-weight', 'bold')]},
+                                        {'selector': 'td', 'props': [('text-align', 'center')]}
+                                    ])
+                                    
+                                    st.dataframe(styled_summary, use_container_width=True)
                             
                             # Display periods table if available
                             if 'periods_df' in result_data and result_data['periods_df'] is not None and not result_data['periods_df'].empty:
@@ -3406,26 +3486,13 @@ if ticker_symbol:
                 
                 # Run backtest button
                 # Add multi-strike backtest option
-                col1, col2, col3 = st.columns([2, 2, 1])
+                col1, col2 = st.columns(2)
                 
                 with col1:
                     run_single_backtest = st.button("🚀 Run Historical Backtest", key="run_backtest")
                 
                 with col2:
                     run_multi_strike_backtest = st.button("🎯 Run Multi-Strike Backtest", key="run_multi_strike_backtest", type="primary")
-                
-                with col3:
-                    # Mid price only checkbox for multi-strike backtest
-                    if 'multi_strike_mid_price_only' not in st.session_state:
-                        st.session_state.multi_strike_mid_price_only = False
-                    
-                    multi_strike_mid_price_only = st.checkbox(
-                        "🎯 Mid Price Only", 
-                        value=st.session_state.multi_strike_mid_price_only,
-                        help="Use only bid/ask prices (exclude stale last prices)",
-                        key="multi_strike_mid_price_only_checkbox"
-                    )
-                    st.session_state.multi_strike_mid_price_only = multi_strike_mid_price_only
                 
                 if run_single_backtest:
                     with st.spinner("Fetching historical data and running backtest..."):
@@ -3437,14 +3504,19 @@ if ticker_symbol:
                             # Get the option details from the current selection
                             if not filtered_opts.empty:
                                 opt = filtered_opts[filtered_opts['strike'] == barbell_strike].iloc[0]
+                                
                                 opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
                                 
-                                if not opt_price or opt_price <= 0:
-                                    st.error("❌ Invalid option price for backtest")
-                                    st.stop()
+                                if opt_price <= 0:
+                                    st.error("❌ No valid option price - check bid/ask/lastPrice data")
+                                    st.info("💡 Try selecting a different strike or expiration with valid option prices")
+                                    # Don't stop execution, just skip the rest of this section
+                                    pass
+                                else:
+                                    # Continue with the rest of the code when opt_price is valid
+                                    pass
                             else:
                                 st.error("❌ No options data available for backtest")
-                                st.stop()
                             
                             # Calculate days to expiration from selected option
                             try:
@@ -4103,24 +4175,11 @@ if ticker_symbol:
                             
                             for strike in available_strikes:
                                 try:
-                                    # Get option price for this strike
+                                    # Get option price for this strike - USE calculate_mid_price TO APPLY ADJUSTMENT
                                     opt = filtered_opts[filtered_opts['strike'] == strike].iloc[0]
+                                    opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
                                     
-                                    # Apply mid price only filter if enabled
-                                    if multi_strike_mid_price_only:
-                                        # Only use strikes with valid bid AND ask prices
-                                        if not opt['bid'] or not opt['ask'] or opt['bid'] <= 0 or opt['ask'] <= 0:
-                                            continue
-                                        opt_price = (opt['bid'] + opt['ask']) / 2
-                                        # Apply price adjustment if active
-                                        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
-                                            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
-                                            opt_price = opt_price * (1 + adjustment_factor)
-                                    else:
-                                        # Use normal mid price calculation (with last price fallback and adjustment)
-                                        opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
-                                    
-                                    if not opt_price or opt_price <= 0:
+                                    if opt_price <= 0:
                                         continue
                                     
                                     # Calculate portfolio parameters for this strike
@@ -4318,10 +4377,6 @@ if ticker_symbol:
                                 st.markdown("### 🎯 Multi-Strike Backtest Results")
                                 st.markdown(f"**Tested {len(strike_results)} {option_type} strikes for expiration {selected_exp}**")
                                 
-                                # Show mid price filter status
-                                if multi_strike_mid_price_only:
-                                    st.info(f"🎯 **Mid Price Only Filter**: Only strikes with valid bid/ask prices were tested (excluded {len(available_strikes) - len(strike_results)} strikes without mid price)")
-                                
                                 # Show price adjustment status
                                 if ('barbell_price_adjustment' in st.session_state and 
                                     st.session_state.barbell_price_adjustment != 0):
@@ -4502,613 +4557,15 @@ if ticker_symbol:
                                 st.success(f"✅ Multi-strike backtest completed! Best strike: ${best_strike['Strike']:.0f} with {best_strike['CAGR (%)']:.2f}% CAGR")
                                 
                             else:
-                                if multi_strike_mid_price_only:
-                                    st.error("❌ No valid results generated - No strikes found with valid bid/ask prices. Try unchecking 'Mid Price Only' to include strikes with last price fallback.")
-                                else:
-                                    st.error("❌ No valid results generated")
+                                st.error("❌ No valid results generated")
                         
                         except Exception as e:
                             st.error(f"❌ Error running multi-strike backtest: {str(e)}")
                             st.exception(e)
                 
-                # All Options Backtest Section
-                st.markdown("---")
-                st.markdown("### 🌐 All CALL Options Backtest")
-                st.markdown("**Test ALL available CALL options (all strikes + all expirations) with the same logic as multi-strike backtest**")
-                
-                # Permanent message
-                st.info("💾 **Results are automatically saved!** You can find all backtest results in the '📊 All Saved Backtest Results' section above.")
-                
-                # Parameters section
-                st.markdown("#### 📊 Backtest Parameters")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    # Initial capital
-                    if 'all_options_initial_capital' not in st.session_state:
-                        st.session_state.all_options_initial_capital = 100000
-                    
-                    all_options_initial_capital = st.number_input(
-                        "💰 Initial Capital ($)", 
-                        min_value=1000, 
-                        value=st.session_state.all_options_initial_capital, 
-                        step=1000,
-                        help="Initial capital for the backtest",
-                        key="all_options_initial_capital_input"
-                    )
-                    st.session_state.all_options_initial_capital = all_options_initial_capital
-                    
-                    # Added per period
-                    if 'all_options_added_per_period' not in st.session_state:
-                        st.session_state.all_options_added_per_period = 0
-                    
-                    all_options_added_per_period = st.number_input(
-                        "📈 Added per Period ($)", 
-                        min_value=0, 
-                        value=st.session_state.all_options_added_per_period, 
-                        step=1000,
-                        help="Amount added each period",
-                        key="all_options_added_per_period_input"
-                    )
-                    st.session_state.all_options_added_per_period = all_options_added_per_period
-                
-                with col2:
-                    # Options percentage
-                    if 'all_options_options_pct' not in st.session_state:
-                        st.session_state.all_options_options_pct = 20
-                    
-                    all_options_options_pct = st.number_input(
-                        "📈 Options Allocation (%)", 
-                        min_value=1, 
-                        max_value=100, 
-                        value=st.session_state.all_options_options_pct, 
-                        step=1,
-                        help="Percentage of capital allocated to options",
-                        key="all_options_options_pct_input"
-                    )
-                    st.session_state.all_options_options_pct = all_options_options_pct
-                    
-                    # Bond return rate
-                    if 'all_options_bond_return' not in st.session_state:
-                        st.session_state.all_options_bond_return = 4.0
-                    
-                    all_options_bond_return = st.number_input(
-                        "💰 Bond Return Rate (%)", 
-                        min_value=0.0, 
-                        max_value=15.0, 
-                        value=st.session_state.all_options_bond_return, 
-                        step=0.1,
-                        help="Annual return rate for the bond portion",
-                        key="all_options_bond_return_input"
-                    )
-                    st.session_state.all_options_bond_return = all_options_bond_return
-                
-                with col3:
-                    # Minimum days filter slider
-                    if 'all_options_min_days' not in st.session_state:
-                        st.session_state.all_options_min_days = 200
-                    
-                    min_days_filter = st.slider(
-                        "🚫 Minimum Days to Expiration Filter", 
-                        min_value=0, 
-                        max_value=730, 
-                        value=st.session_state.all_options_min_days,
-                        step=10,
-                        help="Exclude options with fewer days to expiration (to avoid very short-term options)",
-                        key="all_options_min_days_slider"
-                    )
-                    st.session_state.all_options_min_days = min_days_filter
-                    
-                    # Mid price only checkbox
-                    if 'all_options_mid_price_only' not in st.session_state:
-                        st.session_state.all_options_mid_price_only = False
-                    
-                    all_options_mid_price_only = st.checkbox(
-                        "🎯 Use ONLY Call Mid Price (Bid/Ask)", 
-                        value=st.session_state.all_options_mid_price_only,
-                        help="Exclude options that don't have valid bid/ask prices (avoid stale last prices)",
-                        key="all_options_mid_price_only_checkbox"
-                    )
-                    st.session_state.all_options_mid_price_only = all_options_mid_price_only
-                
-                run_all_options_backtest = st.button("🌐 Run All CALL Options Backtest", key="run_all_options_backtest", type="primary")
-                
-                if run_all_options_backtest:
-                    with st.spinner("Running all CALL options backtest - this may take a very long time..."):
-                        try:
-                            import yfinance as yf
-                            from datetime import datetime, timedelta
-                            import numpy as np
-                            
-                            # Get ALL CALL options from ALL expirations (NO PUTS)
-                            all_calls_data = []
-                            
-                            # Get all calls only
-                            if not calls_combined.empty:
-                                for _, row in calls_combined.iterrows():
-                                    # Check minimum days filter
-                                    try:
-                                        exp_date = pd.to_datetime(row['expiration'])
-                                        days_to_exp = (exp_date - datetime.now()).days
-                                        if days_to_exp >= min_days_filter:
-                                            all_calls_data.append({
-                                                'strike': row['strike'],
-                                                'expiration': row['expiration'],
-                                                'days_to_exp': days_to_exp,
-                                                'bid': row['bid'],
-                                                'ask': row['ask'],
-                                                'lastPrice': row['lastPrice']
-                                            })
-                                    except:
-                                        continue
-                            
-                            if not all_calls_data:
-                                if all_options_mid_price_only:
-                                    st.error(f"❌ No CALL options found with valid bid/ask prices and at least {min_days_filter} days to expiration. Try unchecking 'Use ONLY Call Mid Price' to include options with last price fallback.")
-                                else:
-                                    st.error(f"❌ No CALL options found with at least {min_days_filter} days to expiration")
-                                st.stop()
-                            
-                            st.info(f"🌐 **Testing {len(all_calls_data)} CALL options (min {min_days_filter} days to expiration)**")
-                            
-                            
-                            valid_prices_count = 0
-                            invalid_prices_count = 0
-                            filtered_calls_data = []
-                            
-                            for call_data in all_calls_data:
-                                bid = call_data.get('bid')
-                                ask = call_data.get('ask') 
-                                last_price = call_data.get('lastPrice')
-                                
-                                # Check if we should use only mid prices
-                                if all_options_mid_price_only:
-                                    # Only include options with valid bid AND ask prices
-                                    if bid and ask and bid > 0 and ask > 0:
-                                        opt_price = (bid + ask) / 2
-                                        # Apply price adjustment if active
-                                        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
-                                            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
-                                            opt_price = opt_price * (1 + adjustment_factor)
-                                        if opt_price > 0:
-                                            call_data['calculated_price'] = opt_price
-                                            filtered_calls_data.append(call_data)
-                                            valid_prices_count += 1
-                                        else:
-                                            invalid_prices_count += 1
-                                    else:
-                                        invalid_prices_count += 1
-                                else:
-                                    # Use the normal mid price calculation (with last price fallback and adjustment)
-                                    opt_price = calculate_mid_price(bid, ask, last_price)
-                                    if opt_price and opt_price > 0:
-                                        call_data['calculated_price'] = opt_price
-                                        filtered_calls_data.append(call_data)
-                                        valid_prices_count += 1
-                                    else:
-                                        invalid_prices_count += 1
-                            
-                            # Update all_calls_data with filtered data
-                            all_calls_data = filtered_calls_data
-                            
-                            # Check if any options remain after filtering
-                            if not all_calls_data:
-                                if all_options_mid_price_only:
-                                    st.error("❌ No CALL options remain after mid price filtering. Try unchecking 'Use ONLY Call Mid Price' to include options with last price fallback.")
-                                else:
-                                    st.error("❌ No CALL options remain after price validation.")
-                                st.stop()
-                            
-                            if all_options_mid_price_only:
-                                st.info(f"🎯 **Mid Price Only Filter: {valid_prices_count} options with valid bid/ask, {invalid_prices_count} excluded (no mid price)**")
-                            else:
-                                st.info(f"📊 **Price Analysis: {valid_prices_count} valid prices, {invalid_prices_count} invalid prices**")
-                            
-                            # Get historical data (same as multi-strike backtest)
-                            global_cache_key = f"historical_data_{ticker_symbol}"
-                            if global_cache_key in st.session_state:
-                                cached_data = st.session_state[global_cache_key]
-                                ticker_data = cached_data['ticker_data']
-                                price_col = cached_data['price_col']
-                                results_df = cached_data['results_df']
-                                st.info(f"📊 Using cached historical data for All CALL Options Backtest ({len(results_df)} days)")
-                            else:
-                                st.info("📊 Fetching historical data for All CALL Options Backtest (1993-present)")
-                                ticker_data = yf.download(ticker_symbol, start="1993-01-01", progress=False)
-                                
-                                if ticker_data.empty:
-                                    st.error(f"❌ Failed to fetch {ticker_symbol} data")
-                                    st.stop()
-                                
-                                price_col = 'Close' if 'Close' in ticker_data.columns else 'Adj Close'
-                                ticker_data = ticker_data.resample('D').ffill()
-                                
-                                daily_data = []
-                                for i in range(len(ticker_data)):
-                                    date = ticker_data.index[i]
-                                    price = ticker_data[price_col].iloc[i]
-                                    
-                                    if i > 0:
-                                        prev_price = float(ticker_data[price_col].iloc[i-1])
-                                        current_price = float(price)
-                                        daily_change = (current_price / prev_price) - 1
-                                    else:
-                                        daily_change = 0
-                                    
-                                    daily_change_with_div = daily_change
-                                    daily_change_no_div = daily_change - (0.015 / 365)
-                                    
-                                    daily_data.append({
-                                        'Date': date,
-                                        'Price': float(price),
-                                        'Daily Change (w/ Div)': float(daily_change_with_div * 100),
-                                        'Daily Change (no Div)': float(daily_change_no_div * 100)
-                                    })
-                                
-                                results_df = pd.DataFrame(daily_data)
-                                
-                                st.session_state[global_cache_key] = {
-                                    'ticker_data': ticker_data,
-                                    'price_col': price_col,
-                                    'results_df': results_df,
-                                    'fetch_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                }
-                            
-                            if results_df.empty:
-                                st.error("❌ No data found")
-                                st.stop()
-                            
-                            # Test each CALL option
-                            all_calls_results = []
-                            processed_count = 0
-                            skipped_count = 0
-                            
-                            for call_data in all_calls_data:
-                                try:
-                                    strike = call_data['strike']
-                                    expiration = call_data['expiration']
-                                    days_to_exp = call_data['days_to_exp']
-                                    
-                                    # Use the pre-calculated price from filtering
-                                    opt_price = call_data.get('calculated_price')
-                                    
-                                    if not opt_price or opt_price <= 0:
-                                        skipped_count += 1
-                                        continue
-                                    
-                                    processed_count += 1
-                                    
-                                    # Calculate portfolio parameters using the input parameters
-                                    option_portion = all_options_initial_capital * (all_options_options_pct / 100)
-                                    bond_portion = all_options_initial_capital * ((100 - all_options_options_pct) / 100)
-                                    
-                                    # Same dual run logic as multi-strike backtest
-                                    pure_performance_portfolio = all_options_initial_capital
-                                    pure_period_returns = []
-                                    
-                                    cumulative_with_div = all_options_initial_capital
-                                    cumulative_no_div = all_options_initial_capital
-                                    cumulative_portfolio = all_options_initial_capital
-                                    
-                                    pure_performance_with_div = all_options_initial_capital
-                                    pure_performance_no_div = all_options_initial_capital
-                                    pure_period_returns_with_div = []
-                                    pure_period_returns_no_div = []
-                                    
-                                    initial_contracts = option_portion / (opt_price * 100)
-                                    
-                                    for i in range(0, len(results_df) - days_to_exp + 1, days_to_exp):
-                                        start_date = results_df.iloc[i]['Date']
-                                        end_date = results_df.iloc[i + days_to_exp - 1]['Date']
-                                        
-                                        start_price = results_df.iloc[i]['Price']
-                                        end_price = results_df.iloc[i + days_to_exp - 1]['Price']
-                                        
-                                        ticker_with_div = ((end_price / start_price) - 1) * 100
-                                        ticker_no_div = ticker_with_div - (1.5 * days_to_exp / 365)
-                                        
-                                        # PURE PERFORMANCE CALCULATION
-                                        current_capital_pure = pure_performance_portfolio
-                                        current_option_portion_pure = current_capital_pure * (all_options_options_pct / 100)
-                                        current_contracts_pure = current_option_portion_pure / (opt_price * 100)
-                                        
-                                        bond_period_return = (all_options_bond_return / 100) * (days_to_exp / 365)
-                                        bond_value_pure = (current_capital_pure - current_option_portion_pure) * (1 + bond_period_return)
-                                        
-                                        current_ticker_price = ticker_data[price_col].iloc[-1]
-                                        final_ticker_price = current_ticker_price * (1 + ticker_no_div / 100)
-                                        
-                                        # CALL option payoff only
-                                        option_profit_per_share = max(0, float(final_ticker_price) - strike)
-                                        
-                                        option_value_pure = option_profit_per_share * current_contracts_pure * 100
-                                        
-                                        total_portfolio_value_pure = bond_value_pure + option_value_pure
-                                        portfolio_return_pure = ((total_portfolio_value_pure / current_capital_pure) - 1) * 100
-                                        
-                                        pure_period_returns.append(portfolio_return_pure)
-                                        pure_performance_portfolio = pure_performance_portfolio * (1 + portfolio_return_pure / 100)
-                                        
-                                        # TICKER PERFORMANCE
-                                        pure_performance_with_div = pure_performance_with_div * (1 + ticker_with_div / 100)
-                                        pure_performance_no_div = pure_performance_no_div * (1 + ticker_no_div / 100)
-                                        
-                                        pure_period_returns_with_div.append(ticker_with_div)
-                                        pure_period_returns_no_div.append(ticker_no_div)
-                                        
-                                        # WITH ADDED MONEY CALCULATION
-                                        current_capital_with_added = cumulative_portfolio + all_options_added_per_period
-                                        current_option_portion_with_added = current_capital_with_added * (all_options_options_pct / 100)
-                                        current_contracts_with_added = current_option_portion_with_added / (opt_price * 100)
-                                        
-                                        bond_value_with_added = (current_capital_with_added - current_option_portion_with_added) * (1 + bond_period_return)
-                                        option_value_with_added = option_profit_per_share * current_contracts_with_added * 100
-                                        
-                                        total_portfolio_value_with_added = bond_value_with_added + option_value_with_added
-                                        portfolio_return_with_added = ((total_portfolio_value_with_added / current_capital_with_added) - 1) * 100
-                                        
-                                        cumulative_with_div = cumulative_with_div * (1 + ticker_with_div / 100) + all_options_added_per_period
-                                        cumulative_no_div = cumulative_no_div * (1 + ticker_no_div / 100) + all_options_added_per_period
-                                        cumulative_portfolio = cumulative_portfolio * (1 + portfolio_return_with_added / 100) + all_options_added_per_period
-                                    
-                                    # Calculate metrics (same as multi-strike backtest)
-                                    total_periods = len([i for i in range(0, len(results_df) - days_to_exp + 1, days_to_exp)])
-                                    total_days = total_periods * days_to_exp if total_periods > 0 else 1
-                                    
-                                    final_capital_portfolio = cumulative_portfolio
-                                    
-                                    if total_days > 0 and all_options_initial_capital > 0 and pure_performance_portfolio > 0:
-                                        final_cagr_portfolio = ((pure_performance_portfolio / all_options_initial_capital) ** (365 / total_days) - 1) * 100
-                                    else:
-                                        final_cagr_portfolio = 0
-                                    
-                                    if total_periods > 0 and all_options_initial_capital > 0 and pure_performance_portfolio > 0:
-                                        cpgr_portfolio = ((pure_performance_portfolio / all_options_initial_capital) ** (1 / total_periods) - 1) * 100
-                                    else:
-                                        cpgr_portfolio = 0
-                                    
-                                    def calculate_mwrr(initial_investment, periodic_investments, final_value, periods):
-                                        if periods == 0 or final_value <= 0:
-                                            return 0
-                                        cash_flows = [-initial_investment]
-                                        for i in range(periods):
-                                            cash_flows.append(-periodic_investments)
-                                        cash_flows.append(final_value)
-                                        
-                                        def npv(rate, cash_flows):
-                                            return sum(cf / (1 + rate) ** i for i, cf in enumerate(cash_flows))
-                                        
-                                        def npv_derivative(rate, cash_flows):
-                                            return sum(-i * cf / (1 + rate) ** (i + 1) for i, cf in enumerate(cash_flows))
-                                        
-                                        rate = 0.1
-                                        for _ in range(100):
-                                            npv_val = npv(rate, cash_flows)
-                                            npv_deriv = npv_derivative(rate, cash_flows)
-                                            if abs(npv_val) < 1e-6 or abs(npv_deriv) < 1e-12:
-                                                break
-                                            rate = rate - npv_val / npv_deriv
-                                        
-                                        return rate * 100
-                                    
-                                    mwrr_portfolio = calculate_mwrr(all_options_initial_capital, all_options_added_per_period, final_capital_portfolio, total_periods)
-                                    
-                                    portfolio_returns = pure_period_returns
-                                    
-                                    if portfolio_returns:
-                                        avg_return = np.mean(portfolio_returns)
-                                        median_return = np.median(portfolio_returns)
-                                        best_period = max(portfolio_returns)
-                                        worst_period = min(portfolio_returns)
-                                        positive_periods = sum(1 for r in portfolio_returns if r > 0)
-                                        negative_periods = sum(1 for r in portfolio_returns if r < 0)
-                                        positive_pct = (positive_periods / len(portfolio_returns)) * 100
-                                    else:
-                                        avg_return = 0
-                                        median_return = 0
-                                        best_period = 0
-                                        worst_period = 0
-                                        positive_periods = 0
-                                        negative_periods = 0
-                                        positive_pct = 0
-                                    
-                                    all_calls_results.append({
-                                        'Strike': strike,
-                                        'Expiration': expiration,
-                                        'Days to Exp': days_to_exp,
-                                        'Option Price': opt_price,
-                                        'Contracts': initial_contracts,
-                                        'Final Capital ($)': final_capital_portfolio,
-                                        'CAGR (%)': final_cagr_portfolio,
-                                        'CPGR (%)': cpgr_portfolio,
-                                        'MWRR (%)': mwrr_portfolio,
-                                        'Average Return (%)': avg_return,
-                                        'Median Return (%)': median_return,
-                                        'Best Period (%)': best_period,
-                                        'Worst Period (%)': worst_period,
-                                        'Positive Periods': positive_periods,
-                                        'Negative Periods': negative_periods,
-                                        '% Positive Periods': positive_pct,
-                                        'Total Periods': len(portfolio_returns)
-                                    })
-                                    
-                                except Exception as e:
-                                    skipped_count += 1
-                                    continue
-                            
-                            # Display processing statistics
-                            st.info(f"📈 **Processing Complete: {processed_count} processed, {skipped_count} skipped, {len(all_calls_results)} successful results**")
-                            
-                            if all_calls_results:
-                                # Create results DataFrame
-                                results_df_all_calls = pd.DataFrame(all_calls_results)
-                                
-                                # Sort by CAGR descending
-                                results_df_all_calls = results_df_all_calls.sort_values('CAGR (%)', ascending=False)
-                                
-                                st.markdown("### 🌐 All CALL Options Backtest Results")
-                                st.markdown(f"**Tested {len(all_calls_results)} CALL options (min {min_days_filter} days to expiration)**")
-                                
-                                # Display complete results table
-                                st.markdown("#### 📊 Complete All CALL Options Results Table")
-                                st.markdown(f"**All {len(all_calls_results)} CALL options tested - Sort by any column to filter**")
-                                
-                                # Apply colors to RAW data before formatting - EXACTLY like multi-strike backtest
-                                def color_all_calls_results(val, col_name, row_index):
-                                    try:
-                                        if isinstance(val, (int, float)):
-                                            if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
-                                                if val > 20:
-                                                    return 'background-color: #004d00; color: white; font-weight: bold'
-                                                elif val > 10:
-                                                    return 'background-color: #1e8449; color: white; font-weight: bold'
-                                                elif val > 5:
-                                                    return 'background-color: #66bb6a; color: white'
-                                                elif val > 0:
-                                                    return 'background-color: #ffeb3b; color: black'
-                                                else:
-                                                    return 'background-color: #ef5350; color: white'
-                                            elif col_name == 'Final Capital ($)':
-                                                if val > all_options_initial_capital * 2:
-                                                    return 'background-color: #004d00; color: white; font-weight: bold'
-                                                elif val > all_options_initial_capital * 1.5:
-                                                    return 'background-color: #1e8449; color: white'
-                                                elif val > all_options_initial_capital:
-                                                    return 'background-color: #66bb6a; color: white'
-                                                else:
-                                                    return 'background-color: #ef5350; color: white'
-                                            elif col_name == '% Positive Periods':
-                                                if val > 70:
-                                                    return 'background-color: #004d00; color: white; font-weight: bold'
-                                                elif val > 50:
-                                                    return 'background-color: #66bb6a; color: white'
-                                                elif val > 30:
-                                                    return 'background-color: #ffeb3b; color: black'
-                                                else:
-                                                    return 'background-color: #ef5350; color: white'
-                                    except:
-                                        return ''
-                                    return ''
-                                
-                                # Format the results for better display - MAX 2 decimal places
-                                display_results_all_calls = results_df_all_calls.copy()
-                                
-                                # Format columns - MAX 2 decimal places
-                                for col in display_results_all_calls.columns:
-                                    if col == 'Strike':
-                                        display_results_all_calls[col] = display_results_all_calls[col].apply(lambda x: 
-                                            f"${int(float(x))}" if float(x) == int(float(x)) else f"${float(x):.2f}")
-                                    elif col in ['Positive Periods', 'Negative Periods', 'Total Periods', 'Days to Exp']:
-                                        display_results_all_calls[col] = display_results_all_calls[col].astype(int)
-                                    elif col in ['Option Price', 'Contracts']:
-                                        if display_results_all_calls[col].dtype in ['float64', 'int64']:
-                                            display_results_all_calls[col] = display_results_all_calls[col].apply(lambda x: f"${float(x):.2f}")
-                                    elif col == 'Final Capital ($)':
-                                        if display_results_all_calls[col].dtype in ['float64', 'int64']:
-                                            display_results_all_calls[col] = display_results_all_calls[col].apply(lambda x: f"${float(x):,.0f}")
-                                    elif col in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)', 'Average Return (%)', 'Median Return (%)', 'Best Period (%)', 'Worst Period (%)', '% Positive Periods']:
-                                        if display_results_all_calls[col].dtype in ['float64', 'int64']:
-                                            display_results_all_calls[col] = display_results_all_calls[col].apply(lambda x: f"{float(x):.2f}%")
-                                
-                                # Apply colors to RAW data first, then format for display
-                                styled_results_all_calls = results_df_all_calls.style.apply(
-                                    lambda x: [color_all_calls_results(val, x.name, i) 
-                                             for i, val in enumerate(x)], 
-                                    axis=0
-                                ).set_table_styles([
-                                    {'selector': 'th', 'props': [('background-color', '#2d3748'), ('color', 'white'), ('font-weight', 'bold')]},
-                                    {'selector': 'td', 'props': [('text-align', 'center')]}
-                                ])
-                                
-                                # Format the styled results for display
-                                styled_results_all_calls = styled_results_all_calls.format({
-                                    'Strike': '${:.0f}',
-                                    'Option Price': '${:.2f}',
-                                    'Contracts': '{:.2f}',
-                                    'Final Capital ($)': '${:,.0f}',
-                                    'CAGR (%)': '{:.2f}%',
-                                    'CPGR (%)': '{:.2f}%',
-                                    'MWRR (%)': '{:.2f}%',
-                                    'Average Return (%)': '{:.2f}%',
-                                    'Median Return (%)': '{:.2f}%',
-                                    'Best Period (%)': '{:.2f}%',
-                                    'Worst Period (%)': '{:.2f}%',
-                                    '% Positive Periods': '{:.2f}%'
-                                })
-                                
-                                st.dataframe(styled_results_all_calls, use_container_width=True, height=600)
-                                
-                                # Display best CALL option details
-                                best_call = results_df_all_calls.iloc[0]
-                                st.markdown("#### 🥇 Best CALL Option Details")
-                                
-                                col1, col2, col3, col4 = st.columns(4)
-                                
-                                with col1:
-                                    st.metric("Best Strike", f"${best_call['Strike']:.0f}")
-                                    st.metric("Expiration", best_call['Expiration'])
-                                    st.metric("Days to Exp", f"{best_call['Days to Exp']}")
-                                
-                                with col2:
-                                    st.metric("Option Price", f"${best_call['Option Price']:.2f}")
-                                    st.metric("Contracts", f"{best_call['Contracts']:.2f}")
-                                    st.metric("Final Capital", f"${best_call['Final Capital ($)']:,.0f}")
-                                
-                                with col3:
-                                    st.metric("CAGR", f"{best_call['CAGR (%)']:.2f}%")
-                                    st.metric("CPGR", f"{best_call['CPGR (%)']:.2f}%")
-                                    st.metric("MWRR", f"{best_call['MWRR (%)']:.2f}%")
-                                
-                                with col4:
-                                    st.metric("Avg Return", f"{best_call['Average Return (%)']:.2f}%")
-                                    st.metric("Positive Periods", f"{best_call['Positive Periods']}/{best_call['Total Periods']}")
-                                    st.metric("Success Rate", f"{best_call['% Positive Periods']:.1f}%")
-                                
-                                # Save to persistent storage - SAME AS HISTORICAL BACKTEST
-                                result_key = f"All-CALLs_{ticker_symbol}_All-CALLs_{all_options_options_pct}%_{min_days_filter}d"
-                                st.session_state.all_backtest_results[result_key] = {
-                                    'params': {
-                                        'ticker_symbol': ticker_symbol,
-                                        'selected_exp': 'All-CALLs',
-                                        'days_to_exp': min_days_filter,
-                                        'options_pct': all_options_options_pct,
-                                        'total_capital': all_options_initial_capital,
-                                        'bond_return_rate': all_options_bond_return,
-                                        'added_per_period': all_options_added_per_period,
-                                        'option_type': 'CALL'
-                                    },
-                                    'summary_df': results_df_all_calls,
-                                    'periods_df': None,
-                                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                }
-                                
-                                # Also save in the old format for compatibility
-                                st.session_state.all_calls_results = {
-                                    'results_df': results_df_all_calls,
-                                    'parameters': {
-                                        'ticker_symbol': ticker_symbol,
-                                        'expiration': 'All-CALLs',
-                                        'option_type': 'CALL',
-                                        'initial_capital': all_options_initial_capital,
-                                        'options_pct': all_options_options_pct,
-                                        'bond_return': all_options_bond_return,
-                                        'added_per_period': all_options_added_per_period,
-                                        'days_to_exp': min_days_filter
-                                    }
-                                }
-                                
-                                st.success(f"✅ All CALL options backtest completed! Best CALL: ${best_call['Strike']:.0f} {best_call['Expiration']} with {best_call['CAGR (%)']:.2f}% CAGR")
-                                st.info("💾 **Results saved!** You can find this backtest in the '📊 All Saved Backtest Results' section above.")
-                                
-                            else:
-                                st.error("❌ No valid CALL options found for backtest")
-                                
-                        except Exception as e:
-                            st.error(f"❌ Error running all CALL options backtest: {str(e)}")
-                            st.exception(e)
-                
                 # Strike Optimizer Calculator
+                st.markdown("---")
+                st.markdown("### 🎯 Strike Optimizer Calculator")
                 st.markdown("Find the optimal strike for maximum gains with your specific parameters")
                 
                 col1, col2, col3 = st.columns(3)
