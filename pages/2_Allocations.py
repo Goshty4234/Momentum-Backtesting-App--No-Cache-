@@ -1370,30 +1370,70 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
         if resolved_ticker == "ZEROX":
             return generate_zero_return_data(period)
         if resolved_ticker == "SPYSIM_COMPLETE":
-            return get_spysim_complete_data(period)
+            hist = get_spysim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "GOLDSIM_COMPLETE":
-            return get_goldsim_complete_data(period)
+            hist = get_goldsim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "TBILL_COMPLETE":
-            return get_tbill_complete_data(period)
+            hist = get_tbill_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "IEF_COMPLETE":
-            return get_ief_complete_data(period)
+            hist = get_ief_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "TLT_COMPLETE":
-            return get_tlt_complete_data(period)
+            hist = get_tlt_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "ZROZ_COMPLETE":
-            return get_zroz_complete_data(period)
+            hist = get_zroz_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "BTC_COMPLETE":
-            return get_bitcoin_complete_data(period)
+            hist = get_bitcoin_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "BTC-USD":
             # Fallback: If BTC-USD fails, try BTC_COMPLETE data
             try:
-                return get_bitcoin_complete_data(period)
+                hist = get_bitcoin_complete_data(period)
+                # Apply leverage and/or expense ratio if specified
+                if leverage != 1.0 or expense_ratio != 0.0:
+                    hist = apply_daily_leverage(hist, leverage, expense_ratio)
+                return hist
             except Exception:
                 # Final fallback: use yfinance BTC-USD
                 pass
         if resolved_ticker == "KMLM_COMPLETE":
-            return get_kmlm_complete_data(period)
+            hist = get_kmlm_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "DBMF_COMPLETE":
-            return get_dbmf_complete_data(period)
+            hist = get_dbmf_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Create ticker object with resolved ticker
         ticker_obj = yf.Ticker(resolved_ticker)
@@ -1576,32 +1616,76 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         if resolved_ticker == "ZEROX":
             return generate_zero_return_data(period)
         if resolved_ticker == "SPYSIM_COMPLETE":
-            return get_spysim_complete_data(period)
+            hist = get_spysim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "GOLDSIM_COMPLETE":
-            return get_goldsim_complete_data(period)
+            hist = get_goldsim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "GOLD_COMPLETE":
-            return get_gold_complete_data(period)
+            hist = get_gold_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "ZROZ_COMPLETE":
-            return get_zroz_complete_data(period)
+            hist = get_zroz_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "TLT_COMPLETE":
-            return get_tlt_complete_data(period)
+            hist = get_tlt_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "BTC_COMPLETE":
-            return get_bitcoin_complete_data(period)
+            hist = get_bitcoin_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "BTC-USD":
             # Fallback: If BTC-USD fails, try BTC_COMPLETE data
             try:
-                return get_bitcoin_complete_data(period)
+                hist = get_bitcoin_complete_data(period)
+                # Apply leverage and/or expense ratio if specified
+                if leverage != 1.0 or expense_ratio != 0.0:
+                    hist = apply_daily_leverage(hist, leverage, expense_ratio)
+                return hist
             except Exception:
                 # Final fallback: use yfinance BTC-USD
                 pass
         if resolved_ticker == "KMLM_COMPLETE":
-            return get_kmlm_complete_data(period)
+            hist = get_kmlm_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "IEF_COMPLETE":
-            return get_ief_complete_data(period)
+            hist = get_ief_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "DBMF_COMPLETE":
-            return get_dbmf_complete_data(period)
+            hist = get_dbmf_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         if resolved_ticker == "TBILL_COMPLETE":
-            return get_tbill_complete_data(period)
+            hist = get_tbill_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         ticker = yf.Ticker(resolved_ticker)
         hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
