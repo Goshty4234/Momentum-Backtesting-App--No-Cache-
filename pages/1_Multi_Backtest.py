@@ -1307,43 +1307,83 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=
         
         # Special handling for GOLD_COMPLETE - use our custom gold ticker
         if resolved_ticker == "GOLD_COMPLETE":
-            return get_gold_complete_data(period)
+            hist = get_gold_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for ZROZ_COMPLETE - use our custom ZROZ ticker
         if resolved_ticker == "ZROZ_COMPLETE":
-            return get_zroz_complete_data(period)
+            hist = get_zroz_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for TLT_COMPLETE - use our custom TLT ticker
         if resolved_ticker == "TLT_COMPLETE":
-            return get_tlt_complete_data(period)
+            hist = get_tlt_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for BTC_COMPLETE - use our custom Bitcoin ticker
         if resolved_ticker == "BTC_COMPLETE":
-            return get_bitcoin_complete_data(period)
+            hist = get_bitcoin_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for IEF_COMPLETE - use our custom IEF ticker
         if resolved_ticker == "IEF_COMPLETE":
-            return get_ief_complete_data(period)
+            hist = get_ief_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for KMLM_COMPLETE - use our custom KMLM ticker
         if resolved_ticker == "KMLM_COMPLETE":
-            return get_kmlm_complete_data(period)
+            hist = get_kmlm_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for DBMF_COMPLETE - use our custom DBMF ticker
         if resolved_ticker == "DBMF_COMPLETE":
-            return get_dbmf_complete_data(period)
+            hist = get_dbmf_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for TBILL_COMPLETE - use our custom TBILL ticker
         if resolved_ticker == "TBILL_COMPLETE":
-            return get_tbill_complete_data(period)
+            hist = get_tbill_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for SPYSIM_COMPLETE - use our custom SPYSIM ticker
         if resolved_ticker == "SPYSIM_COMPLETE":
-            return get_spysim_complete_data(period)
+            hist = get_spysim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         # Special handling for GOLDSIM_COMPLETE - use our custom GOLDSIM ticker
         if resolved_ticker == "GOLDSIM_COMPLETE":
-            return get_goldsim_complete_data(period)
+            hist = get_goldsim_complete_data(period)
+            # Apply leverage and/or expense ratio if specified
+            if leverage != 1.0 or expense_ratio != 0.0:
+                hist = apply_daily_leverage(hist, leverage, expense_ratio)
+            return hist
         
         ticker = yf.Ticker(resolved_ticker)
         hist = ticker.history(period=period, auto_adjust=auto_adjust)[["Close", "Dividends"]]
