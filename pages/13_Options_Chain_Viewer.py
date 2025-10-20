@@ -278,7 +278,7 @@ def get_cached_ticker_info(ticker_symbol):
     ticker = yf.Ticker(ticker_symbol)
     try:
         # Single API call to get both price and options data
-        current_price = float(ticker.history(period="1d")['Close'].iloc[-1])
+        current_price = float(ticker.history(period="1d")['Close'].iloc[-1].iloc[0] if hasattr(ticker.history(period="1d")['Close'].iloc[-1], 'iloc') else ticker.history(period="1d")['Close'].iloc[-1])
         expirations = list(ticker.options)  # This is cached by yfinance internally
         fetch_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return current_price, expirations, fetch_timestamp
@@ -365,7 +365,7 @@ def get_cached_vix_data(period="max"):
     yf = get_yfinance()
     vix_ticker = yf.Ticker("^VIX")
     try:
-        vix_current = float(vix_ticker.history(period="1d")['Close'].iloc[-1])
+        vix_current = float(vix_ticker.history(period="1d")['Close'].iloc[-1].iloc[0] if hasattr(vix_ticker.history(period="1d")['Close'].iloc[-1], 'iloc') else vix_ticker.history(period="1d")['Close'].iloc[-1])
         vix_history = vix_ticker.history(period=period)
         # Convert DataFrame to serializable format
         vix_history_dict = {
@@ -2758,7 +2758,7 @@ if ticker_symbol:
                             fig.update_yaxes(title_text="Option Value ($)", row=2, col=1)
                             fig.update_xaxes(title_text="Return (%)", row=2, col=2)
                             fig.update_yaxes(title_text="Count", row=2, col=2)
-                            st.plotly_chart(fig, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
                             
                             # Insights
                             st.markdown("### 🔍 Key Insights")
@@ -2829,7 +2829,7 @@ if ticker_symbol:
                                 height=500,
                                 hovermode='x unified'
                             )
-                            st.plotly_chart(comp, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                            st.plotly_chart(comp, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
                             
                             # Simple ticker vs BARBELL Comparison
                             st.markdown(f"### 📊 {ticker_symbol} vs BARBELL Strategy Comparison")
@@ -2918,7 +2918,7 @@ if ticker_symbol:
                                 height=400
                             )
                             
-                            st.plotly_chart(fig_returns, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                            st.plotly_chart(fig_returns, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
                             
                             # Value Comparison Chart
                             fig_values = go.Figure()
@@ -2954,7 +2954,7 @@ if ticker_symbol:
                                 height=400
                             )
                             
-                            st.plotly_chart(fig_values, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                            st.plotly_chart(fig_values, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
                             
                             # Summary Table
                             st.markdown("### 📊 Performance Summary Table")
@@ -3541,8 +3541,8 @@ if ticker_symbol:
                                 
                                 # Calculate variation from previous day
                                 if i > 0:
-                                    prev_price = float(ticker_data[price_col].iloc[i-1])
-                                    current_price = float(price)
+                                    prev_price = float(ticker_data[price_col].iloc[i-1].iloc[0] if hasattr(ticker_data[price_col].iloc[i-1], 'iloc') else ticker_data[price_col].iloc[i-1])
+                                    current_price = float(price.iloc[0] if hasattr(price, 'iloc') else price)
                                     daily_change = (current_price / prev_price) - 1
                                 else:
                                     daily_change = 0
@@ -3657,7 +3657,7 @@ if ticker_symbol:
                                 current_ticker_price = ticker_data[price_col].iloc[-1]  # Current price (today)
                                 final_ticker_price = current_ticker_price * (1 + ticker_no_div / 100)  # Final price with variation
                                 
-                                option_profit_per_share = max(0, float(final_ticker_price) - barbell_strike)
+                                option_profit_per_share = max(0, float(final_ticker_price.iloc[0] if hasattr(final_ticker_price, 'iloc') else final_ticker_price) - barbell_strike)
                                 option_value_pure = option_profit_per_share * current_contracts_pure * 100
                                 
                                 # Final Portfolio Value (PURE)
@@ -4113,8 +4113,8 @@ if ticker_symbol:
                                 price = ticker_data[price_col].iloc[i]
                                 
                                 if i > 0:
-                                    prev_price = float(ticker_data[price_col].iloc[i-1])
-                                    current_price = float(price)
+                                    prev_price = float(ticker_data[price_col].iloc[i-1].iloc[0] if hasattr(ticker_data[price_col].iloc[i-1], 'iloc') else ticker_data[price_col].iloc[i-1])
+                                    current_price = float(price.iloc[0] if hasattr(price, 'iloc') else price)
                                     daily_change = (current_price / prev_price) - 1
                                 else:
                                     daily_change = 0
@@ -4213,7 +4213,7 @@ if ticker_symbol:
                                         current_ticker_price = ticker_data[price_col].iloc[-1]
                                         final_ticker_price = current_ticker_price * (1 + ticker_no_div / 100)
                                         
-                                        option_profit_per_share = max(0, float(final_ticker_price) - strike) if option_type == "CALL" else max(0, strike - float(final_ticker_price))
+                                        option_profit_per_share = max(0, float(final_ticker_price.iloc[0] if hasattr(final_ticker_price, 'iloc') else final_ticker_price) - strike) if option_type == "CALL" else max(0, strike - float(final_ticker_price.iloc[0] if hasattr(final_ticker_price, 'iloc') else final_ticker_price))
                                         option_value_pure = option_profit_per_share * current_contracts_pure * 100
                                         
                                         # Final Portfolio Value (PURE)
@@ -4432,101 +4432,83 @@ if ticker_symbol:
                                 st.markdown("#### 📊 Complete Multi-Strike Results Table")
                                 st.markdown(f"**All {len(strike_results)} strikes tested - Sort by any column to filter**")
                                 
-                                # Apply comprehensive colors to results - EXACT SAME AS TEST2.PY
-                                def color_comprehensive_results(val, col_name, row_index):
-                                    # Convert string to float if necessary (atomic bomb)
-                                    try:
-                                        if isinstance(val, str):
-                                            # Remove $ and commas for Final Capital
-                                            if col_name == 'Final Capital ($)':
-                                                val = float(val.replace('$', '').replace(',', ''))
-                                            else:
-                                                val = float(val)
-                                    except:
-                                        return ''
+                                # VECTORIZED COLORING - MUCH FASTER FOR LARGE DATASETS
+                                def apply_vectorized_colors(df):
+                                    """Apply colors vectorized for better performance"""
+                                    # Create a copy for styling
+                                    styled_df = df.copy()
                                     
-                                    if isinstance(val, (int, float)):
-                                        if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
-                                            if val > 20:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > 10:
-                                                return 'background-color: #1e8449; color: white; font-weight: bold'
-                                            elif val > 5:
-                                                return 'background-color: #66bb6a; color: white'
-                                            elif val > 0:
-                                                return 'background-color: #ffeb3b; color: black'
-                                            else:
-                                                return 'background-color: #ef5350; color: white'
-                                        elif col_name == 'Final Capital ($)':
-                                            if val > total_capital * 2:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > total_capital * 1.5:
-                                                return 'background-color: #1e8449; color: white'
-                                            elif val > total_capital:
-                                                return 'background-color: #66bb6a; color: white'
-                                            else:
-                                                return 'background-color: #ef5350; color: white'
-                                        elif col_name == '% Positive Periods':
-                                            if val > 70:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > 50:
-                                                return 'background-color: #66bb6a; color: white'
-                                            elif val > 30:
-                                                return 'background-color: #ffeb3b; color: black'
-                                            else:
-                                                return 'background-color: #ef5350; color: white'
-                                        elif col_name in ['Average Return (%)', 'Median Return (%)']:
-                                            if val > 10:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > 5:
-                                                return 'background-color: #1e8449; color: white'
-                                            elif val > 0:
-                                                return 'background-color: #66bb6a; color: white'
-                                            elif val > -5:
-                                                return 'background-color: #ffeb3b; color: black'
-                                            else:
-                                                return 'background-color: #ef5350; color: white'
-                                        elif col_name == 'Best Period (%)':
-                                            if val > 50:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > 20:
-                                                return 'background-color: #1e8449; color: white'
-                                            elif val > 5:
-                                                return 'background-color: #66bb6a; color: white'
-                                            elif val > 0:
-                                                return 'background-color: #ffeb3b; color: black'
-                                            else:
-                                                return 'background-color: #ef5350; color: white'
-                                        elif col_name == 'Worst Period (%)':
-                                            if val > 0:
-                                                return 'background-color: #004d00; color: white; font-weight: bold'
-                                            elif val > -10:
-                                                return 'background-color: #66bb6a; color: white'
-                                            elif val > -20:
-                                                return 'background-color: #ffeb3b; color: black'
-                                            elif val > -50:
-                                                return 'background-color: #ef5350; color: white'
-                                            else:
-                                                return 'background-color: #7b0000; color: white; font-weight: bold'
-                                        elif col_name == 'Distance %':
-                                            if val > 10:
-                                                return 'background-color: #ef5350; color: white'  # Far OTM - red
-                                            elif val > 0:
-                                                return 'background-color: #ffeb3b; color: black'  # OTM - yellow
-                                            elif val > -5:
-                                                return 'background-color: #66bb6a; color: white'  # Near ATM - green
-                                            else:
-                                                return 'background-color: #1e8449; color: white'  # ITM - dark green
-                                        elif col_name in ['Neutral Return %', 'Equal SPY Return %']:
-                                            if val > 20:
-                                                return 'background-color: #ef5350; color: white'  # High requirement - red
-                                            elif val > 10:
-                                                return 'background-color: #ffeb3b; color: black'  # Medium requirement - yellow
-                                            elif val > 0:
-                                                return 'background-color: #66bb6a; color: white'  # Low requirement - green
-                                            else:
-                                                return 'background-color: #1e8449; color: white'  # Very low requirement - dark green
-                                    return ''
+                                    # Define color conditions for each column type
+                                    def get_color_conditions():
+                                        return {
+                                            'CAGR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'CPGR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'MWRR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'Final Capital ($)': lambda x: np.select(
+                                                [x > total_capital * 2, x > total_capital * 1.5, x > total_capital],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            '% Positive Periods': lambda x: np.select(
+                                                [x > 70, x > 50, x > 30],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'Distance %': lambda x: np.select(
+                                                [x > 10, x > 0, x > -5],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            ),
+                                            'Neutral Return %': lambda x: np.select(
+                                                [x > 20, x > 10, x > 0],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            ),
+                                            'Equal SPY Return %': lambda x: np.select(
+                                                [x > 20, x > 10, x > 0],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            )
+                                        }
+                                    
+                                    # Apply colors vectorized
+                                    color_conditions = get_color_conditions()
+                                    for col in df.columns:
+                                        if col in color_conditions:
+                                            styled_df[col] = color_conditions[col](df[col].astype(float))
+                                    
+                                    return styled_df
                                 
                                 # Format the results for better display - EXACT SAME AS TEST2.PY
                                 display_results = results_df_multi.copy()
@@ -4548,16 +4530,98 @@ if ticker_symbol:
                                         if display_results[col].dtype in ['float64', 'int64']:
                                             display_results[col] = display_results[col].apply(lambda x: f"{float(x):.2f}")
                                 
-                                styled_results = display_results.style.apply(
-                                    lambda x: [color_comprehensive_results(val, x.name, i) 
-                                             for i, val in enumerate(x)], 
-                                    axis=0
-                                ).set_table_styles([
+                                # Apply colors using style.apply with vectorized approach
+                                def color_multi_strike_vectorized(df):
+                                    """Vectorized coloring function for Multi-Strike Backtest"""
+                                    # Use original numeric data for comparisons
+                                    numeric_df = results_df_multi.copy()
+                                    
+                                    def color_column(series):
+                                        col_name = series.name
+                                        if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 20:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > 10:
+                                                    colors.append('background-color: #1e8449; color: white; font-weight: bold')
+                                                elif val > 5:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                elif val > 0:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == 'Final Capital ($)':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > total_capital * 2:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > total_capital * 1.5:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                                elif val > total_capital:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == '% Positive Periods':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 70:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > 50:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                elif val > 30:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == 'Distance %':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 10:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                                elif val > 0:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                elif val > -5:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                            return colors
+                                        elif col_name in ['Neutral Return %', 'Equal SPY Return %']:
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 20:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                                elif val > 10:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                elif val > 0:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                            return colors
+                                        else:
+                                            return [''] * len(series)
+                                    
+                                    return df.style.apply(color_column, axis=0)
+                                
+                                # Apply vectorized colors to formatted data
+                                styled_results = color_multi_strike_vectorized(display_results).set_table_styles([
                                     {'selector': 'th', 'props': [('background-color', '#2d3748'), ('color', 'white'), ('font-weight', 'bold')]},
                                     {'selector': 'td', 'props': [('text-align', 'center')]}
                                 ])
                                 
-                                st.dataframe(styled_results, width='stretch', height=450)
+                                st.dataframe(styled_results, width='stretch', height=800)
                                 
                                 # Display best strike details - EXACT SAME AS TEST2.PY
                                 best_strike = results_df_multi.iloc[0]
@@ -4935,7 +4999,7 @@ if ticker_symbol:
                                         final_ticker_price = current_ticker_price * (1 + ticker_no_div / 100)
                                         
                                         # CALL option payoff only
-                                        option_profit_per_share = max(0, float(final_ticker_price) - strike)
+                                        option_profit_per_share = max(0, float(final_ticker_price.iloc[0] if hasattr(final_ticker_price, 'iloc') else final_ticker_price) - strike)
                                         
                                         option_value_pure = option_profit_per_share * current_contracts_pure * 100
                                         
@@ -5124,8 +5188,90 @@ if ticker_symbol:
                                 st.markdown("#### 📊 Complete All CALL Options Results Table")
                                 st.markdown(f"**All {len(all_calls_results)} CALL options tested - Sort by any column to filter**")
                                 
-                                # Apply colors to RAW data before formatting - EXACTLY like multi-strike backtest
-                                def color_all_calls_results(val, col_name, row_index):
+                                # VECTORIZED COLORING FOR MEGA ANALYSIS - MUCH FASTER
+                                def apply_vectorized_colors_all_calls(df):
+                                    """Apply colors vectorized for All CALL Options - optimized for large datasets"""
+                                    # Use the original numeric data for color calculations
+                                    numeric_df = results_df_all_calls.copy()
+                                    
+                                    # Define color conditions for each column type
+                                    def get_color_conditions_all_calls():
+                                        return {
+                                            'CAGR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'CPGR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'MWRR (%)': lambda x: np.select(
+                                                [x > 20, x > 10, x > 5, x > 0],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'Final Capital ($)': lambda x: np.select(
+                                                [x > all_options_initial_capital * 2, x > all_options_initial_capital * 1.5, x > all_options_initial_capital],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #1e8449; color: white',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            '% Positive Periods': lambda x: np.select(
+                                                [x > 70, x > 50, x > 30],
+                                                ['background-color: #004d00; color: white; font-weight: bold',
+                                                 'background-color: #66bb6a; color: white',
+                                                 'background-color: #ffeb3b; color: black'],
+                                                'background-color: #ef5350; color: white'
+                                            ),
+                                            'Distance %': lambda x: np.select(
+                                                [x > 10, x > 0, x > -5],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            ),
+                                            'Neutral Return %': lambda x: np.select(
+                                                [x > 20, x > 10, x > 0],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            ),
+                                            'Equal SPY Return %': lambda x: np.select(
+                                                [x > 20, x > 10, x > 0],
+                                                ['background-color: #ef5350; color: white',
+                                                 'background-color: #ffeb3b; color: black',
+                                                 'background-color: #66bb6a; color: white'],
+                                                'background-color: #1e8449; color: white'
+                                            )
+                                        }
+                                    
+                                    # Apply colors vectorized to numeric data
+                                    color_conditions = get_color_conditions_all_calls()
+                                    styled_df = df.copy()
+                                    
+                                    for col in df.columns:
+                                        if col in color_conditions and col in numeric_df.columns:
+                                            # Apply colors based on numeric values
+                                            colors = color_conditions[col](numeric_df[col].astype(float))
+                                            styled_df[col] = colors
+                                    
+                                    return styled_df
+                                
+                                # OLD SLOW METHOD - REPLACED BY VECTORIZED
+                                def color_all_calls_results_OLD(val, col_name, row_index):
                                     try:
                                         if isinstance(val, (int, float)):
                                             if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
@@ -5219,34 +5365,116 @@ if ticker_symbol:
                                         if display_results_all_calls[col].dtype in ['float64', 'int64']:
                                             display_results_all_calls[col] = display_results_all_calls[col].apply(lambda x: f"{float(x):.2f}%")
                                 
-                                # Apply colors to RAW data first, then format for display
-                                styled_results_all_calls = results_df_all_calls.style.apply(
-                                    lambda x: [color_all_calls_results(val, x.name, i) 
-                                             for i, val in enumerate(x)], 
-                                    axis=0
-                                ).set_table_styles([
+                                # Apply VECTORIZED colors for MEGA ANALYSIS - MUCH FASTER
+                                # First format the data, then apply colors
+                                formatted_results = results_df_all_calls.copy()
+                                
+                                # Format columns BEFORE applying colors
+                                for col in formatted_results.columns:
+                                    if col == 'Strike':
+                                        formatted_results[col] = formatted_results[col].apply(lambda x: f"${int(float(x))}" if float(x) == int(float(x)) else f"${float(x):.2f}")
+                                    elif col in ['Positive Periods', 'Negative Periods', 'Total Periods', 'Days to Exp']:
+                                        formatted_results[col] = formatted_results[col].astype(int)
+                                    elif col in ['Option Price', 'Contracts']:
+                                        if formatted_results[col].dtype in ['float64', 'int64']:
+                                            formatted_results[col] = formatted_results[col].apply(lambda x: f"${float(x):.2f}")
+                                    elif col == 'Final Capital ($)':
+                                        if formatted_results[col].dtype in ['float64', 'int64']:
+                                            formatted_results[col] = formatted_results[col].apply(lambda x: f"${float(x):,.0f}")
+                                    elif col in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)', 'Average Return (%)', 'Median Return (%)', 'Best Period (%)', 'Worst Period (%)', '% Positive Periods', 'Distance %', 'Neutral Return %', 'Equal SPY Return %']:
+                                        if formatted_results[col].dtype in ['float64', 'int64']:
+                                            formatted_results[col] = formatted_results[col].apply(lambda x: f"{float(x):.2f}%")
+                                
+                                # Apply colors using style.apply with vectorized approach
+                                def color_all_calls_vectorized(df):
+                                    """Vectorized coloring function for All CALL Options"""
+                                    # Use original numeric data for comparisons
+                                    numeric_df = results_df_all_calls.copy()
+                                    
+                                    def color_column(series):
+                                        col_name = series.name
+                                        if col_name in ['CAGR (%)', 'CPGR (%)', 'MWRR (%)']:
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 20:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > 10:
+                                                    colors.append('background-color: #1e8449; color: white; font-weight: bold')
+                                                elif val > 5:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                elif val > 0:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == 'Final Capital ($)':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > all_options_initial_capital * 2:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > all_options_initial_capital * 1.5:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                                elif val > all_options_initial_capital:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == '% Positive Periods':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 70:
+                                                    colors.append('background-color: #004d00; color: white; font-weight: bold')
+                                                elif val > 50:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                elif val > 30:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                else:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                            return colors
+                                        elif col_name == 'Distance %':
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 10:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                                elif val > 0:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                elif val > -5:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                            return colors
+                                        elif col_name in ['Neutral Return %', 'Equal SPY Return %']:
+                                            numeric_series = numeric_df[col_name]
+                                            colors = []
+                                            for i in range(len(series)):
+                                                val = numeric_series.iloc[i]
+                                                if val > 20:
+                                                    colors.append('background-color: #ef5350; color: white')
+                                                elif val > 10:
+                                                    colors.append('background-color: #ffeb3b; color: black')
+                                                elif val > 0:
+                                                    colors.append('background-color: #66bb6a; color: white')
+                                                else:
+                                                    colors.append('background-color: #1e8449; color: white')
+                                            return colors
+                                        else:
+                                            return [''] * len(series)
+                                    
+                                    return df.style.apply(color_column, axis=0)
+                                
+                                # Apply vectorized colors to formatted data
+                                styled_results_all_calls = color_all_calls_vectorized(formatted_results).set_table_styles([
                                     {'selector': 'th', 'props': [('background-color', '#2d3748'), ('color', 'white'), ('font-weight', 'bold')]},
                                     {'selector': 'td', 'props': [('text-align', 'center')]}
                                 ])
-                                
-                                # Format the styled results for display
-                                styled_results_all_calls = styled_results_all_calls.format({
-                                    'Strike': '${:.0f}',
-                                    'Option Price': '${:.2f}',
-                                    'Contracts': '{:.2f}',
-                                    'Final Capital ($)': '${:,.0f}',
-                                    'CAGR (%)': '{:.2f}%',
-                                    'CPGR (%)': '{:.2f}%',
-                                    'MWRR (%)': '{:.2f}%',
-                                    'Distance %': '{:.2f}%',
-                                    'Neutral Return %': '{:.2f}%',
-                                    'Equal SPY Return %': '{:.2f}%',
-                                    'Average Return (%)': '{:.2f}%',
-                                    'Median Return (%)': '{:.2f}%',
-                                    'Best Period (%)': '{:.2f}%',
-                                    'Worst Period (%)': '{:.2f}%',
-                                    '% Positive Periods': '{:.2f}%'
-                                })
                                 
                                 st.dataframe(styled_results_all_calls, width='stretch', height=600)
                                 
