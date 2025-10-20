@@ -107,7 +107,7 @@ def clean_dataframe_for_arrow(df):
 
 # Utility function to calculate MID price (Bid + Ask) / 2, fallback to Last
 def calculate_mid_price(bid, ask, last_price):
-    """Calculate MID price from bid/ask, fallback to last price - SIMPLIFIED VERSION"""
+    """Calculate MID price from bid/ask, fallback to last price - WITH PRICE ADJUSTMENT"""
     try:
         # Convert to float and handle None/NaN
         bid_val = float(bid) if bid is not None and pd.notna(bid) else None
@@ -117,14 +117,18 @@ def calculate_mid_price(bid, ask, last_price):
         # Try bid/ask first
         if bid_val is not None and ask_val is not None and bid_val > 0 and ask_val > 0:
             mid_price = (bid_val + ask_val) / 2
-            return mid_price
-        
         # Fallback to last price
-        if last_val is not None and last_val > 0:
-            return last_val
-            
-        # If nothing works, return None
-        return None
+        elif last_val is not None and last_val > 0:
+            mid_price = last_val
+        else:
+            return None
+        
+        # Apply price adjustment if active
+        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
+            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
+            mid_price = mid_price * (1 + adjustment_factor)
+        
+        return mid_price
         
     except (ValueError, TypeError):
         return None
@@ -3402,13 +3406,26 @@ if ticker_symbol:
                 
                 # Run backtest button
                 # Add multi-strike backtest option
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns([2, 2, 1])
                 
                 with col1:
                     run_single_backtest = st.button("🚀 Run Historical Backtest", key="run_backtest")
                 
                 with col2:
                     run_multi_strike_backtest = st.button("🎯 Run Multi-Strike Backtest", key="run_multi_strike_backtest", type="primary")
+                
+                with col3:
+                    # Mid price only checkbox for multi-strike backtest
+                    if 'multi_strike_mid_price_only' not in st.session_state:
+                        st.session_state.multi_strike_mid_price_only = False
+                    
+                    multi_strike_mid_price_only = st.checkbox(
+                        "🎯 Mid Price Only", 
+                        value=st.session_state.multi_strike_mid_price_only,
+                        help="Use only bid/ask prices (exclude stale last prices)",
+                        key="multi_strike_mid_price_only_checkbox"
+                    )
+                    st.session_state.multi_strike_mid_price_only = multi_strike_mid_price_only
                 
                 if run_single_backtest:
                     with st.spinner("Fetching historical data and running backtest..."):
@@ -4086,9 +4103,22 @@ if ticker_symbol:
                             
                             for strike in available_strikes:
                                 try:
-                                    # Get option price for this strike - USE calculate_mid_price TO APPLY ADJUSTMENT
+                                    # Get option price for this strike
                                     opt = filtered_opts[filtered_opts['strike'] == strike].iloc[0]
-                                    opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
+                                    
+                                    # Apply mid price only filter if enabled
+                                    if multi_strike_mid_price_only:
+                                        # Only use strikes with valid bid AND ask prices
+                                        if not opt['bid'] or not opt['ask'] or opt['bid'] <= 0 or opt['ask'] <= 0:
+                                            continue
+                                        opt_price = (opt['bid'] + opt['ask']) / 2
+                                        # Apply price adjustment if active
+                                        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
+                                            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
+                                            opt_price = opt_price * (1 + adjustment_factor)
+                                    else:
+                                        # Use normal mid price calculation (with last price fallback and adjustment)
+                                        opt_price = calculate_mid_price(opt['bid'], opt['ask'], opt['lastPrice'])
                                     
                                     if not opt_price or opt_price <= 0:
                                         continue
@@ -4288,6 +4318,10 @@ if ticker_symbol:
                                 st.markdown("### 🎯 Multi-Strike Backtest Results")
                                 st.markdown(f"**Tested {len(strike_results)} {option_type} strikes for expiration {selected_exp}**")
                                 
+                                # Show mid price filter status
+                                if multi_strike_mid_price_only:
+                                    st.info(f"🎯 **Mid Price Only Filter**: Only strikes with valid bid/ask prices were tested (excluded {len(available_strikes) - len(strike_results)} strikes without mid price)")
+                                
                                 # Show price adjustment status
                                 if ('barbell_price_adjustment' in st.session_state and 
                                     st.session_state.barbell_price_adjustment != 0):
@@ -4468,7 +4502,10 @@ if ticker_symbol:
                                 st.success(f"✅ Multi-strike backtest completed! Best strike: ${best_strike['Strike']:.0f} with {best_strike['CAGR (%)']:.2f}% CAGR")
                                 
                             else:
-                                st.error("❌ No valid results generated")
+                                if multi_strike_mid_price_only:
+                                    st.error("❌ No valid results generated - No strikes found with valid bid/ask prices. Try unchecking 'Mid Price Only' to include strikes with last price fallback.")
+                                else:
+                                    st.error("❌ No valid results generated")
                         
                         except Exception as e:
                             st.error(f"❌ Error running multi-strike backtest: {str(e)}")
@@ -4562,6 +4599,18 @@ if ticker_symbol:
                         key="all_options_min_days_slider"
                     )
                     st.session_state.all_options_min_days = min_days_filter
+                    
+                    # Mid price only checkbox
+                    if 'all_options_mid_price_only' not in st.session_state:
+                        st.session_state.all_options_mid_price_only = False
+                    
+                    all_options_mid_price_only = st.checkbox(
+                        "🎯 Use ONLY Call Mid Price (Bid/Ask)", 
+                        value=st.session_state.all_options_mid_price_only,
+                        help="Exclude options that don't have valid bid/ask prices (avoid stale last prices)",
+                        key="all_options_mid_price_only_checkbox"
+                    )
+                    st.session_state.all_options_mid_price_only = all_options_mid_price_only
                 
                 run_all_options_backtest = st.button("🌐 Run All CALL Options Backtest", key="run_all_options_backtest", type="primary")
                 
@@ -4595,7 +4644,10 @@ if ticker_symbol:
                                         continue
                             
                             if not all_calls_data:
-                                st.error(f"❌ No CALL options found with at least {min_days_filter} days to expiration")
+                                if all_options_mid_price_only:
+                                    st.error(f"❌ No CALL options found with valid bid/ask prices and at least {min_days_filter} days to expiration. Try unchecking 'Use ONLY Call Mid Price' to include options with last price fallback.")
+                                else:
+                                    st.error(f"❌ No CALL options found with at least {min_days_filter} days to expiration")
                                 st.stop()
                             
                             st.info(f"🌐 **Testing {len(all_calls_data)} CALL options (min {min_days_filter} days to expiration)**")
@@ -4603,18 +4655,55 @@ if ticker_symbol:
                             
                             valid_prices_count = 0
                             invalid_prices_count = 0
+                            filtered_calls_data = []
+                            
                             for call_data in all_calls_data:
                                 bid = call_data.get('bid')
                                 ask = call_data.get('ask') 
                                 last_price = call_data.get('lastPrice')
                                 
-                                opt_price = calculate_mid_price(bid, ask, last_price)
-                                if opt_price and opt_price > 0:
-                                    valid_prices_count += 1
+                                # Check if we should use only mid prices
+                                if all_options_mid_price_only:
+                                    # Only include options with valid bid AND ask prices
+                                    if bid and ask and bid > 0 and ask > 0:
+                                        opt_price = (bid + ask) / 2
+                                        # Apply price adjustment if active
+                                        if 'barbell_price_adjustment' in st.session_state and st.session_state.barbell_price_adjustment != 0:
+                                            adjustment_factor = st.session_state.barbell_price_adjustment / 100.0
+                                            opt_price = opt_price * (1 + adjustment_factor)
+                                        if opt_price > 0:
+                                            call_data['calculated_price'] = opt_price
+                                            filtered_calls_data.append(call_data)
+                                            valid_prices_count += 1
+                                        else:
+                                            invalid_prices_count += 1
+                                    else:
+                                        invalid_prices_count += 1
                                 else:
-                                    invalid_prices_count += 1
+                                    # Use the normal mid price calculation (with last price fallback and adjustment)
+                                    opt_price = calculate_mid_price(bid, ask, last_price)
+                                    if opt_price and opt_price > 0:
+                                        call_data['calculated_price'] = opt_price
+                                        filtered_calls_data.append(call_data)
+                                        valid_prices_count += 1
+                                    else:
+                                        invalid_prices_count += 1
                             
-                            st.info(f"📊 **Price Analysis: {valid_prices_count} valid prices, {invalid_prices_count} invalid prices**")
+                            # Update all_calls_data with filtered data
+                            all_calls_data = filtered_calls_data
+                            
+                            # Check if any options remain after filtering
+                            if not all_calls_data:
+                                if all_options_mid_price_only:
+                                    st.error("❌ No CALL options remain after mid price filtering. Try unchecking 'Use ONLY Call Mid Price' to include options with last price fallback.")
+                                else:
+                                    st.error("❌ No CALL options remain after price validation.")
+                                st.stop()
+                            
+                            if all_options_mid_price_only:
+                                st.info(f"🎯 **Mid Price Only Filter: {valid_prices_count} options with valid bid/ask, {invalid_prices_count} excluded (no mid price)**")
+                            else:
+                                st.info(f"📊 **Price Analysis: {valid_prices_count} valid prices, {invalid_prices_count} invalid prices**")
                             
                             # Get historical data (same as multi-strike backtest)
                             global_cache_key = f"historical_data_{ticker_symbol}"
@@ -4681,8 +4770,8 @@ if ticker_symbol:
                                     expiration = call_data['expiration']
                                     days_to_exp = call_data['days_to_exp']
                                     
-                                    # Calculate option price
-                                    opt_price = calculate_mid_price(call_data['bid'], call_data['ask'], call_data['lastPrice'])
+                                    # Use the pre-calculated price from filtering
+                                    opt_price = call_data.get('calculated_price')
                                     
                                     if not opt_price or opt_price <= 0:
                                         skipped_count += 1
