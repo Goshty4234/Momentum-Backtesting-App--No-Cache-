@@ -2002,14 +2002,14 @@ def generate_simple_pdf_report(custom_name=""):
             story.append(config_table)
             story.append(PageBreak())
             # Show ticker allocations table, but hide Allocation % column if momentum is enabled
-            if not active_portfolio.get('use_momentum', True):
+            if not config.get('use_momentum', True):
                 story.append(Paragraph("Initial Ticker Allocations (Entered by User):", styles['Heading3']))
                 story.append(Paragraph("Note: These are the initial allocations entered by the user, not rebalanced allocations.", styles['Normal']))
                 
                 # Create full table with conditional columns for non-momentum strategies
-                if active_portfolio.get('use_sma_filter', False):
+                if config.get('use_sma_filter', False):
                     stocks_data = [['Ticker', 'Allocation\n%', 'Include\nDividends', 'Include in\nMA Filter', 'MA Reference\nTicker']]
-                    for stock in active_portfolio['stocks']:
+                    for stock in config['stocks']:
                         include_ma = "✓" if stock.get('include_in_sma_filter', True) else "✗"
                         ma_ref = stock.get('ma_reference_ticker', '')
                         ma_ref_str = ma_ref if ma_ref else stock['ticker']  # Use own ticker if no custom reference
@@ -2022,7 +2022,7 @@ def generate_simple_pdf_report(custom_name=""):
                         ])
                 else:
                     stocks_data = [['Ticker', 'Allocation\n%', 'Include\nDividends']]
-                    for stock in active_portfolio['stocks']:
+                    for stock in config['stocks']:
                         stocks_data.append([
                             stock['ticker'],
                             f"{stock['allocation']*100:.1f}%",
@@ -2030,7 +2030,7 @@ def generate_simple_pdf_report(custom_name=""):
                         ])
                 
                 # Adjust column widths based on number of columns
-                if active_portfolio.get('use_sma_filter', False):
+                if config.get('use_sma_filter', False):
                     stocks_table = Table(stocks_data, colWidths=[1.2*inch, 1.0*inch, 1.2*inch, 1.2*inch, 1.2*inch])
                 else:
                     stocks_table = Table(stocks_data, colWidths=[2.0*inch, 1.5*inch, 2.0*inch])
@@ -2055,9 +2055,9 @@ def generate_simple_pdf_report(custom_name=""):
                 story.append(Paragraph("Note: Momentum strategy is enabled - ticker allocations are calculated dynamically based on momentum scores.", styles['Normal']))
                 
                 # Create modified table with conditional columns for momentum strategies
-                if active_portfolio.get('use_sma_filter', False):
+                if config.get('use_sma_filter', False):
                     stocks_data_momentum = [['Ticker', 'Include\nDividends', 'Max Allocation\n%', 'Include in\nMA Filter', 'MA Reference\nTicker']]
-                    for stock in active_portfolio['stocks']:
+                    for stock in config['stocks']:
                         max_alloc = stock.get('max_allocation_percent')
                         max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
                         include_ma = "✓" if stock.get('include_in_sma_filter', True) else "✗"
@@ -2072,7 +2072,7 @@ def generate_simple_pdf_report(custom_name=""):
                         ])
                 else:
                     stocks_data_momentum = [['Ticker', 'Include\nDividends', 'Max Allocation\n%']]
-                    for stock in active_portfolio['stocks']:
+                    for stock in config['stocks']:
                         max_alloc = stock.get('max_allocation_percent')
                         max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
                         stocks_data_momentum.append([
@@ -2082,7 +2082,7 @@ def generate_simple_pdf_report(custom_name=""):
                         ])
                 
                 # Adjust column widths based on number of columns for momentum table
-                if active_portfolio.get('use_sma_filter', False):
+                if config.get('use_sma_filter', False):
                     stocks_table_momentum = Table(stocks_data_momentum, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
                 else:
                     stocks_table_momentum = Table(stocks_data_momentum, colWidths=[2.0*inch, 2.0*inch, 2.0*inch])
