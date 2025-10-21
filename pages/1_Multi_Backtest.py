@@ -4998,10 +4998,15 @@ def single_backtest(config, sim_index, reindexed_data):
             
             returns_array = np.array(list(returns.values()))
             
-            percentile_scores = {}
-            for ticker, return_val in returns.items():
-                percentile = (np.sum(returns_array <= return_val) - 1) / (len(returns_array) - 1)
-                base_score = percentile ** 2
+            # NZS: Use relative ranking like Relative Momentum but with compression
+            min_score = min(returns.values())
+            offset = -min_score + 0.01 if min_score < 0 else 0.01
+            shifted = {t: max(0.01, returns[t] + offset) for t in returns.keys()}
+            
+            # Apply NZS compression to the shifted scores
+            compressed_scores = {}
+            for ticker, shifted_val in shifted.items():
+                return_val = returns[ticker]
                 
                 # Zone neutre : allocations similaires pour rendements proches de 0
                 if abs(return_val) <= neutral_zone:
@@ -5017,11 +5022,11 @@ def single_backtest(config, sim_index, reindexed_data):
                         # Positif au-delà de la zone neutre
                         compression_factor = 1.0
                 
-                percentile_scores[ticker] = base_score * compression_factor
+                compressed_scores[ticker] = shifted_val * compression_factor
             
-            # Normaliser
-            sum_scores = sum(percentile_scores.values())
-            weights = {t: percentile_scores[t] / sum_scores for t in percentile_scores}
+            # Normalize
+            sum_scores = sum(compressed_scores.values())
+            weights = {t: compressed_scores[t] / sum_scores for t in compressed_scores}
             
             return weights
 
@@ -6373,10 +6378,15 @@ def single_backtest_year_aware(config, sim_index, reindexed_data):
             
             returns_array = np.array(list(returns.values()))
             
-            percentile_scores = {}
-            for ticker, return_val in returns.items():
-                percentile = (np.sum(returns_array <= return_val) - 1) / (len(returns_array) - 1)
-                base_score = percentile ** 2
+            # NZS: Use relative ranking like Relative Momentum but with compression
+            min_score = min(returns.values())
+            offset = -min_score + 0.01 if min_score < 0 else 0.01
+            shifted = {t: max(0.01, returns[t] + offset) for t in returns.keys()}
+            
+            # Apply NZS compression to the shifted scores
+            compressed_scores = {}
+            for ticker, shifted_val in shifted.items():
+                return_val = returns[ticker]
                 
                 # Zone neutre : allocations similaires pour rendements proches de 0
                 if abs(return_val) <= neutral_zone:
@@ -6392,11 +6402,11 @@ def single_backtest_year_aware(config, sim_index, reindexed_data):
                         # Positif au-delà de la zone neutre
                         compression_factor = 1.0
                 
-                percentile_scores[ticker] = base_score * compression_factor
+                compressed_scores[ticker] = shifted_val * compression_factor
             
-            # Normaliser
-            sum_scores = sum(percentile_scores.values())
-            weights = {t: percentile_scores[t] / sum_scores for t in percentile_scores}
+            # Normalize
+            sum_scores = sum(compressed_scores.values())
+            weights = {t: compressed_scores[t] / sum_scores for t in compressed_scores}
             
             return weights
 
