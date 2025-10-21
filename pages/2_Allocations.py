@@ -4779,14 +4779,36 @@ def single_backtest(config, sim_index, reindexed_data):
                     # NOUVELLE LOGIQUE Near-Zero Symmetry
                     weights = calculate_near_zero_symmetric_momentum(rets)
             else:
-                positive_scores = {t: s for t, s in rets.items() if s > 0}
-                if positive_scores:
-                    sum_positive = sum(positive_scores.values())
-                    weights = {t: positive_scores[t] / sum_positive for t in positive_scores}
-                    for t in [t for t in rets_keys if rets.get(t, 0) <= 0]:
-                        weights[t] = 0
+                # Check user's selection for momentum strategy
+                if momentum_strategy == 'Classic':
+                    positive_scores = {t: s for t, s in rets.items() if s > 0}
+                    if positive_scores:
+                        sum_positive = sum(positive_scores.values())
+                        weights = {t: positive_scores[t] / sum_positive for t in positive_scores}
+                        for t in [t for t in rets_keys if rets.get(t, 0) <= 0]:
+                            weights[t] = 0
+                    else:
+                        weights = {t: 0 for t in rets_keys}
+                elif momentum_strategy == 'Relative Momentum':
+                    # ANCIENNE LOGIQUE Relative Momentum
+                    min_score = min(rets.values())
+                    offset = -min_score + 0.01 if min_score < 0 else 0.01
+                    shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
+                    ssum = sum(shifted.values())
+                    weights = {t: shifted[t] / ssum for t in shifted}
+                elif momentum_strategy == 'Near-Zero Symmetry':
+                    # NOUVELLE LOGIQUE Near-Zero Symmetry
+                    weights = calculate_near_zero_symmetric_momentum(rets)
                 else:
-                    weights = {t: 0 for t in rets_keys}
+                    # Fallback to Classic if unknown strategy
+                    positive_scores = {t: s for t, s in rets.items() if s > 0}
+                    if positive_scores:
+                        sum_positive = sum(positive_scores.values())
+                        weights = {t: positive_scores[t] / sum_positive for t in positive_scores}
+                        for t in [t for t in rets_keys if rets.get(t, 0) <= 0]:
+                            weights[t] = 0
+                    else:
+                        weights = {t: 0 for t in rets_keys}
 
         # Apply post-filtering using inverse volatility and inverse absolute beta (like app.py)
         fallback_mode = all_negative and negative_momentum_strategy == 'Equal weight'
