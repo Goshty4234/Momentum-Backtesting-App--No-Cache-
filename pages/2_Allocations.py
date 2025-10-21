@@ -368,7 +368,7 @@ def get_custom_sector_for_ticker(ticker):
         'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
         'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
         '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
-        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'UGL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
         'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
         'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
         'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
@@ -381,10 +381,14 @@ def get_custom_sector_for_ticker(ticker):
         'CASH', 'SGOV', 'USFR', 'ZEROX'
     }
     
+    # Special case: UGL is always leveraged (2x gold ETF)
+    if base_ticker == 'UGL':
+        return 'LEVERAGED PRECIOUS METALS'
+    
     # If ticker has leverage parameter AND is in our index/ETF list, return appropriate leveraged sector
     if has_leverage and base_ticker in index_etf_tickers:
         # Check for gold/precious metals tickers
-        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF', 'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'UGL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF', 'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM']:
             return 'LEVERAGED PRECIOUS METALS'
         
         # Check for treasury/bond tickers
@@ -570,6 +574,7 @@ def get_custom_sector_for_ticker(ticker):
         'IAUM': 'GOLD',
         'GLDM': 'GOLD',
         'SGOL': 'GOLD',
+        'UGL': 'GOLD',
         'GOLD_COMPLETE': 'GOLD',
         'GOLDSIM_COMPLETE': 'GOLD',
         'GC=F': 'GOLD',
@@ -716,7 +721,7 @@ def get_custom_industry_for_ticker(ticker):
         'TLT', 'IEF', 'SHY', 'BIL', 'ZROZ', 'TLH', 'IEI', 'SHV', 'VGSH', 'VGIT', 'VGLT', 'GOVT', 'SPTL', 'SPTS', 'SPTI',
         'TLTTR', 'TLT_COMPLETE', 'ZROZX', 'ZROZ_COMPLETE', 'IEFTR', 'IEF_COMPLETE', 'TBILL', 'TBILL_COMPLETE',
         '^TNX', '^TYX', '^FVX', '^IRX', 'AGG', 'BND', 'BNDX', 'LQD', 'HYG', 'JNK', 'MUB', 'TIP', 'VTIP',
-        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
+        'GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'UGL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF',
         'GDX', 'GDXJ', 'SLV', 'SI=F', 'SILVER', 'PPLT', 'PL=F', 'PLATINUM', 'PALL', 'PA=F', 'PALLADIUM',
         'USO', 'CL=F', 'OIL', 'UNG', 'NG=F', 'NATGAS', 'DBA', 'ZC=F', 'CORN', 'ZS=F', 'SOYBEAN', 'KC=F', 'COFFEE', 'SB=F', 'SUGAR', 'CT=F', 'COTTON',
         'DBC', 'GSG', 'PDBC', 'BCI', 'HG=F', 'COPPER', 'KMLM', 'DBMF', 'KMLMX', 'KMLM_COMPLETE', 'DBMFX', 'DBMF_COMPLETE',
@@ -729,6 +734,10 @@ def get_custom_industry_for_ticker(ticker):
         'CASH', 'SGOV', 'USFR', 'ZEROX'
     }
     
+    # Special case: UGL is always leveraged (2x gold ETF)
+    if base_ticker == 'UGL':
+        return 'LEVERAGED GOLD'
+    
     # If ticker has leverage parameter AND is in our index/ETF list, determine industry
     if has_leverage and base_ticker in index_etf_tickers:
         # Check for specific semiconductor tickers (SMH, SOXX)
@@ -736,7 +745,7 @@ def get_custom_industry_for_ticker(ticker):
             return 'LEVERAGED SEMICONDUCTORS'
         
         # Check for gold/precious metals tickers
-        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF']:
+        if base_ticker in ['GLD', 'GOLDX', 'GOLDSIM', 'IAU', 'IAUM', 'GLDM', 'SGOL', 'UGL', 'GOLD_COMPLETE', 'GOLDSIM_COMPLETE', 'GC=F', 'GOLDF']:
             return 'LEVERAGED GOLD'
         if base_ticker in ['GDX', 'GDXJ']:
             return 'LEVERAGED GOLD MINERS'
@@ -953,6 +962,7 @@ def get_custom_industry_for_ticker(ticker):
         'IAUM': 'PRECIOUS METALS',
         'GLDM': 'PRECIOUS METALS',
         'SGOL': 'PRECIOUS METALS',
+        'UGL': 'PRECIOUS METALS',
         'GOLD_COMPLETE': 'PRECIOUS METALS',
         'GOLDSIM_COMPLETE': 'PRECIOUS METALS',
         'GC=F': 'GOLD FUTURES',
@@ -10165,36 +10175,51 @@ if st.session_state.get('alloc_backtest_run', False):
                 # This ensures assets that trade 7 days/week (e.g., BITCOIN) are correct
                 periods = {
                     '1W': 7,      # 7 calendar days
-                    '1M': 30,     # ~30 calendar days per month
+                    '1M': 30,     # 30 calendar days per month (more representative)
                     '3M': 90,     # ~90 calendar days per quarter
                     '6M': 180,    # ~180 calendar days per half year
                     '1Y': 365     # ~365 calendar days per year
                 }
                 
                 def _get_value_days_ago(series, days):
-                    """Return value at or before last_date - days from a datetime-indexed Series."""
+                    """Return value exactly days ago with forward fill for weekends/holidays."""
                     if series is None or len(series) == 0:
                         return None
                     last_date = pd.to_datetime(series.index[-1])
                     target_date = last_date - pd.Timedelta(days=days)
                     # Ensure datetime index
                     series.index = pd.to_datetime(series.index)
-                    prior = series.loc[:target_date]
-                    if len(prior) == 0:
-                        return series.iloc[0]
-                    return prior.iloc[-1]
+                    
+                    # Forward fill to handle weekends/holidays - create complete daily series
+                    date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
+                    series_filled = series.reindex(date_range).fillna(method='ffill')
+                    
+                    # Now get exact date (should exist after ffill)
+                    if target_date in series_filled.index:
+                        return series_filled.loc[target_date]
+                    else:
+                        # Fallback if target_date is before series start
+                        return series_filled.iloc[0]
 
                 def get_value_days_ago(series, days):
-                    """Return the series value at or before (last_date - days)."""
+                    """Return the series value exactly days ago with forward fill for weekends/holidays."""
                     if series is None or len(series) == 0:
                         return None
                     last_date = series.index[-1]
                     target_date = last_date - pd.Timedelta(days=days)
-                    # Slice up to target_date, pick last available
-                    prior = series.loc[:target_date]
-                    if len(prior) == 0:
-                        # Not enough history; return first value
-                        return series.iloc[0]
+                    # Ensure datetime index
+                    series.index = pd.to_datetime(series.index)
+                    
+                    # Forward fill to handle weekends/holidays - create complete daily series
+                    date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
+                    series_filled = series.reindex(date_range).fillna(method='ffill')
+                    
+                    # Now get exact date (should exist after ffill)
+                    if target_date in series_filled.index:
+                        return series_filled.loc[target_date]
+                    else:
+                        # Fallback if target_date is before series start
+                        return series_filled.iloc[0]
                     return prior.iloc[-1]
                 
                 
@@ -10323,7 +10348,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     traceback.print_exc()
                     pass
                 
-                # Calculate Volatility and Beta for historical portfolio (last 252 trading days / ~1 year)
+                # Calculate Volatility and Beta for historical portfolio (last 365 calendar days / ~1 year)
                 portfolio_volatility = 'N/A'
                 portfolio_beta = 'N/A'
                 try:
@@ -10332,11 +10357,14 @@ if st.session_state.get('alloc_backtest_run', False):
                         portfolio_result = all_results[active_name]
                         if 'no_additions' in portfolio_result:
                             portfolio_values = portfolio_result['no_additions']
-                            if len(portfolio_values) >= 252:
-                                # Use only last 252 trading days
-                                portfolio_values_1y = portfolio_values.iloc[-252:]
+                            if len(portfolio_values) >= 60:  # Allow flexibility for weekends/holidays
+                                # Use last 365 calendar days (same as performance calculations)
+                                pv = portfolio_values.copy()
+                                pv.index = pd.to_datetime(pv.index)
+                                start_date = pv.index[-1] - pd.Timedelta(days=365)
+                                portfolio_values_1y = pv.loc[start_date:]
                                 portfolio_returns = portfolio_values_1y.pct_change().dropna()
-                                volatility = portfolio_returns.std() * np.sqrt(252) * 100
+                                volatility = portfolio_returns.std() * np.sqrt(365) * 100
                                 portfolio_volatility = f"{volatility:.2f}%"
                                 
                                 # Simple Beta calculation - use pandas correlation and volatility ratio
@@ -10416,7 +10444,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     except Exception:
                         current_returns[period_name] = 'N/A'
                 
-                # Calculate Volatility and Beta for current portfolio (last 252 trading days / ~1 year)
+                # Calculate Volatility and Beta for current portfolio (last 365 calendar days / ~1 year)
                 current_volatility = 'N/A'
                 current_beta = 'N/A'
                 try:
@@ -10430,11 +10458,16 @@ if st.session_state.get('alloc_backtest_run', False):
                             
                         if ticker in raw_data and not raw_data[ticker].empty:
                             df = raw_data[ticker].copy()
-                            if 'Close' in df.columns and len(df) >= 252:
-                                # Use only last 252 trading days
-                                ticker_returns = df['Close'].iloc[-252:].pct_change().dropna()
-                                if len(ticker_returns) >= 200:  # Allow some flexibility
-                                    ticker_vol = ticker_returns.std() * np.sqrt(252) * 100
+                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
+                                # Use last 365 calendar days (same as performance calculations)
+                                df_local = df.copy()
+                                df_local.index = pd.to_datetime(df_local.index)
+                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
+                                ticker_window = df_local['Close'].loc[start_date:]
+                                ticker_returns = ticker_window.pct_change().dropna()
+                                if len(ticker_returns) >= 60:  # Allow some flexibility
+                                    # Annualize using 365 for consistency
+                                    ticker_vol = ticker_returns.std() * np.sqrt(365) * 100
                                     weighted_volatility += ticker_vol * weight
                                     
                                     # Simple Beta calculation for this ticker
@@ -10629,23 +10662,31 @@ if st.session_state.get('alloc_backtest_run', False):
                 # Calculate different period returns using calendar-day lookbacks
                 periods = {
                     '1W': 7,      # 7 calendar days
-                    '1M': 30,     # ~30 calendar days per month
+                    '1M': 30,     # 30 calendar days per month (more representative)
                     '3M': 90,     # ~90 calendar days per quarter
                     '6M': 180,    # ~180 calendar days per half year
                     '1Y': 365     # ~365 calendar days per year
                 }
 
                 def get_value_days_ago(series, days):
-                    """Return the value at or before last_date - days from a datetime-indexed Series/DataFrame column."""
+                    """Return the value exactly days ago with forward fill for weekends/holidays."""
                     if series is None or len(series) == 0:
                         return None
                     last_date = pd.to_datetime(series.index[-1])
                     target_date = last_date - pd.Timedelta(days=days)
                     # Ensure datetime index
-                    idx = pd.to_datetime(series.index)
-                    series.index = idx
-                    prior = series.loc[:target_date]
-                    if len(prior) == 0:
+                    series.index = pd.to_datetime(series.index)
+                    
+                    # Forward fill to handle weekends/holidays - create complete daily series
+                    date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
+                    series_filled = series.reindex(date_range).fillna(method='ffill')
+                    
+                    # Now get exact date (should exist after ffill)
+                    if target_date in series_filled.index:
+                        return series_filled.loc[target_date]
+                    else:
+                        # Fallback if target_date is before series start
+                        return series_filled.iloc[0]
                         return series.iloc[0]
                     return prior.iloc[-1]
 
@@ -10799,15 +10840,15 @@ if st.session_state.get('alloc_backtest_run', False):
                         portfolio_result = all_results[active_name]
                         if 'no_additions' in portfolio_result:
                             portfolio_values = portfolio_result['no_additions']
-                            if len(portfolio_values) >= 60:
-                                # Use last 365 calendar days for the volatility/beta window
+                            if len(portfolio_values) >= 60:  # Allow flexibility for weekends/holidays
+                                # Use last 365 calendar days for the volatility/beta window (same as performance calculations)
                                 pv = portfolio_values.copy()
                                 pv.index = pd.to_datetime(pv.index)
                                 start_date = pv.index[-1] - pd.Timedelta(days=365)
                                 portfolio_values_1y = pv.loc[start_date:]
                                 portfolio_returns = portfolio_values_1y.pct_change().dropna()
-                                # Annualize using 252 trading days convention
-                                volatility = portfolio_returns.std() * np.sqrt(252) * 100
+                                # Annualize using 365 calendar days convention
+                                volatility = portfolio_returns.std() * np.sqrt(365) * 100
                                 portfolio_volatility_calculated = f"{volatility:.2f}%"
                                 
                                 # Simple Beta calculation against SPY
@@ -10890,17 +10931,16 @@ if st.session_state.get('alloc_backtest_run', False):
                     ticker_volatility = 'N/A'
                     ticker_beta = 'N/A'
                     try:
-                        if len(df) >= 60:
-                            # Use last 365 calendar days
+                        if len(df) >= 60:  # Allow flexibility for weekends/holidays
+                            # Use last 365 calendar days (same as performance calculations)
                             df_local = df.copy()
                             df_local.index = pd.to_datetime(df_local.index)
                             start_date = df_local.index[-1] - pd.Timedelta(days=365)
                             ticker_window = df_local['Close'].loc[start_date:]
                             ticker_returns_series = ticker_window.pct_change().dropna()
                             if len(ticker_returns_series) >= 60:  # Allow some flexibility
-                                # Annualize using 252 for weekdays assets, 365 for always-open (BITCOIN)
-                                annualize_days = 365 if ticker == 'BITCOIN' else 252
-                                ticker_vol = ticker_returns_series.std() * np.sqrt(annualize_days) * 100
+                                # Annualize using 365 for consistency
+                                ticker_vol = ticker_returns_series.std() * np.sqrt(365) * 100
                                 ticker_volatility = f"{ticker_vol:.2f}%"
                                 
                                 if ticker == 'SPY':
@@ -11508,17 +11548,24 @@ if st.session_state.get('alloc_backtest_run', False):
                             }
                             
                             def _get_value_days_ago(series, days):
-                                """Return value at or before last_date - days from a datetime-indexed Series."""
+                                """Return value exactly days ago with forward fill for weekends/holidays."""
                                 if series is None or len(series) == 0:
                                     return None
                                 last_date = pd.to_datetime(series.index[-1])
                                 target_date = last_date - pd.Timedelta(days=days)
                                 # Ensure datetime index
                                 series.index = pd.to_datetime(series.index)
-                                prior = series.loc[:target_date]
-                                if len(prior) == 0:
-                                    return series.iloc[0]
-                                return prior.iloc[-1]
+                                
+                                # Forward fill to handle weekends/holidays - create complete daily series
+                                date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
+                                series_filled = series.reindex(date_range).fillna(method='ffill')
+                                
+                                # Now get exact date (should exist after ffill)
+                                if target_date in series_filled.index:
+                                    return series_filled.loc[target_date]
+                                else:
+                                    # Fallback if target_date is before series start
+                                    return series_filled.iloc[0]
                             
                             current_price = df['Close'].iloc[-1]
                             ticker_returns = {'Ticker': ticker}
