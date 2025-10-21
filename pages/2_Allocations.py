@@ -10252,39 +10252,46 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 portfolio_data = []
                 
-                # 1. PORTFOLIO (Historical) - Use backtest results directly
+                # 1. PORTFOLIO (Historical) - Use same raw data as Current method for consistency
                 historical_returns = {}
                 try:
-                    all_results = st.session_state.get('alloc_all_results', {})
-                    if active_name in all_results:
-                        portfolio_result = all_results[active_name]
-                        if 'no_additions' in portfolio_result:
-                            portfolio_values = portfolio_result['no_additions']
+                    # Use the same current_weights and raw_data as Current method
+                    current_weights = {**today_weights, 'CASH': today_weights.get('CASH', 0)}
+                    
+                    for period_name, days in periods.items():
+                        try:
+                            weighted_return = 0.0
+                            total_weight = 0.0
                             
-                            for period_name, days in periods.items():
-                                try:
-                                    # Ensure we have enough data points
-                                    if len(portfolio_values) < days + 1:
-                                        historical_returns[period_name] = 'N/A'
+                            for ticker, weight in current_weights.items():
+                                if ticker == 'CASH' or weight <= 0:
+                                    continue
+                                    
+                                if ticker in raw_data and not raw_data[ticker].empty:
+                                    df = raw_data[ticker].copy()
+                                    if 'Close' not in df.columns or len(df) < days + 1:
                                         continue
                                     
-                                    # Get current and past values safely
-                                    current_value = portfolio_values.iloc[-1]
-                                    past_value = portfolio_values.iloc[-(days + 1)]
-                                    
-                                    if past_value > 0:
-                                        return_pct = ((current_value - past_value) / past_value) * 100
-                                        historical_returns[period_name] = f"{return_pct:+.2f}%"
-                                    else:
-                                        historical_returns[period_name] = 'N/A'
+                                    try:
+                                        # Ensure datetime index
+                                        df.index = pd.to_datetime(df.index)
+                                        current_price = df['Close'].iloc[-1]
+                                        past_price = _get_value_days_ago(df['Close'], days)
                                         
-                                except (IndexError, KeyError):
-                                    historical_returns[period_name] = 'N/A'
-                        else:
-                            for period_name in periods.keys():
+                                        if past_price is not None and past_price > 0:
+                                            return_pct = ((current_price - past_price) / past_price) * 100
+                                            weighted_return += return_pct * weight
+                                            total_weight += weight
+                                    except Exception:
+                                        continue
+                            
+                            if total_weight > 0:
+                                final_return = weighted_return / total_weight
+                                historical_returns[period_name] = f"{final_return:+.2f}%"
+                            else:
                                 historical_returns[period_name] = 'N/A'
-                    else:
-                        for period_name in periods.keys():
+                                
+                        except Exception:
                             historical_returns[period_name] = 'N/A'
                             
                 except Exception as e:
@@ -10379,48 +10386,94 @@ if st.session_state.get('alloc_backtest_run', False):
                 portfolio_volatility = 'N/A'
                 portfolio_beta = 'N/A'
                 try:
-                    all_results = st.session_state.get('alloc_all_results', {})
-                    if active_name in all_results:
-                        portfolio_result = all_results[active_name]
-                        if 'no_additions' in portfolio_result:
-                            portfolio_values = portfolio_result['no_additions']
-                            if len(portfolio_values) >= 60:  # Allow flexibility for weekends/holidays
+                    # Use same method as Current portfolio for consistency
+                    weighted_volatility = 0.0
+                    weighted_beta = 0.0
+                    total_weight_vol = 0.0
+                    
+                    for ticker, weight in current_weights.items():
+                        if ticker == 'CASH' or weight <= 0:
+                            continue
+                            
+                        if ticker in raw_data and not raw_data[ticker].empty:
+                            df = raw_data[ticker].copy()
+                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
                                 # Use last 365 calendar days (same as performance calculations)
-                                pv = portfolio_values.copy()
-                                pv.index = pd.to_datetime(pv.index)
-                                start_date = pv.index[-1] - pd.Timedelta(days=365)
-                                portfolio_values_1y = pv.loc[start_date:]
-                                portfolio_returns = portfolio_values_1y.pct_change().dropna()
-                                volatility = portfolio_returns.std() * np.sqrt(365) * 100
-                                portfolio_volatility = f"{volatility:.2f}%"
+                                df_local = df.copy()
+                                df_local.index = pd.to_datetime(df_local.index)
+                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
+                                df_1y = df_local.loc[start_date:]
+                                ticker_returns = df_1y['Close'].pct_change().dropna()
                                 
-                                # Simple Beta calculation - use pandas correlation and volatility ratio
-                                try:
-                                    # Use available_data for consistency with Benchmark table
-                                    if 'SPY' in available_data and not available_data['SPY'].empty:
-                                        spy_data = available_data['SPY'].copy()
-                                        if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                            spy_close = spy_data['Close'].iloc[-252:]
-                                            spy_returns = spy_close.pct_change().dropna()
-                                            
-                                            # Take same length for both
-                                            min_len = min(len(portfolio_returns), len(spy_returns))
-                                            if min_len >= 200:
-                                                port_ret = portfolio_returns.iloc[-min_len:]
-                                                spy_ret = spy_returns.iloc[-min_len:]
-                                                
-                                                # Simple beta = correlation * (portfolio_vol / market_vol)
-                                                correlation = port_ret.corr(spy_ret)
-                                                port_vol = port_ret.std()
-                                                spy_vol = spy_ret.std()
-                                                
-                                                if spy_vol > 0 and not np.isnan(correlation):
-                                                    beta = correlation * (port_vol / spy_vol)
-                                                    portfolio_beta = f"{beta:.2f}"
-                                                else:
-                                                    portfolio_beta = "1.00"
-                                except Exception:
-                                    pass
+                                if len(ticker_returns) > 0:
+                                    ticker_volatility = ticker_returns.std() * np.sqrt(365) * 100
+                                    weighted_volatility += ticker_volatility * weight
+                                    total_weight_vol += weight
+                    
+                    if total_weight_vol > 0:
+                        final_volatility = weighted_volatility / total_weight_vol
+                        portfolio_volatility = f"{final_volatility:.2f}%"
+                except Exception:
+                    pass
+                                
+                    # Calculate Beta using same method as Current portfolio
+                    try:
+                        if 'SPY' in raw_data and not raw_data['SPY'].empty:
+                            spy_data = raw_data['SPY'].copy()
+                            if 'Close' in spy_data.columns and len(spy_data) >= 252:
+                                spy_data.index = pd.to_datetime(spy_data.index)
+                                start_date = spy_data.index[-1] - pd.Timedelta(days=365)
+                                spy_1y = spy_data.loc[start_date:]
+                                spy_returns = spy_1y['Close'].pct_change().dropna()
+                                
+                                # Calculate portfolio returns using same method as Current
+                                portfolio_returns_list = []
+                                for ticker, weight in current_weights.items():
+                                    if ticker == 'CASH' or weight <= 0:
+                                        continue
+                                    if ticker in raw_data and not raw_data[ticker].empty:
+                                        df = raw_data[ticker].copy()
+                                        if 'Close' in df.columns and len(df) >= 365:
+                                            df.index = pd.to_datetime(df.index)
+                                            start_date = df.index[-1] - pd.Timedelta(days=365)
+                                            df_1y = df.loc[start_date:]
+                                            ticker_returns = df_1y['Close'].pct_change().dropna()
+                                            if len(ticker_returns) > 0:
+                                                portfolio_returns_list.append(ticker_returns * weight)
+                                
+                                if portfolio_returns_list and len(spy_returns) > 0:
+                                    # Align dates and calculate weighted portfolio returns
+                                    common_dates = spy_returns.index
+                                    portfolio_returns_aligned = pd.Series(0, index=common_dates)
+                                    
+                                    for ticker_returns in portfolio_returns_list:
+                                        aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
+                                        portfolio_returns_aligned += aligned_returns
+                                    
+                                    # Calculate correlation and beta
+                                    portfolio_returns_clean = portfolio_returns_aligned.dropna()
+                                    spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
+                                    
+                                    if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
+                                        correlation = portfolio_returns_clean.corr(spy_returns_clean)
+                                        port_vol = portfolio_returns_clean.std()
+                                        spy_vol = spy_returns_clean.std()
+                                        
+                                        if spy_vol > 0 and not np.isnan(correlation):
+                                            beta = correlation * (port_vol / spy_vol)
+                                            portfolio_beta = f"{beta:.2f}"
+                                        else:
+                                            portfolio_beta = "1.00"
+                                    else:
+                                        portfolio_beta = "1.00"
+                                else:
+                                    portfolio_beta = "1.00"
+                            else:
+                                portfolio_beta = "1.00"
+                        else:
+                            portfolio_beta = "1.00"
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 
@@ -10730,40 +10783,52 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 # available_data is already prepared outside this function
                 
-                # Add PORTFOLIO row first for comparison (using backtest results directly)
+                # Add PORTFOLIO row first for comparison (using same raw data as Current method)
                 portfolio_returns_dict = {}
                 
-                # Get the backtest results for this portfolio
+                # Use same method as Current portfolio for consistency
                 try:
-                    # Get the portfolio value series from backtest results
-                    all_results = st.session_state.get('alloc_all_results', {})
-                    if active_name in all_results:
-                        portfolio_result = all_results[active_name]
-                        if 'no_additions' in portfolio_result:
-                            portfolio_values = portfolio_result['no_additions']
+                    # Get current weights from snapshot
+                    snapshot = st.session_state.get('alloc_snapshot_data', {})
+                    today_weights_map = snapshot.get('today_weights_map', {}) if snapshot else {}
+                    current_weights = today_weights_map.get(active_name, {})
+                    if not current_weights:
+                        current_weights = {**today_weights_map.get(active_name, {}), 'CASH': today_weights_map.get(active_name, {}).get('CASH', 0)}
+                    
+                    for period_name, days in periods.items():
+                        try:
+                            weighted_return = 0.0
+                            total_weight = 0.0
                             
-                            # Calculate period returns using calendar-day lookbacks
-                            # Ensure index is datetime
-                            pv = portfolio_values.copy()
-                            pv.index = pd.to_datetime(pv.index)
-                            for period_name, days in periods.items():
-                                try:
-                                    current_value = pv.iloc[-1]
-                                    past_value = get_value_days_ago(pv, days)
-                                    if past_value is not None and past_value > 0:
-                                        return_pct = ((current_value - past_value) / past_value) * 100
-                                        portfolio_returns_dict[period_name] = f"{return_pct:+.2f}%"
-                                    else:
-                                        portfolio_returns_dict[period_name] = 'N/A'
-                                except Exception:
-                                    portfolio_returns_dict[period_name] = 'N/A'
-                        else:
-                            # Fallback: all N/A if no portfolio data
-                            for period_name in periods.keys():
+                            for ticker, weight in current_weights.items():
+                                if ticker == 'CASH' or weight <= 0:
+                                    continue
+                                    
+                                if ticker in raw_data and not raw_data[ticker].empty:
+                                    df = raw_data[ticker].copy()
+                                    if 'Close' not in df.columns or len(df) < days + 1:
+                                        continue
+                                    
+                                    try:
+                                        # Ensure datetime index
+                                        df.index = pd.to_datetime(df.index)
+                                        current_price = df['Close'].iloc[-1]
+                                        past_price = get_value_days_ago(df['Close'], days)
+                                        
+                                        if past_price is not None and past_price > 0:
+                                            return_pct = ((current_price - past_price) / past_price) * 100
+                                            weighted_return += return_pct * weight
+                                            total_weight += weight
+                                    except Exception:
+                                        continue
+                            
+                            if total_weight > 0:
+                                final_return = weighted_return / total_weight
+                                portfolio_returns_dict[period_name] = f"{final_return:+.2f}%"
+                            else:
                                 portfolio_returns_dict[period_name] = 'N/A'
-                    else:
-                        # Fallback: all N/A if no portfolio data
-                        for period_name in periods.keys():
+                                
+                        except Exception:
                             portfolio_returns_dict[period_name] = 'N/A'
                             
                 except Exception as e:
@@ -10860,51 +10925,94 @@ if st.session_state.get('alloc_backtest_run', False):
                 portfolio_volatility_calculated = 'N/A'
                 portfolio_beta_calculated = 'N/A'
                 
-                # Get Volatility and Beta from historical portfolio results (last 365 calendar days)
+                # Calculate Volatility and Beta using same method as Current portfolio
                 try:
-                    all_results = st.session_state.get('alloc_all_results', {})
-                    if active_name and active_name in all_results:
-                        portfolio_result = all_results[active_name]
-                        if 'no_additions' in portfolio_result:
-                            portfolio_values = portfolio_result['no_additions']
-                            if len(portfolio_values) >= 60:  # Allow flexibility for weekends/holidays
-                                # Use last 365 calendar days for the volatility/beta window (same as performance calculations)
-                                pv = portfolio_values.copy()
-                                pv.index = pd.to_datetime(pv.index)
-                                start_date = pv.index[-1] - pd.Timedelta(days=365)
-                                portfolio_values_1y = pv.loc[start_date:]
-                                portfolio_returns = portfolio_values_1y.pct_change().dropna()
-                                # Annualize using 365 calendar days convention
-                                volatility = portfolio_returns.std() * np.sqrt(365) * 100
-                                portfolio_volatility_calculated = f"{volatility:.2f}%"
+                    # Use same method as Current portfolio for consistency
+                    weighted_volatility = 0.0
+                    weighted_beta = 0.0
+                    total_weight_vol = 0.0
+                    
+                    for ticker, weight in current_weights.items():
+                        if ticker == 'CASH' or weight <= 0:
+                            continue
+                            
+                        if ticker in raw_data and not raw_data[ticker].empty:
+                            df = raw_data[ticker].copy()
+                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
+                                # Use last 365 calendar days (same as performance calculations)
+                                df_local = df.copy()
+                                df_local.index = pd.to_datetime(df_local.index)
+                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
+                                df_1y = df_local.loc[start_date:]
+                                ticker_returns = df_1y['Close'].pct_change().dropna()
                                 
-                                # Simple Beta calculation against SPY
-                                try:
-                                    if 'SPY' in available_data and not available_data['SPY'].empty:
-                                        spy_data = available_data['SPY'].copy()
-                                        if 'Close' in spy_data.columns and len(spy_data) >= 60:
-                                            spy_data.index = pd.to_datetime(spy_data.index)
-                                            spy_close = spy_data['Close']
-                                            spy_ret_window = spy_close.loc[start_date:]
-                                            spy_returns = spy_ret_window.pct_change().dropna()
-                                            # Align on common dates
-                                            common_idx = portfolio_returns.index.intersection(spy_returns.index)
-                                            if len(common_idx) >= 60:
-                                                port_ret = portfolio_returns.reindex(common_idx).dropna()
-                                                spy_ret = spy_returns.reindex(common_idx).dropna()
-                                                
-                                                # Simple beta = correlation * (portfolio_vol / market_vol)
-                                                correlation = port_ret.corr(spy_ret)
-                                                port_vol = port_ret.std()
-                                                spy_vol = spy_ret.std()
-                                                
-                                                if spy_vol > 0 and not np.isnan(correlation):
-                                                    beta = correlation * (port_vol / spy_vol)
-                                                    portfolio_beta_calculated = f"{beta:.2f}"
-                                                else:
-                                                    portfolio_beta_calculated = "1.00"
-                                except Exception:
-                                    pass
+                                if len(ticker_returns) > 0:
+                                    ticker_volatility = ticker_returns.std() * np.sqrt(365) * 100
+                                    weighted_volatility += ticker_volatility * weight
+                                    total_weight_vol += weight
+                    
+                    if total_weight_vol > 0:
+                        final_volatility = weighted_volatility / total_weight_vol
+                        portfolio_volatility_calculated = f"{final_volatility:.2f}%"
+                    
+                    # Calculate Beta using same method as Current portfolio
+                    try:
+                        if 'SPY' in raw_data and not raw_data['SPY'].empty:
+                            spy_data = raw_data['SPY'].copy()
+                            if 'Close' in spy_data.columns and len(spy_data) >= 252:
+                                spy_data.index = pd.to_datetime(spy_data.index)
+                                start_date = spy_data.index[-1] - pd.Timedelta(days=365)
+                                spy_1y = spy_data.loc[start_date:]
+                                spy_returns = spy_1y['Close'].pct_change().dropna()
+                                
+                                # Calculate portfolio returns using same method as Current
+                                portfolio_returns_list = []
+                                for ticker, weight in current_weights.items():
+                                    if ticker == 'CASH' or weight <= 0:
+                                        continue
+                                    if ticker in raw_data and not raw_data[ticker].empty:
+                                        df = raw_data[ticker].copy()
+                                        if 'Close' in df.columns and len(df) >= 365:
+                                            df.index = pd.to_datetime(df.index)
+                                            start_date = df.index[-1] - pd.Timedelta(days=365)
+                                            df_1y = df.loc[start_date:]
+                                            ticker_returns = df_1y['Close'].pct_change().dropna()
+                                            if len(ticker_returns) > 0:
+                                                portfolio_returns_list.append(ticker_returns * weight)
+                                
+                                if portfolio_returns_list and len(spy_returns) > 0:
+                                    # Align dates and calculate weighted portfolio returns
+                                    common_dates = spy_returns.index
+                                    portfolio_returns_aligned = pd.Series(0, index=common_dates)
+                                    
+                                    for ticker_returns in portfolio_returns_list:
+                                        aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
+                                        portfolio_returns_aligned += aligned_returns
+                                    
+                                    # Calculate correlation and beta
+                                    portfolio_returns_clean = portfolio_returns_aligned.dropna()
+                                    spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
+                                    
+                                    if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
+                                        correlation = portfolio_returns_clean.corr(spy_returns_clean)
+                                        port_vol = portfolio_returns_clean.std()
+                                        spy_vol = spy_returns_clean.std()
+                                        
+                                        if spy_vol > 0 and not np.isnan(correlation):
+                                            beta = correlation * (port_vol / spy_vol)
+                                            portfolio_beta_calculated = f"{beta:.2f}"
+                                        else:
+                                            portfolio_beta_calculated = "1.00"
+                                    else:
+                                        portfolio_beta_calculated = "1.00"
+                                else:
+                                    portfolio_beta_calculated = "1.00"
+                            else:
+                                portfolio_beta_calculated = "1.00"
+                        else:
+                            portfolio_beta_calculated = "1.00"
+                    except Exception:
+                        portfolio_beta_calculated = "1.00"
                 except Exception:
                     pass
                 
@@ -11630,18 +11738,21 @@ if st.session_state.get('alloc_backtest_run', False):
                                 if 'no_additions' in portfolio_result:
                                     portfolio_values = portfolio_result['no_additions']
                                     
+                                    # Apply forward fill to backtest data for consistency
+                                    pv = portfolio_values.copy()
+                                    pv.index = pd.to_datetime(pv.index)
+                                    
+                                    # Create complete daily series with forward fill (same as get_value_days_ago)
+                                    date_range = pd.date_range(start=pv.index[0], end=pv.index[-1], freq='D')
+                                    pv_filled = pv.reindex(date_range).fillna(method='ffill')
+                                    
                                     for period_name, days in periods.items():
                                         try:
-                                            # Ensure we have enough data points
-                                            if len(portfolio_values) < days + 1:
-                                                weighted_row[period_name] = 'N/A'
-                                                continue
+                                            # Use the same method as get_value_days_ago for consistency
+                                            current_value = pv_filled.iloc[-1]
+                                            past_value = _get_value_days_ago(pv_filled, days)
                                             
-                                            # Get current and past values safely
-                                            current_value = portfolio_values.iloc[-1]
-                                            past_value = portfolio_values.iloc[-(days + 1)]
-                                            
-                                            if past_value > 0:
+                                            if past_value is not None and past_value > 0:
                                                 return_pct = ((current_value - past_value) / past_value) * 100
                                                 weighted_row[period_name] = f"{return_pct:+.2f}%"
                                             else:
