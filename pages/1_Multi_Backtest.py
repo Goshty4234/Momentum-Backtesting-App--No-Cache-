@@ -4983,6 +4983,48 @@ def single_backtest(config, sim_index, reindexed_data):
         all_negative = all(rets[t] <= 0 for t in rets_keys)
         relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
 
+        def calculate_near_zero_symmetric_momentum(returns, neutral_zone=0.05):
+            """
+            Relative momentum avec zone neutre autour de 0 - VERSION AMÉLIORÉE
+            
+            Avantages:
+            - Les rendements dans [-5%, +5%] ont des allocations très similaires
+            - Pas de biaisage par le pire actif
+            - Compression progressive des actifs négatifs
+            - Traitement indépendant de chaque ticker
+            """
+            import numpy as np
+            import math
+            
+            returns_array = np.array(list(returns.values()))
+            
+            percentile_scores = {}
+            for ticker, return_val in returns.items():
+                percentile = (np.sum(returns_array <= return_val) - 1) / (len(returns_array) - 1)
+                base_score = percentile ** 2
+                
+                # Zone neutre : allocations similaires pour rendements proches de 0
+                if abs(return_val) <= neutral_zone:
+                    # Dans la zone neutre : allocations presque identiques
+                    compression_factor = 1.0 - (abs(return_val) / neutral_zone) * 0.1
+                else:
+                    # Au-delà de la zone neutre : compression progressive
+                    if return_val < -neutral_zone:
+                        # Négatif au-delà de la zone neutre
+                        excess_negativity = abs(return_val) - neutral_zone
+                        compression_factor = 0.9 * math.exp(-excess_negativity * 3.0)
+                    else:
+                        # Positif au-delà de la zone neutre
+                        compression_factor = 1.0
+                
+                percentile_scores[ticker] = base_score * compression_factor
+            
+            # Normaliser
+            sum_scores = sum(percentile_scores.values())
+            weights = {t: percentile_scores[t] / sum_scores for t in percentile_scores}
+            
+            return weights
+
         if all_negative:
             # Special handling for SP500TOP20: use Relative as default instead of Cash
             is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
@@ -4990,25 +5032,34 @@ def single_backtest(config, sim_index, reindexed_data):
             # For SP500TOP20, use Relative as default if user chose Cash
             effective_strategy = negative_momentum_strategy
             if is_sp500top20 and negative_momentum_strategy == 'Cash':
-                effective_strategy = 'Relative'
+                effective_strategy = 'Relative momentum'
             
             if effective_strategy == 'Cash':
                 weights = {t: 0.0 for t in rets_keys}
             elif effective_strategy == 'Equal weight':
                 weights = {t: 1.0 / len(rets_keys) for t in rets_keys}
-            else:  # Relative momentum
+            elif effective_strategy == 'Relative momentum':
+                # ANCIENNE LOGIQUE Relative Momentum
                 min_score = min(rets[t] for t in rets_keys)
                 offset = -min_score + 0.01
                 shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
                 ssum = sum(shifted.values())
                 weights = {t: shifted[t] / ssum for t in shifted}
+            elif effective_strategy == 'Near-Zero Symmetry':
+                # NOUVELLE LOGIQUE Near-Zero Symmetry
+                weights = calculate_near_zero_symmetric_momentum(rets)
         else:
             if relative_mode:
-                min_score = min(rets[t] for t in rets_keys)
-                offset = -min_score + 0.01 if min_score < 0 else 0.01
-                shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
-                ssum = sum(shifted.values())
-                weights = {t: shifted[t] / ssum for t in shifted}
+                if momentum_strategy == 'Relative Momentum':
+                    # ANCIENNE LOGIQUE Relative Momentum
+                    min_score = min(rets[t] for t in rets_keys)
+                    offset = -min_score + 0.01 if min_score < 0 else 0.01
+                    shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
+                    ssum = sum(shifted.values())
+                    weights = {t: shifted[t] / ssum for t in shifted}
+                elif momentum_strategy == 'Near-Zero Symmetry':
+                    # NOUVELLE LOGIQUE Near-Zero Symmetry
+                    weights = calculate_near_zero_symmetric_momentum(rets)
             else:
                 positive_scores = {t: rets[t] for t in rets_keys if rets[t] > 0}
                 if positive_scores:
@@ -6287,6 +6338,48 @@ def single_backtest_year_aware(config, sim_index, reindexed_data):
         all_negative = all(rets[t] <= 0 for t in rets_keys)
         relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
 
+        def calculate_near_zero_symmetric_momentum(returns, neutral_zone=0.05):
+            """
+            Relative momentum avec zone neutre autour de 0 - VERSION AMÉLIORÉE
+            
+            Avantages:
+            - Les rendements dans [-5%, +5%] ont des allocations très similaires
+            - Pas de biaisage par le pire actif
+            - Compression progressive des actifs négatifs
+            - Traitement indépendant de chaque ticker
+            """
+            import numpy as np
+            import math
+            
+            returns_array = np.array(list(returns.values()))
+            
+            percentile_scores = {}
+            for ticker, return_val in returns.items():
+                percentile = (np.sum(returns_array <= return_val) - 1) / (len(returns_array) - 1)
+                base_score = percentile ** 2
+                
+                # Zone neutre : allocations similaires pour rendements proches de 0
+                if abs(return_val) <= neutral_zone:
+                    # Dans la zone neutre : allocations presque identiques
+                    compression_factor = 1.0 - (abs(return_val) / neutral_zone) * 0.1
+                else:
+                    # Au-delà de la zone neutre : compression progressive
+                    if return_val < -neutral_zone:
+                        # Négatif au-delà de la zone neutre
+                        excess_negativity = abs(return_val) - neutral_zone
+                        compression_factor = 0.9 * math.exp(-excess_negativity * 3.0)
+                    else:
+                        # Positif au-delà de la zone neutre
+                        compression_factor = 1.0
+                
+                percentile_scores[ticker] = base_score * compression_factor
+            
+            # Normaliser
+            sum_scores = sum(percentile_scores.values())
+            weights = {t: percentile_scores[t] / sum_scores for t in percentile_scores}
+            
+            return weights
+
         if all_negative:
             # Special handling for SP500TOP20: use Relative as default instead of Cash
             is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
@@ -6294,25 +6387,34 @@ def single_backtest_year_aware(config, sim_index, reindexed_data):
             # For SP500TOP20, use Relative as default if user chose Cash
             effective_strategy = negative_momentum_strategy
             if is_sp500top20 and negative_momentum_strategy == 'Cash':
-                effective_strategy = 'Relative'
+                effective_strategy = 'Relative momentum'
             
             if effective_strategy == 'Cash':
                 weights = {t: 0.0 for t in rets_keys}
             elif effective_strategy == 'Equal weight':
                 weights = {t: 1.0 / len(rets_keys) for t in rets_keys}
-            else:  # Relative momentum
+            elif effective_strategy == 'Relative momentum':
+                # ANCIENNE LOGIQUE Relative Momentum
                 min_score = min(rets[t] for t in rets_keys)
                 offset = -min_score + 0.01
                 shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
                 ssum = sum(shifted.values())
                 weights = {t: shifted[t] / ssum for t in shifted}
+            elif effective_strategy == 'Near-Zero Symmetry':
+                # NOUVELLE LOGIQUE Near-Zero Symmetry
+                weights = calculate_near_zero_symmetric_momentum(rets)
         else:
             if relative_mode:
-                min_score = min(rets[t] for t in rets_keys)
-                offset = -min_score + 0.01 if min_score < 0 else 0.01
-                shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
-                ssum = sum(shifted.values())
-                weights = {t: shifted[t] / ssum for t in shifted}
+                if momentum_strategy == 'Relative Momentum':
+                    # ANCIENNE LOGIQUE Relative Momentum
+                    min_score = min(rets[t] for t in rets_keys)
+                    offset = -min_score + 0.01 if min_score < 0 else 0.01
+                    shifted = {t: max(0.01, rets[t] + offset) for t in rets_keys}
+                    ssum = sum(shifted.values())
+                    weights = {t: shifted[t] / ssum for t in shifted}
+                elif momentum_strategy == 'Near-Zero Symmetry':
+                    # NOUVELLE LOGIQUE Near-Zero Symmetry
+                    weights = calculate_near_zero_symmetric_momentum(rets)
             else:
                 positive_scores = {t: rets[t] for t in rets_keys if rets[t] > 0}
                 if positive_scores:
@@ -8006,14 +8108,18 @@ def paste_json_callback():
             momentum_strategy = 'Classic'
         elif momentum_strategy == 'Relative momentum':
             momentum_strategy = 'Relative Momentum'
-        elif momentum_strategy not in ['Classic', 'Relative Momentum']:
+        elif momentum_strategy == 'Near-Zero Symmetry':
+            momentum_strategy = 'Near-Zero Symmetry'
+        elif momentum_strategy not in ['Classic', 'Relative Momentum', 'Near-Zero Symmetry']:
             momentum_strategy = 'Classic'  # Default fallback
         
         # Handle negative momentum strategy value mapping from other pages
         negative_momentum_strategy = json_data.get('negative_momentum_strategy', 'Cash')
         if negative_momentum_strategy == 'Go to cash':
             negative_momentum_strategy = 'Cash'
-        elif negative_momentum_strategy not in ['Cash', 'Equal weight', 'Relative momentum']:
+        elif negative_momentum_strategy == 'Near-Zero Symmetry':
+            negative_momentum_strategy = 'Near-Zero Symmetry'
+        elif negative_momentum_strategy not in ['Cash', 'Equal weight', 'Relative momentum', 'Near-Zero Symmetry']:
             negative_momentum_strategy = 'Cash'  # Default fallback
         
         # Handle stocks field - convert from legacy format if needed
@@ -9497,6 +9603,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 momentum_options.append("Classic")
             if st.checkbox("Relative momentum", key="strategy_momentum_relative"):
                 momentum_options.append("Relative Momentum")
+            if st.checkbox("Near-Zero Symmetry", key="strategy_momentum_nzs"):
+                momentum_options.append("Near-Zero Symmetry")
             
             # Validation and storage for momentum strategy
             if momentum_options:
@@ -9515,6 +9623,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                 negative_options.append("Equal weight")
             if st.checkbox("Relative momentum", key="strategy_negative_relative"):
                 negative_options.append("Relative momentum")
+            if st.checkbox("Near-Zero Symmetry", key="strategy_negative_nzs"):
+                negative_options.append("Near-Zero Symmetry")
             
             # Validation and storage for negative strategy
             if negative_options:
@@ -10429,6 +10539,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                             clear_name_parts.append("Classic")
                         elif variant.get('momentum_strategy') == 'Relative Momentum':
                             clear_name_parts.append("Relative")
+                        elif variant.get('momentum_strategy') == 'Near-Zero Symmetry':
+                            clear_name_parts.append("NZS")
                         
                         # Negative strategy with "and" connector
                         if variant.get('negative_momentum_strategy') == 'Cash':
@@ -10437,6 +10549,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                             clear_name_parts.append("and Equal Weight")
                         elif variant.get('negative_momentum_strategy') == 'Relative momentum':
                             clear_name_parts.append("and Relative")
+                        elif variant.get('negative_momentum_strategy') == 'Near-Zero Symmetry':
+                            clear_name_parts.append("and NZS")
                         
                         # Beta and Volatility (only show when True, omit when False)
                         if variant.get('calc_beta', False):
@@ -11599,8 +11713,8 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
         
         momentum_strategy = st.selectbox(
             "Momentum strategy when NOT all negative:",
-            ["Classic", "Relative Momentum"],
-            index=["Classic", "Relative Momentum"].index(active_portfolio.get('momentum_strategy', 'Classic')),
+            ["Classic", "Relative Momentum", "Near-Zero Symmetry"],
+            index=["Classic", "Relative Momentum", "Near-Zero Symmetry"].index(active_portfolio.get('momentum_strategy', 'Classic')),
             key=f"multi_backtest_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
         )
         # Check if this is SP500TOP20 to set default to Relative instead of Cash
@@ -11612,8 +11726,8 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
         
         negative_momentum_strategy = st.selectbox(
             "Strategy when ALL momentum scores are negative:",
-            ["Cash", "Equal weight", "Relative momentum"],
-            index=["Cash", "Equal weight", "Relative momentum"].index(current_negative_strategy),
+            ["Cash", "Equal weight", "Relative momentum", "Near-Zero Symmetry"],
+            index=["Cash", "Equal weight", "Relative momentum", "Near-Zero Symmetry"].index(current_negative_strategy),
             key=f"multi_backtest_negative_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
         )
         
@@ -13680,14 +13794,18 @@ def paste_all_json_callback():
                     momentum_strategy = 'Classic'
                 elif momentum_strategy == 'Relative momentum':
                     momentum_strategy = 'Relative Momentum'
-                elif momentum_strategy not in ['Classic', 'Relative Momentum']:
+                elif momentum_strategy == 'Near-Zero Symmetry':
+                    momentum_strategy = 'Near-Zero Symmetry'
+                elif momentum_strategy not in ['Classic', 'Relative Momentum', 'Near-Zero Symmetry']:
                     momentum_strategy = 'Classic'  # Default fallback
                 
                 # Handle negative momentum strategy value mapping from other pages
                 negative_momentum_strategy = cfg.get('negative_momentum_strategy', 'Cash')
                 if negative_momentum_strategy == 'Go to cash':
                     negative_momentum_strategy = 'Cash'
-                elif negative_momentum_strategy not in ['Cash', 'Equal weight', 'Relative momentum']:
+                elif negative_momentum_strategy == 'Near-Zero Symmetry':
+                    negative_momentum_strategy = 'Near-Zero Symmetry'
+                elif negative_momentum_strategy not in ['Cash', 'Equal weight', 'Relative momentum', 'Near-Zero Symmetry']:
                     negative_momentum_strategy = 'Cash'  # Default fallback
                 
                 # Handle stocks field - convert from legacy format if needed
