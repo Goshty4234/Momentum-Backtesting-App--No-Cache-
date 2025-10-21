@@ -10415,55 +10415,53 @@ if st.session_state.get('alloc_backtest_run', False):
                         portfolio_volatility = f"{final_volatility:.2f}%"
                 except Exception:
                     pass
+                
+                # Calculate Beta using same method as Current portfolio
+                try:
+                    if 'SPY' in raw_data and not raw_data['SPY'].empty:
+                        spy_data = raw_data['SPY'].copy()
+                        if 'Close' in spy_data.columns and len(spy_data) >= 252:
+                            spy_data.index = pd.to_datetime(spy_data.index)
+                            start_date = spy_data.index[-1] - pd.Timedelta(days=365)
+                            spy_1y = spy_data.loc[start_date:]
+                            spy_returns = spy_1y['Close'].pct_change().dropna()
+                            
+                            # Calculate portfolio returns using same method as Current
+                            portfolio_returns_list = []
+                            for ticker, weight in current_weights.items():
+                                if ticker == 'CASH' or weight <= 0:
+                                    continue
+                                if ticker in raw_data and not raw_data[ticker].empty:
+                                    df = raw_data[ticker].copy()
+                                    if 'Close' in df.columns and len(df) >= 365:
+                                        df.index = pd.to_datetime(df.index)
+                                        start_date = df.index[-1] - pd.Timedelta(days=365)
+                                        df_1y = df.loc[start_date:]
+                                        ticker_returns = df_1y['Close'].pct_change().dropna()
+                                        if len(ticker_returns) > 0:
+                                            portfolio_returns_list.append(ticker_returns * weight)
+                            
+                            if portfolio_returns_list and len(spy_returns) > 0:
+                                # Align dates and calculate weighted portfolio returns
+                                common_dates = spy_returns.index
+                                portfolio_returns_aligned = pd.Series(0, index=common_dates)
                                 
-                    # Calculate Beta using same method as Current portfolio
-                    try:
-                        if 'SPY' in raw_data and not raw_data['SPY'].empty:
-                            spy_data = raw_data['SPY'].copy()
-                            if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                spy_data.index = pd.to_datetime(spy_data.index)
-                                start_date = spy_data.index[-1] - pd.Timedelta(days=365)
-                                spy_1y = spy_data.loc[start_date:]
-                                spy_returns = spy_1y['Close'].pct_change().dropna()
+                                for ticker_returns in portfolio_returns_list:
+                                    aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
+                                    portfolio_returns_aligned += aligned_returns
                                 
-                                # Calculate portfolio returns using same method as Current
-                                portfolio_returns_list = []
-                                for ticker, weight in current_weights.items():
-                                    if ticker == 'CASH' or weight <= 0:
-                                        continue
-                                    if ticker in raw_data and not raw_data[ticker].empty:
-                                        df = raw_data[ticker].copy()
-                                        if 'Close' in df.columns and len(df) >= 365:
-                                            df.index = pd.to_datetime(df.index)
-                                            start_date = df.index[-1] - pd.Timedelta(days=365)
-                                            df_1y = df.loc[start_date:]
-                                            ticker_returns = df_1y['Close'].pct_change().dropna()
-                                            if len(ticker_returns) > 0:
-                                                portfolio_returns_list.append(ticker_returns * weight)
+                                # Calculate correlation and beta
+                                portfolio_returns_clean = portfolio_returns_aligned.dropna()
+                                spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
                                 
-                                if portfolio_returns_list and len(spy_returns) > 0:
-                                    # Align dates and calculate weighted portfolio returns
-                                    common_dates = spy_returns.index
-                                    portfolio_returns_aligned = pd.Series(0, index=common_dates)
+                                if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
+                                    correlation = portfolio_returns_clean.corr(spy_returns_clean)
+                                    port_vol = portfolio_returns_clean.std()
+                                    spy_vol = spy_returns_clean.std()
                                     
-                                    for ticker_returns in portfolio_returns_list:
-                                        aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
-                                        portfolio_returns_aligned += aligned_returns
-                                    
-                                    # Calculate correlation and beta
-                                    portfolio_returns_clean = portfolio_returns_aligned.dropna()
-                                    spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
-                                    
-                                    if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
-                                        correlation = portfolio_returns_clean.corr(spy_returns_clean)
-                                        port_vol = portfolio_returns_clean.std()
-                                        spy_vol = spy_returns_clean.std()
-                                        
-                                        if spy_vol > 0 and not np.isnan(correlation):
-                                            beta = correlation * (port_vol / spy_vol)
-                                            portfolio_beta = f"{beta:.2f}"
-                                        else:
-                                            portfolio_beta = "1.00"
+                                    if spy_vol > 0 and not np.isnan(correlation):
+                                        beta = correlation * (port_vol / spy_vol)
+                                        portfolio_beta = f"{beta:.2f}"
                                     else:
                                         portfolio_beta = "1.00"
                                 else:
@@ -10472,8 +10470,8 @@ if st.session_state.get('alloc_backtest_run', False):
                                 portfolio_beta = "1.00"
                         else:
                             portfolio_beta = "1.00"
-                    except Exception:
-                        pass
+                    else:
+                        portfolio_beta = "1.00"
                 except Exception:
                     pass
                 
