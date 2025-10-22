@@ -2243,6 +2243,12 @@ if 'alloc_portfolio_configs' in st.session_state:
             config['sma_window'] = 200
         if 'ma_type' not in config:
             config['ma_type'] = 'SMA'
+        if 'ma_cross_rebalance' not in config:
+            config['ma_cross_rebalance'] = False
+        if 'ma_tolerance_percent' not in config:
+            config['ma_tolerance_percent'] = 2.0
+        if 'ma_confirmation_days' not in config:
+            config['ma_confirmation_days'] = 3
         
         # Ensure all stocks have include_in_sma_filter and ma_reference_ticker settings
         for stock in config.get('stocks', []):
@@ -4172,6 +4178,168 @@ def calculate_sma(df, window):
         return None
     return df['Close'].rolling(window=window, min_periods=window).mean()
 
+def precompute_ma_columns(reindexed_data, ma_window, ma_type='SMA', ma_multiplier=1.48):
+    """
+    Precompute MA columns for all tickers once at the start.
+    This is the key optimization - compute MA once instead of every day!
+    
+    Args:
+        ma_multiplier: Multiplier to convert market days to calendar days (default 1.48)
+                      Since data uses ffill, we need more calendar days to get market days
+    """
+    ma_col_name = f"MA_{ma_type}_{ma_window}"
+    
+    for ticker, df in reindexed_data.items():
+        if df is None or not isinstance(df, pd.DataFrame) or 'Close' not in df.columns:
+            continue
+            
+        # Only compute if column doesn't exist
+        if ma_col_name not in df.columns:
+            try:
+                if ma_type == 'EMA':
+                    df[ma_col_name] = df['Close'].ewm(span=ma_window, adjust=False, min_periods=ma_window).mean()
+                else:  # SMA
+                    # Apply multiplier to approximate market days from calendar days
+                    adjusted_window = int(ma_window * ma_multiplier)
+                    df[ma_col_name] = df['Close'].rolling(window=adjusted_window, min_periods=adjusted_window).mean()
+            except Exception:
+                # If MA cannot be computed, skip this ticker
+                continue
+
+def detect_ma_cross_with_anti_whipsaw(valid_assets, reindexed_data, date, ma_window, ma_type='SMA', config=None, stocks_config=None, tolerance_percent=2.0, confirmation_days=3):
+    """
+    Detect if any ticker has crossed its Moving Average with anti-whipsaw filtering.
+    
+    Args:
+        valid_assets: List of tickers to check
+        reindexed_data: Dict of ticker -> DataFrame
+        date: Current date for checking
+        ma_window: MA window in days (e.g., 200 for 200-day MA)
+        ma_type: Type of moving average - 'SMA' or 'EMA'
+        config: Optional config dict
+        stocks_config: List of stock configs with include_in_ma_filter and ma_reference_ticker options
+        tolerance_percent: Percentage band that price must exceed MA by (default 2.0%)
+        confirmation_days: Number of days the crossing must persist (default 3)
+        
+    Returns:
+        crossed_assets: List of tickers that crossed their MA with confirmation
+        cross_details: Dict of ticker -> cross information
+    """
+    if not valid_assets or ma_window <= 0:
+        return [], {}
+    
+    crossed_assets = []
+    cross_details = {}
+    
+    # Create mappings from stocks_config
+    include_in_ma = {}
+    ma_reference = {}
+    if stocks_config:
+        for stock in stocks_config:
+            ticker = stock.get('ticker')
+            if ticker:
+                include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
+                ref = stock.get('ma_reference_ticker', '').strip()
+                if ref:
+                    ref = resolve_ticker_alias(ref)
+                ma_reference[ticker] = ref if ref else ticker
+    
+    for ticker in valid_assets:
+        is_included = include_in_ma.get(ticker, True)
+        if not is_included:
+            continue
+            
+        reference_ticker = ma_reference.get(ticker, ticker)
+        
+        # Get reference ticker's data for MA calculation
+        df_ref = reindexed_data.get(reference_ticker)
+        if df_ref is None or not isinstance(df_ref, pd.DataFrame):
+            continue
+        
+        # Get data up to current date
+        df_ref_up_to_date = df_ref[df_ref.index <= date]
+        
+        # Need enough data for MA calculation + confirmation period
+        min_required_days = ma_window + max(confirmation_days, 1)  # At least 1 day for MA calculation
+        if len(df_ref_up_to_date) < min_required_days:
+            continue
+        
+        # Calculate MA on the REFERENCE ticker
+        if ma_type == 'EMA':
+            ma = calculate_ema(df_ref_up_to_date, ma_window)
+        else:  # Default to SMA
+            ma = calculate_sma(df_ref_up_to_date, ma_window)
+            
+        if ma is None or len(ma) < confirmation_days + 1:
+            continue
+        
+        try:
+            # Get current price and MA
+            current_price = df_ref_up_to_date['Close'].iloc[-1]
+            current_ma = ma.iloc[-1]
+            
+            if pd.isna(current_price) or pd.isna(current_ma):
+                continue
+            
+            # Check if price exceeds MA by tolerance percentage
+            price_ma_ratio = current_price / current_ma
+            tolerance_ratio = 1 + (tolerance_percent / 100.0)
+            
+            # Check if crossing is significant enough (above tolerance band)
+            significant_above = price_ma_ratio >= tolerance_ratio
+            significant_below = price_ma_ratio <= (1.0 / tolerance_ratio)
+            
+            if significant_above or significant_below:
+                # Check if this crossing has persisted for confirmation_days
+                crossing_confirmed = True
+                cross_direction = "above" if significant_above else "below"
+                
+                # If confirmation_days = 0, no confirmation needed (immediate)
+                if confirmation_days == 0:
+                    crossing_confirmed = True
+                else:
+                    # Look back confirmation_days to see if crossing has been consistent
+                    for i in range(1, confirmation_days + 1):
+                        if len(df_ref_up_to_date) <= i or len(ma) <= i:
+                            crossing_confirmed = False
+                            break
+                        
+                        # Get historical data
+                        hist_price = df_ref_up_to_date['Close'].iloc[-(i+1)]
+                        hist_ma = ma.iloc[-(i+1)]
+                        
+                        if pd.isna(hist_price) or pd.isna(hist_ma):
+                            crossing_confirmed = False
+                            break
+                        
+                        # Check if historical crossing was in same direction
+                        hist_ratio = hist_price / hist_ma
+                        if cross_direction == "above":
+                            if hist_ratio < tolerance_ratio:
+                                crossing_confirmed = False
+                                break
+                        else:  # below
+                            if hist_ratio > (1.0 / tolerance_ratio):
+                                crossing_confirmed = False
+                                break
+                
+                if crossing_confirmed:
+                    crossed_assets.append(ticker)
+                    cross_details[ticker] = {
+                        'type': cross_direction,
+                        'current_price': current_price,
+                        'current_ma': current_ma,
+                        'price_ma_ratio': price_ma_ratio,
+                        'tolerance_ratio': tolerance_ratio,
+                        'confirmation_days': confirmation_days,
+                        'reference_ticker': reference_ticker
+                    }
+                
+        except Exception as e:
+            continue
+    
+    return crossed_assets, cross_details
+
 def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='SMA', config=None, stocks_config=None):
     """
     Filter out assets that are below their Moving Average (SMA or EMA).
@@ -4581,6 +4749,14 @@ def single_backtest(config, sim_index, reindexed_data):
             start_dates_config[t] = pd.NaT
     dates_added = set()
     dates_rebal = sorted(get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index))
+    
+    # OPTIMIZATION: Precompute MA columns once at the start if MA filter is enabled
+    # This is the key performance improvement - compute MA once instead of every day!
+    if config.get('use_sma_filter', False):
+        ma_window = config.get('sma_window', 200)
+        ma_type = config.get('ma_type', 'SMA')
+        ma_multiplier = config.get('ma_multiplier', 1.48)  # Default multiplier for market days
+        precompute_ma_columns(reindexed_data, ma_window, ma_type, ma_multiplier)
 
     # Dictionaries to store historical data for new tables
     historical_allocations = {}
@@ -5360,6 +5536,23 @@ def single_backtest(config, sim_index, reindexed_data):
                     should_rebalance = False
             else:
                 # Regular rebalancing - always rebalance on scheduled dates
+                should_rebalance = True
+        
+        # Check for MA cross rebalancing (if enabled)
+        ma_cross_rebalance = config.get('ma_cross_rebalance', False)
+        if ma_cross_rebalance and config.get('use_sma_filter', False) and set(tickers):
+            # Check if any ticker has crossed its MA with anti-whipsaw filtering
+            ma_window = config.get('sma_window', 200)
+            ma_type = config.get('ma_type', 'SMA')
+            tolerance_percent = config.get('ma_tolerance_percent', 2.0)
+            confirmation_days = config.get('ma_confirmation_days', 3)
+            
+            crossed_assets, cross_details = detect_ma_cross_with_anti_whipsaw(
+                list(tickers), reindexed_data, date, ma_window, ma_type, config, config['stocks'],
+                tolerance_percent, confirmation_days
+            )
+            
+            if crossed_assets:
                 should_rebalance = True
         
         if should_rebalance and set(tickers):
@@ -6231,6 +6424,10 @@ def paste_json_callback():
             'use_sma_filter': json_data.get('use_sma_filter', False),
             'sma_window': json_data.get('sma_window', 200),
             'ma_type': json_data.get('ma_type', 'SMA'),
+            'ma_multiplier': json_data.get('ma_multiplier', 1.48),
+            'ma_cross_rebalance': json_data.get('ma_cross_rebalance', False),
+            'ma_tolerance_percent': json_data.get('ma_tolerance_percent', 2.0),
+            'ma_confirmation_days': json_data.get('ma_confirmation_days', 3),
         }
         
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index] = allocations_config
@@ -6245,6 +6442,10 @@ def paste_json_callback():
         st.session_state['alloc_active_use_sma_filter'] = allocations_config.get('use_sma_filter', False)
         st.session_state['alloc_active_sma_window'] = allocations_config.get('sma_window', 200)
         st.session_state['alloc_active_ma_type'] = allocations_config.get('ma_type', 'SMA')
+        st.session_state['alloc_active_ma_multiplier'] = allocations_config.get('ma_multiplier', 1.48)
+        st.session_state['alloc_active_ma_cross_rebalance'] = allocations_config.get('ma_cross_rebalance', False)
+        st.session_state['alloc_active_ma_tolerance'] = allocations_config.get('ma_tolerance_percent', 2.0)
+        st.session_state['alloc_active_ma_delay'] = allocations_config.get('ma_confirmation_days', 3)
         
         # Update session state for momentum settings (FIX FOR VISUAL BUG)
         st.session_state['alloc_active_use_momentum'] = allocations_config.get('use_momentum', True)
@@ -7659,6 +7860,78 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
                 help="Number of days for the Moving Average calculation"
             )
             active_portfolio['sma_window'] = ma_window
+        
+        # MA Multiplier input
+        # Initialize MA multiplier state
+        if "alloc_active_ma_multiplier" not in st.session_state:
+            st.session_state["alloc_active_ma_multiplier"] = active_portfolio.get('ma_multiplier', 1.48)
+        
+        ma_multiplier = st.number_input(
+            "MA Multiplier",
+            min_value=1.0,
+            max_value=3.0,
+            value=st.session_state.get("alloc_active_ma_multiplier", 1.48),
+            step=0.01,
+            key="alloc_active_ma_multiplier",
+            help="Multiplier to convert market days to calendar days (default 1.48 for ffill data)"
+        )
+        active_portfolio['ma_multiplier'] = ma_multiplier
+        
+        # MA Cross Rebalancing Section
+        st.markdown("**MA Cross Rebalancing:**")
+        
+        # Initialize MA cross rebalance state
+        if "alloc_active_ma_cross_rebalance" not in st.session_state:
+            st.session_state["alloc_active_ma_cross_rebalance"] = active_portfolio.get('ma_cross_rebalance', False)
+        
+        ma_cross_rebalance = st.checkbox(
+            "Immediate Rebalance on MA Cross",
+            key="alloc_active_ma_cross_rebalance",
+            help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule"
+        )
+        active_portfolio['ma_cross_rebalance'] = ma_cross_rebalance
+        
+        # Anti-whipsaw options (only show when MA cross rebalancing is enabled)
+        if ma_cross_rebalance:
+            st.markdown("**Anti-Whipsaw Settings:**")
+            
+            col_band, col_delay = st.columns(2)
+            
+            with col_band:
+                # Tolerance band percentage
+                if "alloc_active_ma_tolerance" not in st.session_state:
+                    st.session_state["alloc_active_ma_tolerance"] = active_portfolio.get('ma_tolerance_percent', 2.0)
+                
+                tolerance_percent = st.number_input(
+                    "Tolerance Band (%)",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=st.session_state.get("alloc_active_ma_tolerance", 2.0),
+                    step=0.1,
+                    key="alloc_active_ma_tolerance",
+                    help="Percentage band that price must exceed MA by to be considered a valid cross"
+                )
+                active_portfolio['ma_tolerance_percent'] = tolerance_percent
+            
+            with col_delay:
+                # Confirmation delay in days
+                if "alloc_active_ma_delay" not in st.session_state:
+                    st.session_state["alloc_active_ma_delay"] = active_portfolio.get('ma_confirmation_days', 3)
+                
+                confirmation_days = st.number_input(
+                    "Confirmation Delay (days)",
+                    min_value=0,
+                    max_value=10,
+                    value=st.session_state.get("alloc_active_ma_delay", 3),
+                    step=1,
+                    key="alloc_active_ma_delay",
+                    help="Number of days the crossing must persist without recrossing to be confirmed"
+                )
+                active_portfolio['ma_confirmation_days'] = confirmation_days
+        else:
+            # Set default values when disabled
+            active_portfolio['ma_tolerance_percent'] = 2.0
+            active_portfolio['ma_confirmation_days'] = 3
 
     # Store MA filter state
     active_portfolio['use_sma_filter'] = st.session_state.get('alloc_active_use_sma_filter', False)
@@ -7772,11 +8045,13 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['use_sma_filter'] = st.session_state.get('alloc_active_use_sma_filter', False)
     cleaned_config['sma_window'] = st.session_state.get('alloc_active_sma_window', 200)
     cleaned_config['ma_type'] = st.session_state.get('alloc_active_ma_type', 'SMA')
+    cleaned_config['ma_multiplier'] = st.session_state.get('alloc_active_ma_multiplier', 1.48)
     
     # Also update the active portfolio to keep it in sync
     active_portfolio['use_sma_filter'] = st.session_state.get('alloc_active_use_sma_filter', False)
     active_portfolio['sma_window'] = st.session_state.get('alloc_active_sma_window', 200)
     active_portfolio['ma_type'] = st.session_state.get('alloc_active_ma_type', 'SMA')
+    active_portfolio['ma_multiplier'] = st.session_state.get('alloc_active_ma_multiplier', 1.48)
     
     config_json = json.dumps(cleaned_config, indent=4)
     st.code(config_json, language='json')
