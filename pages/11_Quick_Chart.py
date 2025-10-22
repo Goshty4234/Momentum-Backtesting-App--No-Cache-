@@ -55,6 +55,143 @@ def get_processed_ticker_data(final_ticker):
     
     return data
 
+def calculate_ma_crossings(data, ma_column):
+    """Calculate MA crossings with dates, direction, and duration"""
+    crossings = []
+    
+    # Create a boolean series for price above MA
+    above_ma = data['Close'] > data[ma_column]
+    
+    # Find crossing points (where the boolean series changes)
+    crossing_points = above_ma.diff().fillna(0) != 0
+    
+    if not crossing_points.any():
+        return crossings
+    
+    # Get crossing dates and directions
+    crossing_dates = data.index[crossing_points]
+    crossing_directions = above_ma[crossing_points]
+    
+    # Calculate duration for each crossing
+    for i, (date, direction) in enumerate(zip(crossing_dates, crossing_directions)):
+        # Find the next crossing or end of data
+        if i < len(crossing_dates) - 1:
+            next_date = crossing_dates[i + 1]
+            duration = (next_date - date).days
+        else:
+            # Last crossing - duration to current date
+            duration = (data.index[-1] - date).days
+        
+        crossings.append({
+            'date': date.strftime('%Y-%m-%d'),
+            'direction': 'Above MA' if direction else 'Below MA',
+            'duration_days': duration,
+            'price': data.loc[date, 'Close'],
+            'ma_value': data.loc[date, ma_column]
+        })
+    
+    return crossings
+
+def calculate_cagr(returns):
+    """Calculate Compound Annual Growth Rate"""
+    if len(returns) == 0:
+        return 0
+    total_return = (1 + returns).prod() - 1
+    years = len(returns) / 252  # Assuming 252 trading days per year
+    if years == 0:
+        return 0
+    return (1 + total_return) ** (1 / years) - 1
+
+def calculate_drawdown(returns):
+    """Calculate maximum drawdown"""
+    if len(returns) == 0:
+        return 0
+    cumulative = (1 + returns).cumprod()
+    running_max = cumulative.expanding().max()
+    drawdown = (cumulative - running_max) / running_max
+    return drawdown.min()
+
+def analyze_sma_periods(data, min_period=10, max_period=200, 
+                       bandwidth_pct=0, confirmation_days=0):
+    """Analyze all SMA periods and find best CAGR and min drawdown periods"""
+    results = []
+    
+    for period in range(min_period, max_period + 1):
+        try:
+            # Calculate SMA
+            data_copy = data.copy()
+            data_copy[f'MA_{period}'] = data_copy['Close'].rolling(window=period).mean()
+            
+            # Remove NaN values
+            data_clean = data_copy.dropna()
+            if len(data_clean) < 252:  # Need at least 1 year of data
+                continue
+            
+            # Apply bandwidth filter if specified
+            if bandwidth_pct > 0:
+                bandwidth = data_clean[f'MA_{period}'] * (bandwidth_pct / 100)
+                above_band = data_clean['Close'] > (data_clean[f'MA_{period}'] + bandwidth)
+                below_band = data_clean['Close'] < (data_clean[f'MA_{period}'] - bandwidth)
+            else:
+                above_band = data_clean['Close'] > data_clean[f'MA_{period}']
+                below_band = data_clean['Close'] < data_clean[f'MA_{period}']
+            
+            # Apply confirmation days filter if specified
+            if confirmation_days > 0:
+                # Require consecutive days above/below MA
+                above_confirmed = above_band.rolling(window=confirmation_days).sum() == confirmation_days
+                below_confirmed = below_band.rolling(window=confirmation_days).sum() == confirmation_days
+                
+                # Generate signals with confirmation
+                signals = np.where(above_confirmed, 1, np.where(below_confirmed, 0, np.nan))
+            else:
+                # Simple signals
+                signals = np.where(above_band, 1, 0)
+            
+            # Forward fill signals to maintain position until next signal
+            signals = pd.Series(signals, index=data_clean.index).fillna(method='ffill')
+            
+            # Calculate returns based on signals
+            returns = data_clean['Close'].pct_change()
+            strategy_returns = signals.shift(1) * returns  # Shift to avoid look-ahead bias
+            
+            # Remove NaN from strategy returns
+            strategy_returns = strategy_returns.dropna()
+            
+            if len(strategy_returns) == 0:
+                continue
+                
+            # Calculate metrics
+            cagr = calculate_cagr(strategy_returns)
+            max_dd = calculate_drawdown(strategy_returns)
+            
+            results.append({
+                'period': period,
+                'cagr': cagr * 100,  # Convert to percentage
+                'max_drawdown': max_dd * 100,  # Convert to percentage
+                'total_return': (1 + strategy_returns).prod() - 1,
+                'sharpe': strategy_returns.mean() / strategy_returns.std() * np.sqrt(252) if strategy_returns.std() > 0 else 0,
+                'win_rate': (strategy_returns > 0).mean() * 100
+            })
+            
+        except Exception as e:
+            continue
+    
+    if not results:
+        return None, "No valid results found"
+    
+    # Find best CAGR period
+    best_cagr = max(results, key=lambda x: x['cagr'])
+    
+    # Find min drawdown period (least negative drawdown)
+    best_drawdown = max(results, key=lambda x: x['max_drawdown'])  # max because drawdowns are negative
+    
+    return {
+        'all_results': results,
+        'best_cagr': best_cagr,
+        'best_drawdown': best_drawdown
+    }, None
+
 def update_ticker_input():
     """Callback function when ticker input changes - auto-capitalize and resolve aliases"""
     if 'ticker_input_key' in st.session_state:
@@ -173,6 +310,9 @@ def generate_chart(ticker_input, ma_window, ma_type):
         current_ma = data[f'MA_{ma_window}'].iloc[-1]
         current_date = data.index[-1].strftime('%Y-%m-%d')
         
+        # Calculate MA crossings
+        crossings = calculate_ma_crossings(data, f'MA_{ma_window}')
+        
         chart_data = {
             'fig': fig,
             'final_ticker': final_ticker,
@@ -181,7 +321,8 @@ def generate_chart(ticker_input, ma_window, ma_type):
             'current_ma': current_ma,
             'current_date': current_date,
             'ma_window': ma_window,
-            'ma_type': ma_type
+            'ma_type': ma_type,
+            'crossings': crossings
         }
         
         return chart_data, None
@@ -189,7 +330,11 @@ def generate_chart(ticker_input, ma_window, ma_type):
     except Exception as e:
         return None, str(e)
 
-st.set_page_config(page_title="Quick Chart", layout="wide")
+st.set_page_config(
+    page_title="Quick Chart", 
+    page_icon="📈", 
+    layout="wide"
+)
 
 st.title("📈 Quick Chart - Ticker & Moving Average")
 
@@ -287,15 +432,182 @@ if ticker_input:
             st.write("**Last 5 days:**")
             display_data = data[['Close', f'MA_{chart_data["ma_window"]}']].tail()
             st.dataframe(display_data)
+        
+        # Show MA crossings table
+        if 'crossings' in chart_data and chart_data['crossings']:
+            with st.expander("🔄 MA Crossings Analysis", expanded=True):
+                st.write(f"**Total Crossings:** {len(chart_data['crossings'])}")
+                
+                # Create crossings DataFrame
+                crossings_df = pd.DataFrame(chart_data['crossings'])
+                crossings_df['price'] = crossings_df['price'].round(2)
+                crossings_df['ma_value'] = crossings_df['ma_value'].round(2)
+                
+                # Add color coding for direction
+                def color_direction(val):
+                    if val == 'Above MA':
+                        return 'background-color: #2d5016; color: #ffffff'
+                    else:
+                        return 'background-color: #8b0000; color: #ffffff'
+                
+                styled_df = crossings_df.style.applymap(color_direction, subset=['direction'])
+                st.dataframe(styled_df, use_container_width=True)
+                
+                # Show statistics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    above_crossings = len([c for c in chart_data['crossings'] if c['direction'] == 'Above MA'])
+                    st.metric("Above MA Crossings", above_crossings)
+                with col2:
+                    below_crossings = len([c for c in chart_data['crossings'] if c['direction'] == 'Below MA'])
+                    st.metric("Below MA Crossings", below_crossings)
+                with col3:
+                    avg_duration = np.mean([c['duration_days'] for c in chart_data['crossings']])
+                    st.metric("Avg Duration (days)", f"{avg_duration:.1f}")
+                
+                # Show longest periods
+                st.write("**Longest Periods:**")
+                sorted_crossings = sorted(chart_data['crossings'], key=lambda x: x['duration_days'], reverse=True)
+                for i, crossing in enumerate(sorted_crossings[:5]):
+                    st.write(f"{i+1}. {crossing['direction']} for {crossing['duration_days']:.0f} days (from {crossing['date']})")
+        elif 'crossings' in chart_data:
+            st.info("No MA crossings detected in the data period")
+        else:
+            st.info("Generate a chart first to see MA crossings analysis")
 
 else:
     st.info("👆 Enter a ticker symbol to get started")
 
-# Footer
+# SMA Analyzer section (Advanced - at the end)
 st.markdown("---")
-st.markdown("💡 **Tips:**")
-st.markdown("- Use aliases like `SPYTR`, `TQQQND`, `GOLDX` for special tickers")
-st.markdown("- Leveraged tickers (like `TQQQND`) include leverage and expense ratio")
-st.markdown("- Berkshire tickers: use `BRK.A` or `BRK.B` (automatically converted)")
-st.markdown("- **Cache**: Data cached for 2 hours - test multiple MA without re-downloading!")
-st.markdown("- **Session**: Chart persists when switching pages")
+st.subheader("🎯 SMA Analyzer (Advanced)")
+
+# Parameters in two rows
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    min_period = st.number_input(
+        "Min Period",
+        min_value=5,
+        max_value=100,
+        value=10,
+        help="Minimum SMA period to test"
+    )
+
+with col2:
+    max_period = st.number_input(
+        "Max Period", 
+        min_value=50,
+        max_value=500,
+        value=200,
+        help="Maximum SMA period to test"
+    )
+
+with col3:
+    bandwidth_pct = st.number_input(
+        "Bandwidth %",
+        min_value=0.0,
+        max_value=10.0,
+        value=0.0,
+        step=0.1,
+        help="Price must cross MA by this % to trigger signal (anti-whiplash)"
+    )
+
+with col4:
+    confirmation_days = st.number_input(
+        "Confirmation Days",
+        min_value=0,
+        max_value=10,
+        value=0,
+        help="Require N consecutive days above/below MA to confirm signal"
+    )
+
+# Analysis button
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    if st.button("🔍 Analyze SMA Periods", type="secondary"):
+        if ticker_input:
+            # Get data for analysis
+            final_ticker = ticker_input
+            data = get_processed_ticker_data(final_ticker)
+            
+            if data is not None and not data.empty:
+                with st.spinner(f"Analyzing SMA periods for {final_ticker}..."):
+                    analysis_result, error = analyze_sma_periods(
+                        data, 
+                        min_period=min_period, 
+                        max_period=max_period, 
+                        bandwidth_pct=bandwidth_pct,
+                        confirmation_days=confirmation_days
+                    )
+                    
+                    if analysis_result:
+                        st.session_state.sma_analysis = analysis_result
+                        st.success(f"✅ Analysis complete!")
+                    else:
+                        st.error(f"❌ Error: {error}")
+            else:
+                st.error("❌ No data available for analysis")
+        else:
+            st.warning("⚠️ Enter a ticker symbol first")
+
+with col2:
+    if st.button("🗑️ Clear Results", type="secondary"):
+        if 'sma_analysis' in st.session_state:
+            del st.session_state.sma_analysis
+            st.rerun()
+
+with col3:
+    st.write("")  # Empty space for alignment
+
+with col4:
+    st.write("")  # Empty space for alignment
+
+# Display SMA Analysis Results
+if 'sma_analysis' in st.session_state and st.session_state.sma_analysis:
+    analysis = st.session_state.sma_analysis
+    
+    st.markdown("---")
+    st.subheader("📊 SMA Analysis Results")
+    
+    # Show best results for both metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Best CAGR Period", f"{analysis['best_cagr']['period']}")
+    with col2:
+        st.metric("Best CAGR", f"{analysis['best_cagr']['cagr']:.2f}%")
+    with col3:
+        st.metric("Min Drawdown Period", f"{analysis['best_drawdown']['period']}")
+    with col4:
+        st.metric("Min Drawdown", f"{analysis['best_drawdown']['max_drawdown']:.2f}%")
+    with col5:
+        st.metric("Win Rate (Best CAGR)", f"{analysis['best_cagr']['win_rate']:.1f}%")
+    
+    # Show results table
+    results_df = pd.DataFrame(analysis['all_results'])
+    
+    # Format all numeric columns to show exactly 2 decimal places
+    numeric_columns = ['cagr', 'max_drawdown', 'total_return', 'sharpe', 'win_rate']
+    for col in numeric_columns:
+        if col in results_df.columns:
+            results_df[col] = results_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else x)
+    
+    # Sort by CAGR descending
+    results_df = results_df.sort_values('cagr', ascending=False)
+    
+    # Highlight the best results
+    def highlight_best(row):
+        if row['period'] == analysis['best_cagr']['period']:
+            return ['background-color: #2d5016; color: white'] * len(row)  # Green for best CAGR
+        elif row['period'] == analysis['best_drawdown']['period']:
+            return ['background-color: #8b0000; color: white'] * len(row)  # Red for min drawdown
+        return [''] * len(row)
+    
+    styled_df = results_df.style.apply(highlight_best, axis=1)
+    st.dataframe(styled_df, use_container_width=True)
+    
+    # Show summary
+    st.write("**🎯 Summary:**")
+    st.write(f"• **Best CAGR**: Period {analysis['best_cagr']['period']} with {analysis['best_cagr']['cagr']:.2f}% CAGR")
+    st.write(f"• **Min Drawdown**: Period {analysis['best_drawdown']['period']} with {analysis['best_drawdown']['max_drawdown']:.2f}% drawdown")
