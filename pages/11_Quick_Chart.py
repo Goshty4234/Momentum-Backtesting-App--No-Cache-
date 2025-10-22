@@ -396,6 +396,70 @@ def generate_chart(ticker_input, ma_window, ma_type, calendar_multiplier=1.48):
         # Create chart
         fig = go.Figure()
         
+        # Add background zones based on price vs SMA relationship
+        # Create zones where price is above/below SMA
+        above_sma = data['Close'] > data[f'MA_{ma_window}_regular']
+        
+        # Find transition points
+        transitions = above_sma.diff().fillna(0) != 0
+        transition_dates = data.index[transitions]
+        
+        # Prepare shapes for background zones
+        shapes = []
+        if len(transition_dates) > 0:
+            current_zone = above_sma.iloc[0]
+            start_date = data.index[0]
+            
+            for i, transition_date in enumerate(transition_dates):
+                # Add zone from start to transition
+                if current_zone:
+                    # Bullish zone (green background)
+                    shapes.append(dict(
+                        type="rect",
+                        x0=start_date, x1=transition_date,
+                        y0=0, y1=1,
+                        yref="paper",
+                        fillcolor="rgba(0, 255, 0, 0.15)",
+                        layer="below",
+                        line=dict(width=0)
+                    ))
+                else:
+                    # Bearish zone (red background)
+                    shapes.append(dict(
+                        type="rect",
+                        x0=start_date, x1=transition_date,
+                        y0=0, y1=1,
+                        yref="paper",
+                        fillcolor="rgba(255, 0, 0, 0.15)",
+                        layer="below",
+                        line=dict(width=0)
+                    ))
+                
+                start_date = transition_date
+                current_zone = not current_zone
+            
+            # Add final zone
+            if current_zone:
+                shapes.append(dict(
+                    type="rect",
+                    x0=start_date, x1=data.index[-1],
+                    y0=0, y1=1,
+                    yref="paper",
+                    fillcolor="rgba(0, 255, 0, 0.15)",
+                    layer="below",
+                    line=dict(width=0)
+                ))
+            else:
+                shapes.append(dict(
+                    type="rect",
+                    x0=start_date, x1=data.index[-1],
+                    y0=0, y1=1,
+                    yref="paper",
+                    fillcolor="rgba(255, 0, 0, 0.15)",
+                    layer="below",
+                    line=dict(width=0)
+                ))
+        
         # Add price line
         fig.add_trace(go.Scatter(
             x=data.index,
@@ -431,7 +495,8 @@ def generate_chart(ticker_input, ma_window, ma_type, calendar_multiplier=1.48):
             hovermode='x unified',
             height=600,
             showlegend=True,
-            template="plotly_white"
+            template="plotly_white",
+            shapes=shapes
         )
         
         # Customize hover template to show full date and prevent text truncation
