@@ -3058,7 +3058,11 @@ def generate_allocations_pdf(custom_name=""):
             ['Max Allocation', f"{active_portfolio.get('max_allocation_percent', 10.0):.1f}%" if active_portfolio.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock'],
             ['MA Filter', 'Yes' if active_portfolio.get('use_sma_filter', False) else 'No', 'Filter assets below moving average'],
             ['MA Type', active_portfolio.get('ma_type', 'SMA'), 'Type of moving average (SMA or EMA)'],
-            ['MA Window', f"{active_portfolio.get('sma_window', 200)} days", 'Moving average calculation window']
+            ['MA Window', f"{active_portfolio.get('sma_window', 200)} days", 'Moving average calculation window'],
+            ['MA Multiplier', f"{active_portfolio.get('ma_multiplier', 1.48):.4f}", 'Multiplier to convert market days to calendar days'],
+            ['MA Cross Rebalancing', 'Yes' if active_portfolio.get('ma_cross_rebalance', False) else 'No', 'Immediate rebalancing on MA cross'],
+            ['MA Tolerance Band', f"{active_portfolio.get('ma_tolerance_percent', 2.0):.1f}%" if active_portfolio.get('ma_cross_rebalance', False) else 'N/A', 'Tolerance band for MA cross detection'],
+            ['MA Confirmation Days', f"{active_portfolio.get('ma_confirmation_days', 3)} days" if active_portfolio.get('ma_cross_rebalance', False) else 'N/A', 'Confirmation delay for MA cross']
         ]
         
         # Add momentum windows if they exist
