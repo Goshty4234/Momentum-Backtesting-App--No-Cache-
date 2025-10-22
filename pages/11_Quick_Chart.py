@@ -434,6 +434,14 @@ def generate_chart(ticker_input, ma_window, ma_type, calendar_multiplier=1.48):
             template="plotly_white"
         )
         
+        # Customize hover template to show full date and prevent text truncation
+        fig.update_traces(
+            hovertemplate="<b>%{fullData.name}</b><br>" +
+                         "Date: %{x|%Y-%m-%d}<br>" +
+                         "Price: $%{y:.2f}<br>" +
+                         "<extra></extra>"
+        )
+        
         # Calculate metrics for both MAs
         current_price = data['Close'].iloc[-1]
         current_ma_regular = data[f'MA_{ma_window}_regular'].iloc[-1]
