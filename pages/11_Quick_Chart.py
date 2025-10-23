@@ -675,7 +675,7 @@ if ticker_input:
                 st.dataframe(styled_df, use_container_width=True)
                 
                 # Show statistics
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     above_crossings = len([c for c in chart_data['crossings_regular'] if c['direction'] == 'Above MA'])
                     st.metric("Above MA", above_crossings)
@@ -685,6 +685,9 @@ if ticker_input:
                 with col3:
                     avg_duration = np.mean([c['duration_days'] for c in chart_data['crossings_regular']])
                     st.metric("Avg Duration", f"{avg_duration:.1f}")
+                with col4:
+                    median_duration = np.median([c['duration_days'] for c in chart_data['crossings_regular']])
+                    st.metric("Median Duration", f"{median_duration:.1f}")
         else:
             st.info("No Trading Days MA crossings detected")
         
@@ -710,7 +713,7 @@ if ticker_input:
                 st.dataframe(styled_df, use_container_width=True)
                 
                 # Show statistics
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     above_crossings = len([c for c in chart_data['crossings_ffill'] if c['direction'] == 'Above MA'])
                     st.metric("Above MA", above_crossings)
@@ -720,6 +723,9 @@ if ticker_input:
                 with col3:
                     avg_duration = np.mean([c['duration_days'] for c in chart_data['crossings_ffill']])
                     st.metric("Avg Duration", f"{avg_duration:.1f}")
+                with col4:
+                    median_duration = np.median([c['duration_days'] for c in chart_data['crossings_ffill']])
+                    st.metric("Median Duration", f"{median_duration:.1f}")
         else:
             st.info("No Calendar Days MA crossings detected")
 
