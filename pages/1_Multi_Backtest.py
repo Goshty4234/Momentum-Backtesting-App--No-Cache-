@@ -11423,8 +11423,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         else:
                             clear_name_parts.append(f"- {ma_type}{ma_window}")
                     
-                    # Add MA Cross Rebalancing information (only show when enabled)
-                    if variant.get('ma_cross_rebalance', False):
+                    # Add MA Cross Rebalancing information (only show when enabled AND SMA/EMA is active)
+                    if variant.get('ma_cross_rebalance', False) and variant.get('use_sma_filter', False):
                         tolerance = variant.get('ma_tolerance_percent', 2.0)
                         days = variant.get('ma_confirmation_days', 3)
                         clear_name_parts.append(f"- Cross Band {tolerance:.0f}% Days {days}")
