@@ -11361,7 +11361,15 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         
                         variants.append(variant)
                     
-                    return variants
+                    # FINAL CHECK: Remove portfolios with Cross Band but no MA
+                    final_variants = []
+                    for variant in variants:
+                        # Skip portfolios that have cross rebalancing but no MA filter
+                        if variant.get('ma_cross_rebalance', False) and not variant.get('use_sma_filter', False):
+                            continue  # Skip this illogical portfolio
+                        final_variants.append(variant)
+                    
+                    return final_variants
                 
                 import copy
                 
