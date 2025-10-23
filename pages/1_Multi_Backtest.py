@@ -3755,7 +3755,7 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("### Performance Settings")
 with col2:
-    use_parallel = st.checkbox("Parallel Processing", value=True,
+    use_parallel = st.checkbox("Parallel Processing", value=False,
                               help="✅ Process multiple portfolios simultaneously using threading. Automatically enabled for 3+ portfolios for better performance.")
     st.session_state.use_parallel_processing = use_parallel
 
