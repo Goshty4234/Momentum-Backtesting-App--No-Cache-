@@ -8922,39 +8922,7 @@ def update_active_portfolio_index():
         st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
         st.session_state[ma_multiplier_key] = active_portfolio.get('ma_multiplier', 1.48)
         
-        # NUCLEAR OVERRIDE: Force sync ALL MA widgets with JSON values (with error handling)
-        def nuclear_ma_sync():
-            """NUCLEAR: Force sync ALL MA widgets with imported JSON values"""
-            try:
-                # Force sync MA Multiplier widget (using working logic)
-                ma_multiplier_working_key = f"ma_multiplier_working_{portfolio_index}"
-                st.session_state[ma_multiplier_working_key] = active_portfolio.get('ma_multiplier', 1.48)
-                
-                # Force sync MA Window widget
-                ma_window_main_key = f"ma_window_main_{portfolio_index}"
-                st.session_state[ma_window_main_key] = active_portfolio.get('sma_window', 200)
-                
-                # Force sync MA Cross Rebalance widget
-                ma_cross_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
-                st.session_state[ma_cross_key] = active_portfolio.get('ma_cross_rebalance', False)
-                
-                # Force sync MA Tolerance widget
-                ma_tolerance_key = f"multi_backtest_active_ma_tolerance_{portfolio_index}"
-                st.session_state[ma_tolerance_key] = active_portfolio.get('ma_tolerance_percent', 2.0)
-                
-                # Force sync MA Delay widget
-                ma_delay_key = f"multi_backtest_active_ma_delay_{portfolio_index}"
-                st.session_state[ma_delay_key] = active_portfolio.get('ma_confirmation_days', 3)
-                
-                # Force sync independent test widget with JSON value
-                independent_key = f"independent_ma_multiplier_test_{portfolio_index}"
-                st.session_state[independent_key] = active_portfolio.get('ma_multiplier', 1.48)
-            except Exception:
-                # If sync fails, continue without it to avoid breaking the app
-                pass
-        
-        # Execute NUCLEAR sync
-        nuclear_ma_sync()
+        # No forced sync - let widgets work naturally like page 1
         
         # Initialize MA cross rebalance setting
         ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
@@ -11777,47 +11745,7 @@ def update_stock_dividends(index):
 # Update active_portfolio
 active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
 
-# NUCLEAR OVERRIDE: Force sync ALL widgets with portfolio values on every display
-def nuclear_widget_sync_on_display():
-    """NUCLEAR: Force sync ALL widgets with portfolio values on every display"""
-    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-    portfolio = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
-    
-    # Only sync if values are different to avoid unnecessary updates
-    ma_multiplier_simple_key = f"ma_multiplier_simple_{portfolio_index}"
-    if ma_multiplier_simple_key not in st.session_state or st.session_state[ma_multiplier_simple_key] != portfolio.get('ma_multiplier', 1.48):
-        st.session_state[ma_multiplier_simple_key] = portfolio.get('ma_multiplier', 1.48)
-    
-    # Only sync other widgets if they exist and are different
-    ma_window_main_key = f"ma_window_main_{portfolio_index}"
-    if ma_window_main_key not in st.session_state or st.session_state[ma_window_main_key] != portfolio.get('sma_window', 200):
-        st.session_state[ma_window_main_key] = portfolio.get('sma_window', 200)
-    
-    ma_cross_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
-    if ma_cross_key not in st.session_state or st.session_state[ma_cross_key] != portfolio.get('ma_cross_rebalance', False):
-        st.session_state[ma_cross_key] = portfolio.get('ma_cross_rebalance', False)
-    
-    ma_tolerance_key = f"multi_backtest_active_ma_tolerance_{portfolio_index}"
-    if ma_tolerance_key not in st.session_state or st.session_state[ma_tolerance_key] != portfolio.get('ma_tolerance_percent', 2.0):
-        st.session_state[ma_tolerance_key] = portfolio.get('ma_tolerance_percent', 2.0)
-    
-    ma_delay_key = f"multi_backtest_active_ma_delay_{portfolio_index}"
-    if ma_delay_key not in st.session_state or st.session_state[ma_delay_key] != portfolio.get('ma_confirmation_days', 3):
-        st.session_state[ma_delay_key] = portfolio.get('ma_confirmation_days', 3)
-    
-    # Force sync other important widgets only if different
-    if 'multi_backtest_active_use_sma_filter' not in st.session_state or st.session_state['multi_backtest_active_use_sma_filter'] != portfolio.get('use_sma_filter', False):
-        st.session_state['multi_backtest_active_use_sma_filter'] = portfolio.get('use_sma_filter', False)
-    
-    if 'multi_backtest_active_sma_window' not in st.session_state or st.session_state['multi_backtest_active_sma_window'] != portfolio.get('sma_window', 200):
-        st.session_state['multi_backtest_active_sma_window'] = portfolio.get('sma_window', 200)
-
-# Execute NUCLEAR sync on every display (only if needed)
-try:
-    nuclear_widget_sync_on_display()
-except Exception:
-    # If sync fails, continue without it to avoid breaking the app
-    pass
+# No forced sync - let widgets work naturally like page 1
 
 # Initialize MA filter state - SPECIFIC TO EACH PORTFOLIO
 ma_filter_key = f"multi_backtest_active_use_sma_filter_{st.session_state.multi_backtest_active_portfolio_index}"
@@ -14845,40 +14773,7 @@ def paste_all_json_callback():
             force_ma_sync_after_import()
             
             # NUCLEAR OVERRIDE: Force sync ALL MA widgets for ALL portfolios after JSON import (with error handling)
-            def nuclear_ma_sync_all_portfolios():
-                """NUCLEAR: Force sync ALL MA widgets for ALL portfolios with imported JSON values"""
-                try:
-                    for i, portfolio in enumerate(obj):
-                        if isinstance(portfolio, dict):
-                            # Force sync MA Multiplier widget for this portfolio (using working logic)
-                            ma_multiplier_working_key = f"ma_multiplier_working_{i}"
-                            st.session_state[ma_multiplier_working_key] = portfolio.get('ma_multiplier', 1.48)
-                            
-                            # Force sync MA Window widget for this portfolio
-                            ma_window_main_key = f"ma_window_main_{i}"
-                            st.session_state[ma_window_main_key] = portfolio.get('sma_window', 200)
-                            
-                            # Force sync MA Cross Rebalance widget for this portfolio
-                            ma_cross_key = f"multi_backtest_active_ma_cross_rebalance_{i}"
-                            st.session_state[ma_cross_key] = portfolio.get('ma_cross_rebalance', False)
-                            
-                            # Force sync MA Tolerance widget for this portfolio
-                            ma_tolerance_key = f"multi_backtest_active_ma_tolerance_{i}"
-                            st.session_state[ma_tolerance_key] = portfolio.get('ma_tolerance_percent', 2.0)
-                            
-                            # Force sync MA Delay widget for this portfolio
-                            ma_delay_key = f"multi_backtest_active_ma_delay_{i}"
-                            st.session_state[ma_delay_key] = portfolio.get('ma_confirmation_days', 3)
-                            
-                            # Force sync independent test widget for this portfolio
-                            independent_key = f"independent_ma_multiplier_test_{i}"
-                            st.session_state[independent_key] = portfolio.get('ma_multiplier', 1.48)
-                except Exception:
-                    # If sync fails, continue without it to avoid breaking the app
-                    pass
-            
-            # Execute NUCLEAR sync for all portfolios
-            nuclear_ma_sync_all_portfolios()
+            # No forced sync - let widgets work naturally like page 1
             
             # Process each portfolio configuration for Multi-Backtest page
             processed_configs = []
