@@ -774,9 +774,9 @@ if st.session_state.quick_chart_calendar_data:
             def highlight_best(row):
                 styles = [''] * len(row)
                 if row['period'] == results['best_cagr']['period']:
-                    styles[0] = 'background-color: #2d5016; color: #ffffff'
+                    styles[1] = 'background-color: #2d5016; color: #ffffff'  # CAGR column (green)
                 if row['period'] == results['best_drawdown']['period']:
-                    styles[1] = 'background-color: #8b0000; color: #ffffff'
+                    styles[2] = 'background-color: #8b0000; color: #ffffff'  # Max Drawdown column (red)
                 return styles
             
             styled_df = results_df.style.apply(highlight_best, axis=1)
@@ -920,9 +920,9 @@ if st.session_state.quick_chart_calendar_data:
             def highlight_best(row):
                 styles = [''] * len(row)
                 if row['period'] == results['best_cagr_period']:
-                    styles[0] = 'background-color: #2d5016; color: #ffffff'
+                    styles[1] = 'background-color: #2d5016; color: #ffffff'  # CAGR column (green)
                 if row['period'] == results['best_drawdown_period']:
-                    styles[1] = 'background-color: #8b0000; color: #ffffff'
+                    styles[2] = 'background-color: #8b0000; color: #ffffff'  # Max Drawdown column (red)
                 return styles
             
             styled_df = results_df.style.apply(highlight_best, axis=1)
