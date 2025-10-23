@@ -11085,14 +11085,10 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     # Add to variant params
     if ma_options:
         variant_params["ma_windows"] = ma_options
-    else:
-        variant_params["ma_windows"] = [None]
     
     # Add MA multiplier to variant params
     if ma_multiplier_options:
         variant_params["ma_multiplier"] = ma_multiplier_options
-    else:
-        variant_params["ma_multiplier"] = [1.48]
     
     # Add MA cross rebalancing to variant params
     if ma_cross_options:
@@ -11108,10 +11104,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # If no MA types enabled, use default values
             variant_params["ma_tolerance_percent"] = [2.0]
             variant_params["ma_confirmation_days"] = [3]
-    else:
-        variant_params["ma_cross_rebalance"] = [False]
-        variant_params["ma_tolerance_percent"] = [2.0]
-        variant_params["ma_confirmation_days"] = [3]
         
         # CLEAN SESSION STATE: When MA cross is disabled, clean up MA cross session state
         if f"ma_tolerance_values_{portfolio_index}" in st.session_state:
@@ -11184,6 +11176,18 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         # Check if maximum allocation filter is missing (only required when momentum is enabled)
         if use_momentum_vary and "max_allocation" not in variant_params:
             validation_errors.append("⚠️ Select at least one **Maximum Allocation Filter** option when momentum is enabled")
+        
+        # Check if MA options are missing (always required)
+        if "ma_windows" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **MA option** (Disable MA, Include SMA, or Include EMA)")
+        
+        # Check if MA multiplier options are missing (always required)
+        if "ma_multiplier" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **MA Multiplier option** (Use Default MA Multiplier or Vary MA Multiplier)")
+        
+        # Check if MA cross rebalancing options are missing (always required)
+        if "ma_cross_rebalance" not in variant_params:
+            validation_errors.append("⚠️ Select at least one **MA Cross Rebalancing option** (Disable MA Cross Rebalancing or Enable MA Cross Rebalancing)")
         
         # Show validation errors
         if validation_errors:
