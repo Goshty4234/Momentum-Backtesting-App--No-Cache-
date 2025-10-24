@@ -12,7 +12,7 @@ import re
 import time
 from numba import jit
 import concurrent.futures
-from functools import lru_cache
+# lru_cache removed for NO_CACHE version
 import os
 import signal
 import sys
@@ -1292,12 +1292,12 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     return results
 
 def get_ticker_data(ticker_symbol, period="max", auto_adjust=False, _cache_bust=None):
-    """Get ticker data (NO_CACHE version)
+    """Get ticker data (NO_CACHE version - Optimized for backtesting)
     
     Args:
         ticker_symbol: Stock ticker symbol (supports leverage format like SPY?L=3)
-        period: Data period (used in cache key to prevent conflicts)
-        auto_adjust: Auto-adjust setting (used in cache key to prevent conflicts)
+        period: Data period
+        auto_adjust: Auto-adjust setting
     """
     try:
         # Parse parameters from ticker symbol
@@ -3878,7 +3878,7 @@ def get_portfolio_value(portfolio_name):
     return portfolio_value
 
 def create_allocation_evolution_chart(portfolio_name, allocs_data):
-    """Create allocation evolution chart for a portfolio (NO_CACHE version)"""
+    """Create allocation evolution chart for a portfolio (CACHED version)"""
     try:
         # Convert to DataFrame for easier processing
         alloc_df = pd.DataFrame(allocs_data).T
@@ -3954,7 +3954,7 @@ def create_allocation_evolution_chart(portfolio_name, allocs_data):
         return None
 
 def process_allocation_dataframe(portfolio_name, allocation_data):
-    """Process allocation data into a clean DataFrame (NO_CACHE version)"""
+    """Process allocation data into a clean DataFrame (CACHED version)"""
     try:
         # Ensure all tickers (excluding None) are present in all dates for proper DataFrame creation
         all_tickers = set()
@@ -3998,7 +3998,7 @@ def process_allocation_dataframe(portfolio_name, allocation_data):
         return None, []
 
 def precompute_individual_portfolio_charts():
-    """Pre-compute ALL individual portfolio data for instant switching (NO_CACHE version)"""
+    """Pre-compute and cache ALL individual portfolio data for instant switching"""
     try:
         # Get all portfolio names from results
         all_results = st.session_state.get('multi_all_results', {})
@@ -4009,7 +4009,7 @@ def precompute_individual_portfolio_charts():
         if not all_results or not all_allocations:
             return
         
-        # Initialize comprehensive data storage
+        # Initialize comprehensive cache
         if 'individual_portfolio_cache' not in st.session_state:
             st.session_state.individual_portfolio_cache = {}
         
@@ -4018,19 +4018,19 @@ def precompute_individual_portfolio_charts():
             if portfolio_name in all_allocations:
                 portfolio_cache = {}
                 
-                # 1. Store portfolio configuration
+                # 1. Cache portfolio configuration
                 portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == portfolio_name), None)
                 portfolio_cache['config'] = portfolio_cfg
                 
-                # 2. Store allocation data
+                # 2. Cache allocation data
                 allocation_data = all_allocations[portfolio_name]
                 portfolio_cache['allocation_data'] = allocation_data
                 
-                # 3. Store metrics data
+                # 3. Cache metrics data
                 if portfolio_name in all_metrics:
                     portfolio_cache['metrics_data'] = all_metrics[portfolio_name]
                 
-                # 4. Pre-compute Historical Allocations DataFrame
+                # 4. Pre-compute and cache Historical Allocations DataFrame
                 if allocation_data:
                     try:
                         allocations_df_raw, all_tickers = process_allocation_dataframe(portfolio_name, allocation_data)
@@ -4057,7 +4057,7 @@ def precompute_individual_portfolio_charts():
                         'allocation': latest_allocation
                     }
                     
-                    # Create the pie chart
+                    # Create and cache the pie chart
                     if labels_today and vals_today:
                         fig_today = go.Figure()
                         fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
@@ -4104,7 +4104,7 @@ def precompute_individual_portfolio_charts():
                 if portfolio_name in today_weights_map:
                     portfolio_cache['today_weights'] = today_weights_map[portfolio_name]
                 
-                # Store everything in the data storage
+                # Store everything in the cache
                 st.session_state.individual_portfolio_cache[portfolio_name] = portfolio_cache
         
         st.success(f"✅ Pre-computed ALL data for {len(all_results)} portfolios")
@@ -4113,7 +4113,7 @@ def precompute_individual_portfolio_charts():
         st.error(f"Error pre-computing portfolio data: {str(e)}")
 
 def create_pie_chart(portfolio_name, allocation_data, title_suffix="Current Allocation"):
-    """Create pie chart for portfolio allocation (NO_CACHE version)"""
+    """Create pie chart for portfolio allocation (CACHED version)"""
     try:
         if not allocation_data:
             return None
@@ -4355,7 +4355,7 @@ def get_dates_by_freq(freq, start, end, market_days):
         raise ValueError(f"Unknown frequency: {freq}")
 
 def get_cached_rebalancing_dates(portfolio_name, rebalancing_frequency, sim_index):
-    """Get rebalancing dates (NO_CACHE version)"""
+    """Get rebalancing dates with caching to avoid recalculation"""
     cache_key = f"rebalancing_dates_{portfolio_name}_{rebalancing_frequency}"
     portfolio_rebalancing_dates = st.session_state.get(cache_key)
     
@@ -4949,24 +4949,31 @@ def detect_ma_cross_with_anti_whipsaw(valid_assets, reindexed_data, date, ma_win
         # Get data up to current date
         df_ref_up_to_date = df_ref[df_ref.index <= date]
         
-        # Need enough data for MA calculation + confirmation period
-        min_required_days = ma_window + max(confirmation_days, 1)  # At least 1 day for MA calculation
-        if len(df_ref_up_to_date) < min_required_days:
+        # Use precomputed MA column - this is the key optimization!
+        ma_col_name = f"MA_{ma_type}_{ma_window}"
+        if ma_col_name not in df_ref.columns:
+            # MA not precomputed, skip this ticker
             continue
         
-        # Calculate MA on the REFERENCE ticker
-        if ma_type == 'EMA':
-            ma = calculate_ema(df_ref_up_to_date, ma_window)
-        else:  # Default to SMA
-            ma = calculate_sma(df_ref_up_to_date, ma_window)
+        # Get MA from precomputed column
+        ma = df_ref[ma_col_name]
+        
+        # Need enough data for confirmation period
+        if len(df_ref_up_to_date) < max(confirmation_days, 1):
+            continue
             
         if ma is None or len(ma) < confirmation_days + 1:
             continue
         
         try:
-            # Get current price and MA
-            current_price = df_ref_up_to_date['Close'].iloc[-1]
-            current_ma = ma.iloc[-1]
+            # Get current price and MA from precomputed data
+            if date in df_ref.index:
+                current_price = df_ref.loc[date, 'Close']
+                current_ma = df_ref.loc[date, ma_col_name]
+            else:
+                # If exact date not found, use the last available values
+                current_price = df_ref_up_to_date['Close'].iloc[-1]
+                current_ma = df_ref_up_to_date[ma_col_name].iloc[-1]
             
             if pd.isna(current_price) or pd.isna(current_ma):
                 continue
@@ -4990,13 +4997,13 @@ def detect_ma_cross_with_anti_whipsaw(valid_assets, reindexed_data, date, ma_win
                 else:
                     # Look back confirmation_days to see if crossing has been consistent
                     for i in range(1, confirmation_days + 1):
-                        if len(df_ref_up_to_date) <= i or len(ma) <= i:
+                        if len(df_ref_up_to_date) <= i:
                             crossing_confirmed = False
                             break
                         
-                        # Get historical data
+                        # Get historical data from precomputed columns
                         hist_price = df_ref_up_to_date['Close'].iloc[-(i+1)]
-                        hist_ma = ma.iloc[-(i+1)]
+                        hist_ma = df_ref_up_to_date[ma_col_name].iloc[-(i+1)]
                         
                         if pd.isna(hist_price) or pd.isna(hist_ma):
                             crossing_confirmed = False
@@ -5081,24 +5088,39 @@ def detect_ma_cross(valid_assets, reindexed_data, date, ma_window, ma_type='SMA'
         # Get data up to current date
         df_ref_up_to_date = df_ref[df_ref.index <= date]
         
-        if len(df_ref_up_to_date) < ma_window + 1:  # Need at least ma_window + 1 for comparison
+        # Use precomputed MA column - this is the key optimization!
+        ma_col_name = f"MA_{ma_type}_{ma_window}"
+        if ma_col_name not in df_ref.columns:
+            # MA not precomputed, skip this ticker
             continue
         
-        # Calculate MA on the REFERENCE ticker
-        if ma_type == 'EMA':
-            ma = calculate_ema(df_ref_up_to_date, ma_window)
-        else:  # Default to SMA
-            ma = calculate_sma(df_ref_up_to_date, ma_window)
+        # Get MA from precomputed column
+        ma = df_ref[ma_col_name]
+        
+        if len(df_ref_up_to_date) < 2:  # Need at least 2 days for comparison
+            continue
             
         if ma is None or len(ma) < 2:
             continue
         
         try:
-            # Get current and previous prices and MA values
-            current_price = df_ref_up_to_date['Close'].iloc[-1]
-            previous_price = df_ref_up_to_date['Close'].iloc[-2]
-            current_ma = ma.iloc[-1]
-            previous_ma = ma.iloc[-2]
+            # Get current and previous prices and MA values from precomputed data
+            if date in df_ref.index:
+                current_price = df_ref.loc[date, 'Close']
+                current_ma = df_ref.loc[date, ma_col_name]
+                # Get previous day data
+                prev_date = df_ref.index[df_ref.index < date][-1] if len(df_ref.index[df_ref.index < date]) > 0 else None
+                if prev_date is not None:
+                    previous_price = df_ref.loc[prev_date, 'Close']
+                    previous_ma = df_ref.loc[prev_date, ma_col_name]
+                else:
+                    continue
+            else:
+                # If exact date not found, use the last available values
+                current_price = df_ref_up_to_date['Close'].iloc[-1]
+                previous_price = df_ref_up_to_date['Close'].iloc[-2]
+                current_ma = df_ref_up_to_date[ma_col_name].iloc[-1]
+                previous_ma = df_ref_up_to_date[ma_col_name].iloc[-2]
             
             if pd.isna(current_price) or pd.isna(previous_price) or pd.isna(current_ma) or pd.isna(previous_ma):
                 continue
@@ -5251,7 +5273,7 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
     return filtered_assets, excluded_assets
 
 def make_config_hashable(config):
-    """Convert config dict to hashable tuple"""
+    """Convert config dict to hashable tuple for caching"""
     import json
     try:
         # Convert config to JSON string (hashable)
@@ -5277,7 +5299,7 @@ def make_config_hashable(config):
         return json.dumps(config, sort_keys=True, default=str)
 
 def make_data_hash(reindexed_data):
-    """Create a hash of reindexed_data"""
+    """Create a hash of reindexed_data for caching"""
     try:
         # Create hash based on tickers and data shapes
         hash_parts = []
@@ -5289,11 +5311,10 @@ def make_data_hash(reindexed_data):
     except:
         return str(len(reindexed_data))
 
-@lru_cache(maxsize=128)
 def cached_momentum_calculation(ticker, start_date_str, end_date_str, lookback_days, exclude_days, reindexed_data_hash):
     """
-    Momentum calculation (uses lru_cache only, NO Streamlit @st.cache_data).
-    Uses string dates and hash for Python-level caching only.
+    Cache momentum calculations to avoid recomputation.
+    Uses string dates and hash for caching.
     Returns momentum return value.
     """
     try:
@@ -5306,7 +5327,7 @@ def cached_momentum_calculation(ticker, start_date_str, end_date_str, lookback_d
 
 def cached_beta_calculation(ticker, benchmark, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
     """
-    Beta calculation (NO_CACHE version).
+    Cache beta calculations to avoid recomputation.
     Returns beta value.
     """
     try:
@@ -5316,7 +5337,7 @@ def cached_beta_calculation(ticker, benchmark, start_date_str, end_date_str, win
 
 def cached_volatility_calculation(ticker, start_date_str, end_date_str, window_days, exclude_days, reindexed_data_hash):
     """
-    Volatility calculation (NO_CACHE version).
+    Cache volatility calculations to avoid recomputation.
     Returns volatility value (annualized).
     """
     try:
@@ -5377,7 +5398,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     # Get regular rebalancing dates
     dates_rebal = sorted(get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index))
     
-    # OPTIMIZATION: Precompute MA columns once at the start if MA filter is enabled
+    # OPTIMIZATION: Precompute MA columns once at the start if MA filter OR MA cross rebalancing is enabled
     # This is the key performance improvement - compute MA once instead of every day!
     ma_crossings_data = None
     ma_filter_data = None
@@ -5425,7 +5446,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     def calculate_momentum(date, current_assets, momentum_windows, stocks_config=None):
         cumulative_returns, valid_assets = {}, []
         
-        # Apply MA filter BEFORE calculating momentum (more efficient)
+        # Apply MA filter BEFORE calculating momentum (ULTRA OPTIMIZED!)
         assets_to_calculate = current_assets
         if config.get('use_sma_filter', False) and ma_filter_data is not None:
             # ULTRA FAST: Use precomputed filter results!
@@ -5865,10 +5886,8 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     if not use_momentum:
         current_allocations = {t: allocations.get(t,0) for t in tickers}
         
-        # Apply MA filter even when momentum is disabled
-        if config.get('use_sma_filter', False):
-            ma_window = config.get('sma_window', 200)
-            ma_type = config.get('ma_type', 'SMA')
+        # Apply MA filter even when momentum is disabled (ULTRA OPTIMIZED!)
+        if config.get('use_sma_filter', False) and ma_filter_data is not None:
             # Get list of current tickers (excluding CASH)
             current_tickers = [t for t in tickers if t != 'CASH']
             # ULTRA FAST: Use precomputed filter results!
@@ -6256,32 +6275,14 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         date_normalized = pd.Timestamp(date).normalize()
         dates_rebal_normalized = {pd.Timestamp(d).normalize() for d in dates_rebal}
         
-        # Check for MA cross rebalancing (if enabled)
+        # Check for MA cross rebalancing (if enabled) - ULTRA OPTIMIZED!
         ma_cross_rebalance = config.get('ma_cross_rebalance', False)
-        if ma_cross_rebalance and config.get('use_sma_filter', False) and set(tickers):
-            # Check if any ticker has crossed its MA with anti-whipsaw filtering
-            ma_window = config.get('sma_window', 200)
-            ma_type = config.get('ma_type', 'SMA')
-            tolerance_percent = config.get('ma_tolerance_percent', 2.0)
-            confirmation_days = config.get('ma_confirmation_days', 3)
-            
-            # ULTRA FAST: Use precomputed crossings if available!
-            if ma_crossings_data is not None:
-                if date in ma_crossings_data:
-                    crossed_assets = list(ma_crossings_data[date].keys())
-                    should_rebalance = True
-                    print(f"[MA CROSS] Detected confirmed MA cross for {crossed_assets} at {date} (precomputed), triggering immediate rebalancing")
-            else:
-                # Fallback to original method if not precomputed
-                crossed_assets, cross_details = detect_ma_cross_with_anti_whipsaw(
-                    list(tickers), reindexed_data, date, ma_window, ma_type, config, config['stocks'],
-                    tolerance_percent, confirmation_days
-                )
-                
-                if crossed_assets:
-                    # MA cross detected with confirmation - trigger immediate rebalancing
-                    should_rebalance = True
-                    print(f"[MA CROSS] Detected confirmed MA cross for {crossed_assets} at {date} (tolerance: {tolerance_percent}%, confirmation: {confirmation_days} days), triggering immediate rebalancing")
+        if ma_cross_rebalance and ma_crossings_data is not None:
+            # ULTRA FAST: Just check if this date has precomputed crossings!
+            if date in ma_crossings_data:
+                crossed_assets = list(ma_crossings_data[date].keys())
+                should_rebalance = True
+                print(f"[MA CROSS] Detected confirmed MA cross for {crossed_assets} at {date} (precomputed), triggering immediate rebalancing")
         
         if date_normalized in dates_rebal_normalized and set(tickers):
             # If targeted rebalancing is enabled, check thresholds first
@@ -6340,12 +6341,11 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         
         if should_rebalance:
             if use_momentum:
-                # Apply MA filter BEFORE calculating momentum (CRITICAL FIX)
+                # Apply MA filter BEFORE calculating momentum (ULTRA OPTIMIZED!)
                 assets_to_calculate = set(tickers)
                 if config.get('use_sma_filter', False) and ma_filter_data is not None:
                     # ULTRA FAST: Use precomputed filter results!
                     filtered_assets = [t for t in tickers if ma_filter_data.get(date, {}).get(t, True)]
-                    excluded_assets = {t: f"Below MA" for t in tickers if t not in filtered_assets}
                     
                     # If no assets remain after MA filtering, go to cash immediately
                     if not filtered_assets:
@@ -6359,6 +6359,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     
                     # Only calculate momentum for filtered assets
                     assets_to_calculate = filtered_assets
+                    excluded_assets = [t for t in tickers if t not in filtered_assets]
                     print(f"[MA FILTER] Assets after MA filter at {date}: {filtered_assets}, excluded: {excluded_assets}")
                 
                 returns, valid_assets = calculate_momentum(date, assets_to_calculate, momentum_windows, config['stocks'])
@@ -6371,7 +6372,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                     )
                     historical_metrics[date] = metrics_on_rebal
                     
-                    # Apply MA filter to weights: set excluded assets to 0 and redistribute
+                    # Apply MA filter to weights: set excluded assets to 0 and redistribute (ULTRA OPTIMIZED!)
                     if config.get('use_sma_filter', False) and ma_filter_data is not None:
                         # ULTRA FAST: Use precomputed filter results!
                         filtered_assets = [t for t in tickers if ma_filter_data.get(date, {}).get(t, True)]
@@ -6536,7 +6537,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 # Start with original allocations
                 rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
                 
-                # Apply MA filter if enabled (for non-momentum strategies)
+                # Apply MA filter if enabled (for non-momentum strategies) (ULTRA OPTIMIZED!)
                 if config.get('use_sma_filter', False) and ma_filter_data is not None:
                     # Get list of current tickers (excluding CASH)
                     current_tickers = [t for t in tickers if t != 'CASH']
@@ -6872,25 +6873,6 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
     """
     import pandas as pd
     
-    # ULTRA OPTIMIZATION: Precompute MA data if needed
-    ma_crossings_data = None
-    ma_filter_data = None
-    if config.get('use_sma_filter', False) or config.get('ma_cross_rebalance', False):
-        ma_window = config.get('sma_window', 200)
-        ma_type = config.get('ma_type', 'SMA')
-        ma_multiplier = config.get('ma_multiplier', 1.48)  # Default multiplier for market days
-        precompute_ma_columns(reindexed_data, ma_window, ma_type, ma_multiplier)
-        
-        # ULTRA OPTIMIZATION: Precompute ALL MA filters if MA filter is enabled
-        if config.get('use_sma_filter', False):
-            ma_filter_data = precompute_ma_filters(reindexed_data, ma_window, ma_type, ma_multiplier, config.get('stocks', []))
-        
-        # ULTRA OPTIMIZATION: Precompute ALL MA crossings if MA cross rebalancing is enabled
-        if config.get('ma_cross_rebalance', False):
-            tolerance_percent = config.get('ma_tolerance_percent', 2.0)
-            confirmation_days = config.get('ma_confirmation_days', 3)
-            ma_crossings_data = precompute_ma_crossings(reindexed_data, ma_window, ma_type, tolerance_percent, confirmation_days)
-    
     def calculate_momentum(date, current_assets, momentum_windows, stocks_config=None):
         """Momentum calculation function (same as in single_backtest)"""
         cumulative_returns, valid_assets = {}, []
@@ -7200,6 +7182,26 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
     added_amount = config.get('added_amount', 0)
     added_frequency = config.get('added_frequency', 'None')
     
+    # OPTIMIZATION: Precompute MA columns once at the start if MA filter OR MA cross rebalancing is enabled
+    # This is the key performance improvement - compute MA once instead of every day!
+    ma_crossings_data = None
+    ma_filter_data = None
+    if config.get('use_sma_filter', False) or config.get('ma_cross_rebalance', False):
+        ma_window = config.get('sma_window', 200)
+        ma_type = config.get('ma_type', 'SMA')
+        ma_multiplier = config.get('ma_multiplier', 1.48)  # Default multiplier for market days
+        precompute_ma_columns(reindexed_data, ma_window, ma_type, ma_multiplier)
+        
+        # ULTRA OPTIMIZATION: Precompute ALL MA filters if MA filter is enabled
+        if config.get('use_sma_filter', False):
+            ma_filter_data = precompute_ma_filters(reindexed_data, ma_window, ma_type, ma_multiplier, config.get('stocks', []))
+        
+        # ULTRA OPTIMIZATION: Precompute ALL MA crossings if MA cross rebalancing is enabled
+        if config.get('ma_cross_rebalance', False):
+            tolerance_percent = config.get('ma_tolerance_percent', 2.0)
+            confirmation_days = config.get('ma_confirmation_days', 3)
+            ma_crossings_data = precompute_ma_crossings(reindexed_data, ma_window, ma_type, tolerance_percent, confirmation_days)
+    
     # Initialize portfolio values
     values = {t: [initial_value if t == 'SP500TOP20' else 0] for t in all_tickers + ['SP500TOP20']}
     unallocated_cash = [0]
@@ -7267,6 +7269,15 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
             should_rebalance = date == sim_index[0]
         elif rebalancing_frequency in ["Never", "none"]:
             should_rebalance = False
+        
+        # Check for MA cross rebalancing (if enabled) - ULTRA OPTIMIZED!
+        ma_cross_rebalance = config.get('ma_cross_rebalance', False)
+        if ma_cross_rebalance and ma_crossings_data is not None:
+            # ULTRA FAST: Just check if this date has precomputed crossings!
+            if date in ma_crossings_data:
+                crossed_assets = list(ma_crossings_data[date].keys())
+                should_rebalance = True
+                print(f"[MA CROSS] Detected confirmed MA cross for {crossed_assets} at {date} (precomputed), triggering immediate rebalancing")
         
         if should_rebalance and available_tickers:
             # CALCULATE CURRENT TOTAL VALUE
@@ -8911,18 +8922,9 @@ def update_active_portfolio_index():
         st.session_state['multi_backtest_active_sma_window'] = active_portfolio.get('sma_window', 200)
         # MA Multiplier - RECONSTRUCTED (no complex sync)
         
-        # NUCLEAR: FORCE MA Filter widgets to sync with portfolio-specific keys
-        portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-        ma_filter_key = f"multi_backtest_active_use_sma_filter_{portfolio_index}"
-        ma_window_key = f"multi_backtest_active_ma_window_{portfolio_index}"
-        ma_type_key = f"multi_backtest_active_ma_type_{portfolio_index}"
-        ma_multiplier_key = f"multi_backtest_active_ma_multiplier_{portfolio_index}"
-        st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
-        st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
-        st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
+        # Force sync MA Multiplier widget with imported JSON value
+        ma_multiplier_key = f"ma_multiplier_working_{portfolio_index}"
         st.session_state[ma_multiplier_key] = active_portfolio.get('ma_multiplier', 1.48)
-        
-        # No forced sync - let widgets work naturally like page 1
         
         # Initialize MA cross rebalance setting
         ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
@@ -9173,8 +9175,6 @@ def update_use_max_allocation():
 
 def update_max_allocation_percent():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['max_allocation_percent'] = st.session_state.multi_backtest_active_max_allocation_percent
-
-# OLD MA Multiplier callback removed - now using direct widget-to-portfolio sync
 
 def update_start_with():
     st.session_state.multi_backtest_start_with = st.session_state.multi_backtest_start_with_radio
@@ -10855,80 +10855,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     st.session_state[f"ema_values_{portfolio_index}"] = values[:i] + values[i+1:]
                     st.rerun()
     
-    # MA Multiplier Section - ONLY show if at least one MA type is enabled
-    if include_sma or include_ema:
-        st.markdown("**MA Multiplier:**")
-        
-        # Initialize session state for MA multiplier
-        if f"ma_multiplier_values_{portfolio_index}" not in st.session_state:
-            st.session_state[f"ma_multiplier_values_{portfolio_index}"] = [1.48]
-        
-        # Checkboxes for MA multiplier options
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            disable_ma_multiplier = st.checkbox(
-                "Use Default MA Multiplier (1.48)",
-                value=True,
-                key=f"ma_multiplier_default_{portfolio_index}"
-            )
-        
-        with col2:
-            enable_ma_multiplier = st.checkbox(
-                "Vary MA Multiplier",
-                key=f"ma_multiplier_vary_{portfolio_index}"
-            )
-        
-        # Build MA multiplier options
-        ma_multiplier_options = []
-        
-        if disable_ma_multiplier:
-            ma_multiplier_options.append(1.48)  # Default value
-        
-        if enable_ma_multiplier:
-            st.markdown("**MA Multiplier Values:**")
-            
-            # Add button for multiplier
-            if st.button("➕ Add Multiplier", key=f"add_multiplier_{portfolio_index}"):
-                st.session_state[f"ma_multiplier_values_{portfolio_index}"].append(1.48)
-                st.rerun()
-            
-            # Display multiplier values
-            multiplier_values = st.session_state[f"ma_multiplier_values_{portfolio_index}"]
-            for i in range(len(multiplier_values)):
-                col1, col2 = st.columns([4, 1])
-                
-                unique_id = f"multiplier_{portfolio_index}_{i}_{id(multiplier_values)}"
-                
-                with col1:
-                    val = st.number_input(
-                        f"Multiplier {i+1}",
-                        min_value=1.0,
-                        max_value=3.0,
-                        value=multiplier_values[i],
-                        step=0.01,
-                        key=f"multiplier_input_{unique_id}",
-                        help="Multiplier to convert market days to calendar days (default 1.48 for ffill data)"
-                    )
-                    multiplier_values[i] = val
-                    ma_multiplier_options.append(val)
-                
-                with col2:
-                    if len(multiplier_values) > 1 and st.button("🗑️", key=f"del_multiplier_{unique_id}"):
-                        st.session_state[f"ma_multiplier_values_{portfolio_index}"] = multiplier_values[:i] + multiplier_values[i+1:]
-                        st.rerun()
-    else:
-        # If no MA types are enabled, set default values and clean session state
-        ma_multiplier_options = [1.48]
-        st.session_state[f"ma_multiplier_{portfolio_index}"] = 1.48
-        
-        # Clean up MA multiplier session state when not needed
-        if f"ma_multiplier_values_{portfolio_index}" in st.session_state:
-            del st.session_state[f"ma_multiplier_values_{portfolio_index}"]
-        if f"ma_multiplier_default_{portfolio_index}" in st.session_state:
-            del st.session_state[f"ma_multiplier_default_{portfolio_index}"]
-        if f"ma_multiplier_vary_{portfolio_index}" in st.session_state:
-            del st.session_state[f"ma_multiplier_vary_{portfolio_index}"]
+    # MA Multiplier - SIMPLE (moved to main section)
+    ma_multiplier_options = [1.48]  # Default value
     
     # MA Cross Rebalancing Section - ONLY show if at least one MA type is enabled
     if include_sma or include_ema:
@@ -11053,10 +10981,14 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
     # Add to variant params
     if ma_options:
         variant_params["ma_windows"] = ma_options
+    else:
+        variant_params["ma_windows"] = [None]
     
     # Add MA multiplier to variant params
     if ma_multiplier_options:
         variant_params["ma_multiplier"] = ma_multiplier_options
+    else:
+        variant_params["ma_multiplier"] = [1.48]
     
     # Add MA cross rebalancing to variant params
     if ma_cross_options:
@@ -11072,6 +11004,10 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             # If no MA types enabled, use default values
             variant_params["ma_tolerance_percent"] = [2.0]
             variant_params["ma_confirmation_days"] = [3]
+    else:
+        variant_params["ma_cross_rebalance"] = [False]
+        variant_params["ma_tolerance_percent"] = [2.0]
+        variant_params["ma_confirmation_days"] = [3]
         
         # CLEAN SESSION STATE: When MA cross is disabled, clean up MA cross session state
         if f"ma_tolerance_values_{portfolio_index}" in st.session_state:
@@ -11145,17 +11081,22 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
         if use_momentum_vary and "max_allocation" not in variant_params:
             validation_errors.append("⚠️ Select at least one **Maximum Allocation Filter** option when momentum is enabled")
         
-        # Check if MA options are missing (always required)
-        if "ma_windows" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **MA option** (Disable MA, Include SMA, or Include EMA)")
+        # VALIDATION MA FILTER - Au moins une option cochée
+        # 1. Vérifier MA Filter - au moins une option cochée
+        if not disabled and not include_sma and not include_ema:
+            validation_errors.append("❌ **MA Filter** : Au moins une option doit être cochée (Disable MA, Include SMA, ou Include EMA)")
         
-        # Check if MA multiplier options are missing (always required)
-        if "ma_multiplier" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **MA Multiplier option** (Use Default MA Multiplier or Vary MA Multiplier)")
+        # 2. Vérifier SMA/EMA - si Include SMA ou Include EMA est coché, au moins une valeur doit être définie
+        if include_sma and not st.session_state.get(f"sma_values_{portfolio_index}", []):
+            validation_errors.append("❌ **SMA Values** : Si Include SMA est coché, au moins une valeur SMA doit être définie")
         
-        # Check if MA cross rebalancing options are missing (always required)
-        if "ma_cross_rebalance" not in variant_params:
-            validation_errors.append("⚠️ Select at least one **MA Cross Rebalancing option** (Disable MA Cross Rebalancing or Enable MA Cross Rebalancing)")
+        if include_ema and not st.session_state.get(f"ema_values_{portfolio_index}", []):
+            validation_errors.append("❌ **EMA Values** : Si Include EMA est coché, au moins une valeur EMA doit être définie")
+        
+        # 3. Vérifier MA Cross Rebalancing - au moins une option cochée
+        if include_sma or include_ema:
+            if not disable_ma_cross and not enable_ma_cross:
+                validation_errors.append("❌ **MA Cross Rebalancing** : Au moins une option doit être cochée (Disable MA Cross ou Enable MA Cross)")
         
         # Show validation errors
         if validation_errors:
@@ -11329,15 +11270,7 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         
                         variants.append(variant)
                     
-                    # FINAL CHECK: Remove portfolios with Cross Band but no MA
-                    final_variants = []
-                    for variant in variants:
-                        # Skip portfolios that have cross rebalancing but no MA filter
-                        if variant.get('ma_cross_rebalance', False) and not variant.get('use_sma_filter', False):
-                            continue  # Skip this illogical portfolio
-                        final_variants.append(variant)
-                    
-                    return final_variants
+                    return variants
                 
                 import copy
                 
@@ -11440,8 +11373,8 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         else:
                             clear_name_parts.append(f"- {ma_type}{ma_window}")
                     
-                    # Add MA Cross Rebalancing information (only show when enabled)
-                    if variant.get('ma_cross_rebalance', False):
+                    # Add MA Cross Rebalancing information (only show when enabled AND SMA/EMA is active)
+                    if variant.get('ma_cross_rebalance', False) and variant.get('use_sma_filter', False):
                         tolerance = variant.get('ma_tolerance_percent', 2.0)
                         days = variant.get('ma_confirmation_days', 3)
                         clear_name_parts.append(f"- Cross Band {tolerance:.0f}% Days {days}")
@@ -11745,22 +11678,16 @@ def update_stock_dividends(index):
 # Update active_portfolio
 active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
 
-# No forced sync - let widgets work naturally like page 1
-
 # Initialize MA filter state - SPECIFIC TO EACH PORTFOLIO
 ma_filter_key = f"multi_backtest_active_use_sma_filter_{st.session_state.multi_backtest_active_portfolio_index}"
 ma_window_key = f"multi_backtest_active_ma_window_{st.session_state.multi_backtest_active_portfolio_index}"
 ma_type_key = f"multi_backtest_active_ma_type_{st.session_state.multi_backtest_active_portfolio_index}"
-ma_multiplier_key = f"multi_backtest_active_ma_multiplier_{st.session_state.multi_backtest_active_portfolio_index}"
-
 if ma_filter_key not in st.session_state:
     st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
 if ma_window_key not in st.session_state:
     st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
 if ma_type_key not in st.session_state:
     st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
-if ma_multiplier_key not in st.session_state:
-    st.session_state[ma_multiplier_key] = active_portfolio.get('ma_multiplier', 1.48)
 
 for i in range(len(active_portfolio['stocks'])):
     stock = active_portfolio['stocks'][i]
@@ -12769,13 +12696,10 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
     ma_filter_key = f"multi_backtest_active_use_sma_filter_{st.session_state.multi_backtest_active_portfolio_index}"
     ma_window_key = f"multi_backtest_active_ma_window_{st.session_state.multi_backtest_active_portfolio_index}"
     ma_type_key = f"multi_backtest_active_ma_type_{st.session_state.multi_backtest_active_portfolio_index}"
-    ma_multiplier_key = f"multi_backtest_active_ma_multiplier_{st.session_state.multi_backtest_active_portfolio_index}"
-    
     # FORCE sync with current portfolio values (like momentum checkbox does)
     st.session_state[ma_filter_key] = active_portfolio.get('use_sma_filter', False)
     st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
     st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
-    # MA Multiplier - RECONSTRUCTED (no complex sync)
 
     # MA Filter options - LEFT ALIGNED STYLE
     st.checkbox("Enable MA Filter", 
@@ -12824,22 +12748,22 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
         # Update portfolio with widget value (widget controls portfolio)
         actual_portfolio['ma_multiplier'] = ma_multiplier
         
-# Test widget removed - now using working logic for the main MA Multiplier
-        
         # New option for immediate rebalancing on MA cross
         ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{st.session_state.multi_backtest_active_portfolio_index}"
         
-        # Initialize the new option if not exists
+        # Initialize the new option if not exists - PRESERVE EXISTING VALUE
         if ma_cross_rebalance_key not in st.session_state:
             st.session_state[ma_cross_rebalance_key] = active_portfolio.get('ma_cross_rebalance', False)
-        
-        # MA Multiplier - RECONSTRUCTED (no complex sync)
+        else:
+            # Preserve existing session state value and sync with portfolio
+            current_value = st.session_state[ma_cross_rebalance_key]
+            active_portfolio['ma_cross_rebalance'] = current_value
         
         st.checkbox("Immediate Rebalance on MA Cross", 
                    key=ma_cross_rebalance_key,
                    help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule")
         
-        # Store the new option in active portfolio
+        # Store the new option in active portfolio - ALWAYS sync
         active_portfolio['ma_cross_rebalance'] = st.session_state.get(ma_cross_rebalance_key, False)
         
         # Anti-whipsaw options (only show when MA cross rebalancing is enabled)
@@ -13026,11 +12950,10 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     ma_filter_key = f"multi_backtest_active_use_sma_filter_{portfolio_index}"
     ma_window_key = f"multi_backtest_active_ma_window_{portfolio_index}"
     ma_type_key = f"multi_backtest_active_ma_type_{portfolio_index}"
-    
     cleaned_config['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     cleaned_config['sma_window'] = st.session_state.get(ma_window_key, 200)
     cleaned_config['ma_type'] = st.session_state.get(ma_type_key, 'SMA')
-    cleaned_config['ma_multiplier'] = st.session_state.get(ma_multiplier_key, 1.48)  # Use session state value
+    # MA Multiplier is handled by the widget itself
     
     # Add MA cross rebalance setting
     ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
@@ -13567,7 +13490,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 # Emergency stop is now handled by the existing emergency_kill function
                 
                 # =============================================================================
-                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (NO_CACHE VERSION)
+                # SIMPLE, FAST, AND RELIABLE PORTFOLIO PROCESSING (CACHED VERSION)
                 # =============================================================================
                 
                 # Initialize results storage
@@ -13580,7 +13503,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability (NO_CACHE version)...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability & caching...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -14610,10 +14533,10 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             st.session_state.multi_backtest_portfolio_key_map = portfolio_key_map
             st.session_state.multi_backtest_ran = True
             
-            # OPTIMIZATION: Pre-compute allocation evolution charts for all portfolios
+            # OPTIMIZATION: Pre-compute and cache allocation evolution charts for all portfolios
             st.info("🔄 Pre-computing charts for instant portfolio selection...")
             
-            # Pre-compute individual portfolio charts
+            # Pre-compute and cache individual portfolio charts
             precompute_individual_portfolio_charts()
             progress_bar = st.progress(0)
             
@@ -14643,7 +14566,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                             allocs_data = filtered_allocs_data
                         
                         if allocs_data:
-                            # Use function to create chart
+                            # Use cached function to create chart
                             fig_evolution = create_allocation_evolution_chart(portfolio_name, allocs_data)
                             if fig_evolution:
                                 st.session_state[f'multi_allocation_evolution_chart_{portfolio_name}'] = fig_evolution
@@ -14745,35 +14668,20 @@ def paste_all_json_callback():
             for key in widget_keys_to_clear:
                 if key in st.session_state:
                     del st.session_state[key]
-            # FUCKING NUKE: Force sync ALL MA parameters after import
-            def force_ma_sync_after_import():
-                """NUCLEAR: Force sync ALL MA parameters after JSON import"""
-                for i, portfolio in enumerate(obj):
-                    if isinstance(portfolio, dict):
-                        # Force sync MA multiplier for this portfolio
-                        ma_multiplier_key = f"multi_backtest_active_ma_multiplier_{i}"
-                        st.session_state[ma_multiplier_key] = portfolio.get('ma_multiplier', 1.48)  # Use imported value
-                        
-                        # Force sync ALL other MA parameters
-                        ma_filter_key = f"multi_backtest_active_use_sma_filter_{i}"
-                        ma_window_key = f"multi_backtest_active_ma_window_{i}"
-                        ma_type_key = f"multi_backtest_active_ma_type_{i}"
-                        ma_cross_key = f"multi_backtest_active_ma_cross_rebalance_{i}"
-                        ma_tolerance_key = f"multi_backtest_active_ma_tolerance_{i}"
-                        ma_delay_key = f"multi_backtest_active_ma_delay_{i}"
-                        
-                        st.session_state[ma_filter_key] = portfolio.get('use_sma_filter', False)
-                        st.session_state[ma_window_key] = portfolio.get('sma_window', 200)
-                        st.session_state[ma_type_key] = portfolio.get('ma_type', 'SMA')
-                        st.session_state[ma_cross_key] = portfolio.get('ma_cross_rebalance', False)
-                        st.session_state[ma_tolerance_key] = portfolio.get('ma_tolerance_percent', 2.0)
-                        st.session_state[ma_delay_key] = portfolio.get('ma_confirmation_days', 3)
+            # Force sync MA Multiplier widgets for all portfolios after JSON import
+            for i, portfolio in enumerate(obj):
+                if isinstance(portfolio, dict):
+                    ma_multiplier_working_key = f"ma_multiplier_working_{i}"
+                    st.session_state[ma_multiplier_working_key] = portfolio.get('ma_multiplier', 1.48)
             
-            # Execute the FUCKING NUKE
-            force_ma_sync_after_import()
             
-            # NUCLEAR OVERRIDE: Force sync ALL MA widgets for ALL portfolios after JSON import (with error handling)
-            # No forced sync - let widgets work naturally like page 1
+            # NUCLEAR OPTION: FORCE REPLACE ALL EXISTING PORTFOLIOS
+            st.session_state['multi_backtest_portfolio_configs'] = []  # CLEAR ALL EXISTING
+            st.session_state['multi_backtest_fusion_portfolio_configs'] = []  # CLEAR ALL FUSION
+            
+            # Show nuclear power message
+            st.success("🚀 **NUCLEAR JSON IMPORT** - All existing portfolios cleared and replaced!")
+            st.info("💥 **SURPUISSANT MODE** - MA multipliers will be forced to imported values!")
             
             # Process each portfolio configuration for Multi-Backtest page
             processed_configs = []
@@ -14994,6 +14902,7 @@ def paste_all_json_callback():
                 st.session_state['multi_backtest_active_use_sma_filter_0'] = bool(processed_configs[0].get('use_sma_filter', False))
                 st.session_state['multi_backtest_active_ma_window_0'] = processed_configs[0].get('sma_window', 200)
                 st.session_state['multi_backtest_active_ma_type_0'] = processed_configs[0].get('ma_type', 'SMA')
+                st.session_state['multi_backtest_active_ma_multiplier_0'] = processed_configs[0].get('ma_multiplier', 1.48)
                 st.session_state['multi_backtest_active_ma_cross_rebalance_0'] = bool(processed_configs[0].get('ma_cross_rebalance', False))
                 st.session_state['multi_backtest_active_ma_tolerance_0'] = processed_configs[0].get('ma_tolerance_percent', 2.0)
                 st.session_state['multi_backtest_active_ma_delay_0'] = processed_configs[0].get('ma_confirmation_days', 3)
@@ -15003,6 +14912,7 @@ def paste_all_json_callback():
                     st.session_state[f'multi_backtest_active_use_sma_filter_{idx}'] = bool(cfg.get('use_sma_filter', False))
                     st.session_state[f'multi_backtest_active_ma_window_{idx}'] = cfg.get('sma_window', 200)
                     st.session_state[f'multi_backtest_active_ma_type_{idx}'] = cfg.get('ma_type', 'SMA')
+                    st.session_state[f'multi_backtest_active_ma_multiplier_{idx}'] = cfg.get('ma_multiplier', 1.48)
                     st.session_state[f'multi_backtest_active_ma_cross_rebalance_{idx}'] = bool(cfg.get('ma_cross_rebalance', False))
                     st.session_state[f'multi_backtest_active_ma_tolerance_{idx}'] = cfg.get('ma_tolerance_percent', 2.0)
                     st.session_state[f'multi_backtest_active_ma_delay_{idx}'] = cfg.get('ma_confirmation_days', 3)
@@ -15054,31 +14964,7 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['use_sma_filter'] = config.get('use_sma_filter', False)
             cleaned_config['sma_window'] = config.get('sma_window', 200)
             cleaned_config['ma_type'] = config.get('ma_type', 'SMA')
-            # Get MA multiplier from the actual portfolio config, not just the default
-            ma_multiplier_value = config.get('ma_multiplier', 1.48)
-            # Try to get the actual value from session state if it's still default
-            if ma_multiplier_value == 1.48:
-                # Look for the actual MA multiplier value in session state
-                portfolio_name = config.get('name', '')
-                if portfolio_name:
-                    # Try different session state keys for MA multiplier
-                    ma_multiplier_key = f"ma_multiplier_values_{portfolio_name}"
-                    if ma_multiplier_key in st.session_state:
-                        ma_multiplier_values = st.session_state[ma_multiplier_key]
-                        if ma_multiplier_values and len(ma_multiplier_values) > 0:
-                            ma_multiplier_value = ma_multiplier_values[0]
-                    else:
-                        # Try to get from the current portfolio index
-                        try:
-                            portfolio_index = next(i for i, cfg in enumerate(st.session_state.get('multi_backtest_portfolio_configs', [])) if cfg.get('name') == portfolio_name)
-                            ma_multiplier_key = f"ma_multiplier_values_{portfolio_index}"
-                            if ma_multiplier_key in st.session_state:
-                                ma_multiplier_values = st.session_state[ma_multiplier_key]
-                                if ma_multiplier_values and len(ma_multiplier_values) > 0:
-                                    ma_multiplier_value = ma_multiplier_values[0]
-                        except (StopIteration, ValueError):
-                            pass
-            cleaned_config['ma_multiplier'] = ma_multiplier_value
+            cleaned_config['ma_multiplier'] = config.get('ma_multiplier', 1.48)
             cleaned_config['ma_cross_rebalance'] = config.get('ma_cross_rebalance', False)
             cleaned_config['ma_tolerance_percent'] = config.get('ma_tolerance_percent', 2.0)
             cleaned_config['ma_confirmation_days'] = config.get('ma_confirmation_days', 3)
@@ -15753,7 +15639,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     all_tickers = sorted(list(all_tickers))
                     
                     if all_tickers:
-                        # Fetch PE data for all tickers
+                        # Fetch PE data for all tickers (cached per portfolio)
                         pe_data = {}
                         for ticker in all_tickers:
                             try:
@@ -17437,12 +17323,12 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             if view_clicked:
                 # No-op here; the detail panels below will render based on selected_portfolio_detail. Keep a small indicator
                 st.success(f"Loaded details for {selected_portfolio_detail}")
-            # Table 1: Historical Allocations - ULTRA-OPTIMIZED (NO_CACHE version)
+            # Table 1: Historical Allocations - ULTRA-OPTIMIZED with comprehensive caching
             if 'individual_portfolio_cache' in st.session_state and selected_portfolio_detail in st.session_state.individual_portfolio_cache:
                 st.markdown("---")
                 st.markdown(f"**Historical Allocations for {selected_portfolio_detail}**")
                 
-                # Use pre-computed data - INSTANT ACCESS!
+                # Use pre-computed data from cache - INSTANT ACCESS!
                 portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
                 allocations_df_raw = portfolio_cache.get('allocations_df')
                 all_tickers = portfolio_cache.get('allocations_tickers', [])
@@ -17900,7 +17786,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             
             # ULTRA-OPTIMIZED: Use comprehensive cache for instant display
             if 'individual_portfolio_cache' in st.session_state and selected_portfolio_detail in st.session_state.individual_portfolio_cache:
-                # Use pre-computed chart from comprehensive data storage - INSTANT!
+                # Use pre-computed chart from comprehensive cache - INSTANT!
                 portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
                 fig_today = portfolio_cache.get('pie_chart_figure')
                 
@@ -17909,7 +17795,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     # Store in session state for PDF export
                     st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
                 else:
-                    # Fallback if chart not in data storage
+                    # Fallback if chart not in cache
                     pie_data = portfolio_cache.get('pie_chart_data', {})
                     labels_today = pie_data.get('labels', [])
                     vals_today = pie_data.get('values', [])
@@ -17926,20 +17812,20 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         )
                         st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
                         st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
-                    else:
-                        # Fallback to real-time calculation if comprehensive data storage is not available
-                        fig_today = go.Figure()
-                        fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
-                        fig_today.update_traces(textinfo='percent+label')
-                        fig_today.update_layout(
-                            template='plotly_dark', 
-                            margin=dict(t=30),
-                            height=600,  # Make it bigger as the main chart
-                            showlegend=True
-                        )
-                        st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
-                        # Store in session state for PDF export
-                        st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
+            else:
+                # Fallback to real-time calculation if comprehensive cache is not available
+                fig_today = go.Figure()
+                fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
+                fig_today.update_traces(textinfo='percent+label')
+                fig_today.update_layout(
+                    template='plotly_dark', 
+                    margin=dict(t=30),
+                    height=600,  # Make it bigger as the main chart
+                    showlegend=True
+                )
+                st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
+                # Store in session state for PDF export
+                st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
 
             # Add the "Target Allocation if Rebalanced Today" table right under the main pie chart
             if selected_portfolio_detail in st.session_state.multi_all_allocations:
@@ -18229,7 +18115,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             sim_index = portfolio_results.index
                                 
                                 if sim_index is not None:
-                                    # Use rebalancing dates for better performance
+                                    # Use cached rebalancing dates for better performance
                                     portfolio_rebalancing_dates = get_cached_rebalancing_dates(selected_portfolio_detail, rebalancing_frequency, sim_index)
                                     if portfolio_rebalancing_dates:
                                         # Find the last rebalancing date before or on the final date
@@ -18389,7 +18275,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             sim_index = portfolio_results.index
                                 
                                 if sim_index is not None:
-                                    # Use rebalancing dates for better performance
+                                    # Use cached rebalancing dates for better performance
                                     portfolio_rebalancing_dates = get_cached_rebalancing_dates(selected_portfolio_detail, rebalancing_frequency, sim_index)
                                     if portfolio_rebalancing_dates:
                                         # Find the last rebalancing date before or on the final date
@@ -19912,8 +19798,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
     if st.session_state.get('multi_backtest_ran', False):
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("🔄 Clear Data", help="Clear all stored charts and data"):
-                # Clear all stored data
+            if st.button("🔄 Clear Cache", help="Clear all cached charts and data"):
+                # Clear all cached data
                 keys_to_clear = [key for key in st.session_state.keys() if key.startswith(('multi_allocation_evolution_chart_', 'processed_allocations_df_', 'processed_allocations_tickers_', 'pie_chart_'))]
                 for key in keys_to_clear:
                     del st.session_state[key]
@@ -19921,12 +19807,12 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 st.rerun()
         
         with col2:
-            stored_charts = len([key for key in st.session_state.keys() if key.startswith('multi_allocation_evolution_chart_')])
-            st.metric("Stored Charts", stored_charts)
+            cached_charts = len([key for key in st.session_state.keys() if key.startswith('multi_allocation_evolution_chart_')])
+            st.metric("Cached Charts", cached_charts)
         
         with col3:
-            stored_dfs = len([key for key in st.session_state.keys() if key.startswith('processed_allocations_df_')])
-            st.metric("Stored DataFrames", stored_dfs)
+            cached_dfs = len([key for key in st.session_state.keys() if key.startswith('processed_allocations_df_')])
+            st.metric("Cached DataFrames", cached_dfs)
     
     # NEW: Individual Ticker Analysis with MA from Backtest - INDEPENDENT SECTION
     if 'multi_all_allocations' in st.session_state and st.session_state.multi_all_allocations:
