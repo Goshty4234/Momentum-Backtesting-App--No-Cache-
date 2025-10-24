@@ -87,7 +87,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'QQQTR': 'QQQ',          # NASDAQ-100 (with dividends) - 1999+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -731,7 +731,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'QQQTR': 'QQQ',          # NASDAQ-100 (with dividends) - 1999+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -3748,6 +3748,12 @@ st.set_page_config(layout="wide", page_title="Multi-Portfolio Analysis")
 
 st.title("Multi-Portfolio Backtest")
 
+# Important performance notice
+st.info("""
+⚠️ **Performance Tip**: Due to Streamlit's architecture limitations, **always clear all outputs** before modifying portfolios to prevent severe lag. 
+Click the "🔄 Clear All Outputs" button before making changes to avoid performance issues caused by accumulated plot data in memory.
+""")
+
 st.markdown("Use the forms below to configure and run backtests for multiple portfolios.")
 
 # Performance Settings
@@ -4384,7 +4390,7 @@ def calculate_max_drawdown(values):
 
 def calculate_volatility(returns):
     # Annualized volatility - same as Backtest_Engine.py
-    return returns.std() * np.sqrt(365) if len(returns) > 1 else np.nan
+    return returns.std() * np.sqrt(365.25) if len(returns) > 1 else np.nan
 
 def calculate_beta(returns, benchmark_returns):
     # Use exact logic from app.py
@@ -4422,7 +4428,7 @@ def calculate_sortino(returns, risk_free_rate):
     
     downside_std = downside_returns.std()
     
-    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365)
+    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365.25)
 
 # -----------------------
 # Timer function for next rebalance date
@@ -4621,7 +4627,7 @@ def calculate_sharpe(returns, risk_free_rate):
     if excess_returns.std() == 0:
         return np.nan
         
-    return excess_returns.mean() / excess_returns.std() * np.sqrt(365)
+    return excess_returns.mean() / excess_returns.std() * np.sqrt(365.25)
 
 # FIXED: Correct UPI calculation - EXACTLY like Backtest_Engine.py
 def calculate_upi(cagr, ulcer_index):
@@ -5557,7 +5563,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 if len(returns_t_vol) < 2:
                     vol_vals[t] = np.nan
                 else:
-                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365)
+                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365.25)
                 metrics[t]['Volatility'] = vol_vals[t]
 
         # attach raw momentum
@@ -6981,7 +6987,7 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
                 if len(returns_t_vol) < 2:
                     vol_vals[t] = np.nan
                 else:
-                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365)
+                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365.25)
                 metrics[t]['Volatility'] = vol_vals[t]
 
         # attach raw momentum
@@ -9985,8 +9991,8 @@ st.sidebar.radio(
     ["rebalancing_date", "momentum_window_complete"],
     format_func=lambda x: "First rebalance on rebalancing date" if x == "rebalancing_date" else "First rebalance when momentum window complete",
     help="""
-    **First rebalance on rebalancing date:** Start rebalancing immediately when possible.
-    **First rebalance when momentum window complete:** Wait for the largest momentum window to complete before first rebalance.
+    **First rebalance on rebalancing date:** Wait for the momentum window to complete, then rebalance on the next regular rebalancing date (e.g., wait a few more days to get to the 1st of the month).
+    **First rebalance when momentum window complete:** Rebalance immediately on an irregular date as soon as the momentum window is completed (e.g., on a random day like the 15th).
     """,
     key="multi_backtest_first_rebalance_strategy_radio",
     on_change=update_first_rebalance_strategy
@@ -12499,7 +12505,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
     with col_beta_vol:
         if "multi_backtest_active_calc_beta" not in st.session_state:
             st.session_state["multi_backtest_active_calc_beta"] = active_portfolio['calc_beta']
-        st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score.")
+        st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score. The momentum scores will be divided by Beta and then normalized.")
         # Reset Beta button
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
             pass
@@ -12517,7 +12523,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
             st.session_state["multi_backtest_active_calc_vol"] = active_portfolio['calc_volatility']
-        st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score.")
+        st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score. The momentum scores will be divided by Volatility and then normalized.")
         # Reset Volatility button
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
             pass
@@ -15161,17 +15167,34 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         last_date = max(series['no_additions'].index.max() for series in st.session_state.multi_all_results.values())
         st.subheader(f"Results for Backtest Period: {first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')}")
 
+        # Chart options in columns
+        col1, col2 = st.columns(2)
+        
         # Hover mode option with error handling
-        try:
-            show_closest_only = st.checkbox(
-                "Show Only Closest Portfolio on Hover",
-                value=False,
-                help="When enabled, hovering will show only the portfolio line closest to your cursor instead of all portfolios.",
-                key="multi_chart_closest_hover"
-            )
-        except Exception as e:
-            st.warning(f"Error with hover checkbox: {e}")
-            show_closest_only = False
+        with col1:
+            try:
+                show_closest_only = st.checkbox(
+                    "Show Only Closest Portfolio on Hover",
+                    value=False,
+                    help="When enabled, hovering will show only the portfolio line closest to your cursor instead of all portfolios.",
+                    key="multi_chart_closest_hover"
+                )
+            except Exception as e:
+                st.warning(f"Error with hover checkbox: {e}")
+                show_closest_only = False
+        
+        # Log scale option
+        with col2:
+            try:
+                use_log_scale = st.checkbox(
+                    "Use Log Scale for Y-Axis",
+                    value=False,
+                    help="When enabled, the Y-axis will use logarithmic scale, which is useful for comparing portfolios with very different performance ranges.",
+                    key="multi_chart_log_scale"
+                )
+            except Exception as e:
+                st.warning(f"Error with log scale checkbox: {e}")
+                use_log_scale = False
         
         fig1 = go.Figure()
         # CRITICAL: Maintain portfolio order from portfolio_configs
@@ -15256,7 +15279,12 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 title="Portfolio Value ($)", 
                 title_standoff=20,
                 side="left",
-                position=0.0  # Force left alignment for perfect positioning
+                position=0.0,  # Force left alignment for perfect positioning
+                type="log" if use_log_scale else "linear",  # Use log scale if checkbox is checked
+                tickmode="array" if use_log_scale else "auto",  # Use array mode for log scale to control ticks
+                tickvals=[10000, 50000, 100000, 500000, 1000000] if use_log_scale else None,  # Define specific tick positions for log scale
+                ticktext=["$10K", "$50K", "$100K", "$500K", "$1M"] if use_log_scale else None,  # Shorter labels for log scale
+                nticks=5 if use_log_scale else None  # Limit number of ticks for log scale
             )
         )
         st.plotly_chart(fig1, use_container_width=True, key="multi_performance_chart")
