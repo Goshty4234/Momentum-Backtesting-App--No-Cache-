@@ -85,7 +85,7 @@ def get_ticker_aliases_for_backtest():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'QQQTR': 'QQQ',          # NASDAQ-100 (with dividends) - 1999+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -128,7 +128,7 @@ def get_ticker_aliases_for_backtest():
         'BITCOIN': 'BTC-USD',    # Bitcoin (2014+) - No dividends
         
         # Leveraged & Inverse ETFs (Synthetic Aliases)
-        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'TQQQTR': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
         'TQQQND': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
         'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
         'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
@@ -139,7 +139,7 @@ def get_ticker_aliases_for_backtest():
         'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
         'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
         'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
-        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
+        'SQQQTR': '^NDX?L=-3?E=0.95',    # -3x NASDAQ-100 (price only, no dividends) - 1985+
         
         # Synthetic Complete Tickers
         'SPYSIM': 'SPYSIM_COMPLETE',  # Complete S&P 500 Simulation (1885+) - Historical + SPYTR
@@ -2559,7 +2559,7 @@ def calculate_max_drawdown(values):
 
 def calculate_volatility(returns):
     # Annualized volatility
-    return np.std(returns) * np.sqrt(365) if len(returns) > 1 else np.nan
+    return np.std(returns) * np.sqrt(365.25) if len(returns) > 1 else np.nan
 
 def calculate_beta(returns, benchmark_returns):
     # Use exact logic from app.py
@@ -5048,7 +5048,7 @@ def single_backtest(config, sim_index, reindexed_data):
                     if len(returns_t_vol) < 2:
                         vol_vals[t] = np.nan
                     else:
-                        vol_vals[t] = returns_t_vol.std() * np.sqrt(365)
+                        vol_vals[t] = returns_t_vol.std() * np.sqrt(365.25)
                     metrics[t]['Volatility'] = vol_vals[t]
         
         for t in rets:
@@ -8888,7 +8888,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 cagr = calculate_cagr(stats_values, stats_dates)
                 max_dd, drawdowns = calculate_max_drawdown(stats_values)
                 vol = calculate_volatility(stats_returns)
-                sharpe = np.nan if stats_returns.std() == 0 else stats_returns.mean() * 365 / (stats_returns.std() * np.sqrt(365))
+                sharpe = np.nan if stats_returns.std() == 0 else stats_returns.mean() * 365.25 / (stats_returns.std() * np.sqrt(365.25))
                 sortino = calculate_sortino(stats_returns)
                 ulcer = calculate_ulcer_index(stats_values)
                 upi = calculate_upi(cagr, ulcer)
@@ -10880,7 +10880,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 ticker_returns = df_1y['Close'].pct_change().dropna()
                                 
                                 if len(ticker_returns) > 0:
-                                    ticker_volatility = ticker_returns.std() * np.sqrt(365) * 100
+                                    ticker_volatility = ticker_returns.std() * np.sqrt(365.25) * 100
                                     weighted_volatility += ticker_volatility * weight
                                     total_weight_vol += weight
                     
@@ -11019,7 +11019,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 ticker_returns = ticker_window.pct_change().dropna()
                                 if len(ticker_returns) >= 60:  # Allow some flexibility
                                     # Annualize using 365 for consistency
-                                    ticker_vol = ticker_returns.std() * np.sqrt(365) * 100
+                                    ticker_vol = ticker_returns.std() * np.sqrt(365.25) * 100
                                     weighted_volatility += ticker_vol * weight
                                     
                                     # Simple Beta calculation for this ticker
@@ -11419,7 +11419,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 ticker_returns = df_1y['Close'].pct_change().dropna()
                                 
                                 if len(ticker_returns) > 0:
-                                    ticker_volatility = ticker_returns.std() * np.sqrt(365) * 100
+                                    ticker_volatility = ticker_returns.std() * np.sqrt(365.25) * 100
                                     weighted_volatility += ticker_volatility * weight
                                     total_weight_vol += weight
                     
@@ -11547,7 +11547,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             ticker_returns_series = ticker_window.pct_change().dropna()
                             if len(ticker_returns_series) >= 60:  # Allow some flexibility
                                 # Annualize using 365 for consistency
-                                ticker_vol = ticker_returns_series.std() * np.sqrt(365) * 100
+                                ticker_vol = ticker_returns_series.std() * np.sqrt(365.25) * 100
                                 ticker_volatility = f"{ticker_vol:.2f}%"
                                 
                                 if ticker == 'SPY':
