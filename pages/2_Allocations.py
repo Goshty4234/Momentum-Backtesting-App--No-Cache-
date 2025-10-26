@@ -26,6 +26,7 @@ import os
 import signal
 import sys
 import threading
+import diskcache as dc
 warnings.filterwarnings('ignore')
 
 # Handle rerun flag for smooth UI updates - must be at the very top
@@ -1163,22 +1164,20 @@ def get_risk_free_rate_robust(dates):
                         closest_date = valid_dates.max()
                         result.iloc[i] = daily_rate_series.loc[closest_date]
                     else:
-                        # If no data before target date, use the earliest available
+                        # Use the earliest available rate
                         result.iloc[i] = daily_rate_series.iloc[0]
                 
-                # Handle any remaining NaN values
-                if result.isna().any():
-                    result = result.fillna(method='ffill').fillna(method='bfill')
-                    if result.isna().any():
-                        result = result.fillna(0.000105)  # Default daily rate
-                
                 return result
-        
-        # Fallback to default if all else fails
-        return _get_default_risk_free_rate(dates)
-        
-    except Exception:
-        return _get_default_risk_free_rate(dates)
+            else:
+                # No valid data - return constant rate
+                return pd.Series(0.0001, index=dates)
+        else:
+            # No data available - return constant rate
+            return pd.Series(0.0001, index=dates)
+            
+    except Exception as e:
+        # Fallback to constant rate
+        return pd.Series(0.0001, index=dates)
 
 def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
     """
@@ -1286,6 +1285,8 @@ def apply_daily_leverage(price_data: pd.DataFrame, leverage: float, expense_rati
     # Get time-varying risk-free rates for the entire period
     try:
         risk_free_rates = get_risk_free_rate_robust(price_data.index)
+        # Save the risk-free rate series used during backtest for consistency in graphs
+        st.session_state.backtest_risk_free_series = risk_free_rates
         # Ensure risk-free rates are timezone-naive to match price_data
         if getattr(risk_free_rates.index, "tz", None) is not None:
             risk_free_rates.index = risk_free_rates.index.tz_localize(None)
@@ -1363,8 +1364,8 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
         auto_adjust: Auto-adjust setting
     """
     try:
-        # Parse leverage from ticker symbol
-        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        # Parse leverage and expense ratio from ticker symbol
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
         # Check if this is a leveraged ticker (for valuation stats only)
         leveraged_map = get_leveraged_ticker_underlying()
@@ -1466,12 +1467,14 @@ def get_ticker_data_for_valuation(ticker_symbol, period="max", auto_adjust=False
 
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
-    Smart batch download with fallback to individual downloads.
+    Smart batch download with fallback to individual downloads + 4h cache.
     
     Strategy:
-    1. Try batch download (fast - 1 API call for all tickers)
-    2. If batch fails → fallback to individual downloads (reliable)
-    3. Invalid tickers are skipped, others continue
+    1. Check cache first (4-hour TTL)
+    2. If batch enabled: Try batch download (fast - 1 API call for all tickers)
+    3. If batch fails → fallback to individual downloads (reliable)
+    4. Invalid tickers are skipped, others continue
+    5. Store in cache for 4 hours
     
     Args:
         ticker_list: List of ticker symbols (can include leverage format)
@@ -1484,7 +1487,52 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     if not ticker_list:
         return {}
     
+    # Initialize disk cache (survives page reloads)
+    import diskcache as dc
+    import os
+    
+    # Create cache directory if it doesn't exist
+    cache_dir = '.streamlit/ticker_cache'
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Initialize disk cache with 4-hour TTL
+    disk_cache = dc.Cache(cache_dir)
+    
+    # Check cache first
+    from datetime import datetime, timedelta
     results = {}
+    cache_hits = 0
+    cache_misses = []
+    
+    # Generate cache keys and check disk cache
+    for ticker_symbol in ticker_list:
+        cache_key = f"{ticker_symbol}_{period}_{auto_adjust}"
+        
+        # Try to get from disk cache
+        cached_data = disk_cache.get(cache_key)
+        
+        if cached_data is not None:
+            # Data found in disk cache (4h TTL is handled by diskcache)
+            try:
+                results[ticker_symbol] = cached_data.copy()
+                cache_hits += 1
+                continue
+            except:
+                # If deserialization fails, mark as miss
+                pass
+        
+        cache_misses.append(ticker_symbol)
+    
+    if cache_hits > 0:
+        st.write(f"✅ Cache hit: {cache_hits}/{len(ticker_list)} tickers (from cache, < 4h old)")
+    
+    # If everything was cached, return early
+    if not cache_misses:
+        return results
+    
+    if cache_misses:
+        st.write(f"📥 Downloading {len(cache_misses)} tickers from Yahoo Finance...")
+    
     yahoo_tickers = []
     
     for ticker_symbol in ticker_list:
@@ -1508,17 +1556,21 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                     except:
                         pass
         
-        resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=False))
+        resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
         print(f"[BATCH DEBUG] {ticker_symbol} -> base={base_ticker}, resolved={resolved}, L={leverage}, E={expense_ratio}")
         yahoo_tickers.append((ticker_symbol, resolved, leverage, expense_ratio))
     
     # Extract unique resolved tickers for batch download (exclude _COMPLETE tickers and ZEROX)
     resolved_list = list(set([resolved for _, resolved, _, _ in yahoo_tickers if not resolved.endswith('_COMPLETE') and resolved != 'ZEROX']))
-    print(f"[BATCH DEBUG] Resolved tickers to download: {resolved_list}")
+    
+    # CRITICAL: We must use individual downloads, not batch downloads
+    # Batch downloads force ALL tickers to have the SAME date range (intersection of all dates)
+    # This breaks backtesting because each ticker should have its own unique history
+    USE_BATCH_DOWNLOAD = False  # Set to False to preserve unique date ranges
     
     try:
         # BATCH DOWNLOAD - Fast path (1 API call for all)
-        if len(resolved_list) > 1:
+        if USE_BATCH_DOWNLOAD and len(resolved_list) > 1:
             batch_data = yf.download(
                 resolved_list,
                 period=period,
@@ -1599,11 +1651,19 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                     if leverage != 1.0 or expense_ratio != 0.0:
                         hist = apply_daily_leverage(hist, leverage, expense_ratio)
                     results[ticker_symbol] = hist
+                    
+                    # Store in disk cache (4h TTL)
+                    cache_key = f"{ticker_symbol}_{period}_{auto_adjust}"
+                    disk_cache.set(cache_key, hist.copy(), expire=4*3600)  # 4 hours in seconds
                 else:
                     results[ticker_symbol] = pd.DataFrame()
             except Exception as e:
                 print(f"Error downloading {ticker_symbol}: {e}")
                 results[ticker_symbol] = pd.DataFrame()
+    
+    if cache_misses and results:
+        downloaded_count = len([r for r in results.values() if r is not None and not r.empty])
+        st.write(f"📥 Downloaded {downloaded_count} new tickers (cached for 4h)")
     
     return results
 
@@ -1616,8 +1676,8 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         auto_adjust: Auto-adjust setting
     """
     try:
-        # Parse leverage from ticker symbol
-        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        # Parse leverage and expense ratio from ticker symbol
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
         # Use original ticker for backtests and calculations (NO conversion)
         resolved_ticker = base_ticker
@@ -1703,9 +1763,9 @@ def get_ticker_data(ticker_symbol, period="max", auto_adjust=False):
         if hist.empty:
             return hist
             
-        # Apply leverage if specified
-        if leverage != 1.0:
-            hist = apply_daily_leverage(hist, leverage)
+        # Apply leverage and/or expense ratio if specified
+        if leverage != 1.0 or expense_ratio != 0.0:
+            hist = apply_daily_leverage(hist, leverage, expense_ratio)
             
         return hist
     except Exception:
@@ -1945,15 +2005,20 @@ def get_tbill_complete_data(period="max"):
             return pd.DataFrame()
 
 def get_ticker_info(ticker_symbol):
-    """Get ticker info (NO CACHE for maximum freshness)
+    """Get ticker info (with 4h disk cache for PE/valuations)
     
     This function handles two special cases:
     1. Canadian tickers: Converts USD OTC to Canadian exchange (CNSWF → CSU.TO)
     2. Leveraged tickers: Uses underlying ticker for info (NVDL → NVDA)
     """
     try:
-        # Parse leverage from ticker symbol
-        base_ticker, leverage = parse_leverage_ticker(ticker_symbol)
+        # Initialize disk cache for ticker info
+        cache_dir = '.streamlit/ticker_info_cache'
+        os.makedirs(cache_dir, exist_ok=True)
+        info_cache = dc.Cache(cache_dir)
+        
+        # Parse leverage and expense ratio from ticker symbol
+        base_ticker, leverage, expense_ratio = parse_ticker_parameters(ticker_symbol)
         
         # Check if this is a leveraged ticker (for valuation stats only)
         leveraged_map = get_leveraged_ticker_underlying()
@@ -1964,8 +2029,19 @@ def get_ticker_info(ticker_symbol):
             # Resolve ticker alias for valuation tables (converts USD OTC to Canadian exchange, indices to ETFs)
             resolved_ticker = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
         
+        # Check cache first
+        cache_key = f"info_{resolved_ticker}"
+        cached_info = info_cache.get(cache_key)
+        if cached_info is not None:
+            return cached_info
+        
+        # Fetch from Yahoo Finance
         stock = yf.Ticker(resolved_ticker)
         info = stock.info
+        
+        # Store in cache for 4 hours
+        info_cache.set(cache_key, info, expire=4*3600)
+        
         return info
     except Exception:
         return {}
@@ -6792,7 +6868,6 @@ def update_max_allocation_percent():
 # Sidebar simplified for single-portfolio allocation tracker
 st.sidebar.title("Allocation Tracker")
 
-
 # Work with the first portfolio as active (single-portfolio mode). Keep inputs accessible.
 active_portfolio = st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]
 # Do not show portfolio name in allocation tracker. Keep a page-scoped session key for compatibility.
@@ -6995,7 +7070,7 @@ for i in range(len(active_portfolio['stocks'])):
                 format="%d", 
                 key=max_cap_key, 
                 label_visibility="visible",
-                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled)"
+                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled). This overrides the Min and Max Threshold filters for this specific ticker."
             )
             
             # Update the portfolio config
@@ -7749,14 +7824,22 @@ if leveraged_tickers:
     st.markdown("---")
     st.markdown("### 🚀 Leverage Summary")
     
-    # Get risk-free rate for drag calculation
+    # ALWAYS get current risk-free rate for accurate display (more precise than historical rates!)
     try:
-        risk_free_rates = get_risk_free_rate_robust([pd.Timestamp.now()])
-        daily_rf = risk_free_rates.iloc[0] if len(risk_free_rates) > 0 else 0.000105
-        annual_rf = daily_rf * 365.25 * 100  # Convert daily to annual percentage
-    except:
+        # Get current risk-free rate for accurate display
+        risk_free_data = get_risk_free_rate_robust([pd.Timestamp.now()])
+        if not risk_free_data.empty:
+            daily_rf = risk_free_data.iloc[0]
+            annual_rf = ((1 + daily_rf)**365.25 - 1) * 100  # Convert daily to annual percentage (compounded)
+            print(f"🔍 DEBUG: Using current risk-free rate - Daily: {daily_rf:.6f}, Annual: {annual_rf:.2f}%")
+        else:
+            daily_rf = 0.000105  # fallback
+            annual_rf = 3.86  # fallback annual rate
+            print(f"🔍 DEBUG: Using fallback risk-free rate - Daily: {daily_rf:.6f}, Annual: {annual_rf:.2f}%")
+    except Exception as e:
         daily_rf = 0.000105  # fallback
         annual_rf = 3.86  # fallback annual rate
+        print(f"🔍 DEBUG: Exception in risk-free rate - {e}, Using fallback - Daily: {daily_rf:.6f}, Annual: {annual_rf:.2f}%")
     
     # Group by leverage level
     leverage_groups = {}
@@ -7769,7 +7852,7 @@ if leveraged_tickers:
         base_tickers = leverage_groups[leverage]
         daily_drag = (leverage - 1) * daily_rf * 100
         st.markdown(f"🚀 **{leverage}x leverage** on {', '.join(base_tickers)}")
-        st.markdown(f"📉 **Daily drag:** {daily_drag:.3f}% (RF: {annual_rf:.2f}%)")
+        st.markdown(f"📉 **Daily drag:** {daily_drag:.4f}% (RF: {annual_rf:.2f}%)")
 
 st.subheader("Strategy")
 if "alloc_active_use_momentum" not in st.session_state:
@@ -7812,7 +7895,8 @@ if active_portfolio['use_momentum']:
             "Momentum strategy when NOT all negative:",
             ["Classic", "Relative Momentum", "Near-Zero Symmetry"],
             index=["Classic", "Relative Momentum", "Near-Zero Symmetry"].index(active_portfolio.get('momentum_strategy', 'Classic')),
-            key=momentum_key
+            key=momentum_key,
+            help="Classic: Uses absolute momentum values. Only assets with positive momentum get allocated, weighted by their momentum strength. Assets with negative momentum get 0% allocation.\n\nRelative Momentum: Shifts all momentum scores to be positive by adding an offset, then allocates proportionally. This ensures all assets get some allocation even when all have negative momentum.\n\nNear-Zero Symmetry: Creates a neutral zone around 0% momentum (±5%). Assets in this zone get similar allocations, while negative assets get progressively compressed allocations."
         )
         negative_momentum_strategy = st.selectbox(
             "Strategy when ALL momentum scores are negative:",
@@ -7827,7 +7911,7 @@ if active_portfolio['use_momentum']:
     with col_beta_vol:
         if "alloc_active_calc_beta" not in st.session_state:
             st.session_state["alloc_active_calc_beta"] = active_portfolio.get('calc_beta', False)
-        st.checkbox("Include Beta in momentum weighting", key="alloc_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score.")
+        st.checkbox("Include Beta in momentum weighting", key="alloc_active_calc_beta", on_change=update_calc_beta, help="Penalizes high-beta stocks by reducing their allocation. Stocks with Beta > 1.0 (more volatile than market) get lower weights, while stocks with Beta < 1.0 (less volatile) get higher weights. This reduces portfolio risk by favoring stable stocks.")
         if st.session_state.get('alloc_active_calc_beta', False):
             if "alloc_active_beta_window" not in st.session_state:
                 st.session_state["alloc_active_beta_window"] = active_portfolio['beta_window_days']
@@ -7839,7 +7923,7 @@ if active_portfolio['use_momentum']:
                 pass
         if "alloc_active_calc_vol" not in st.session_state:
             st.session_state["alloc_active_calc_vol"] = active_portfolio.get('calc_volatility', False)
-        st.checkbox("Include Volatility in momentum weighting", key="alloc_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score.")
+        st.checkbox("Include Volatility in momentum weighting", key="alloc_active_calc_vol", on_change=update_calc_vol, help="Penalizes high-volatility stocks by reducing their allocation. Stocks with high price swings get lower weights, while stable stocks get higher weights. This reduces portfolio risk by favoring less volatile investments.")
         if st.session_state.get('alloc_active_calc_vol', False):
             if "alloc_active_vol_window" not in st.session_state:
                 st.session_state["alloc_active_vol_window"] = active_portfolio['vol_window_days']
@@ -8017,7 +8101,7 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
         "Enable MA Filter", 
         key="alloc_active_use_sma_filter",
         on_change=update_use_sma_filter,
-        help="Enable the Moving Average filter"
+        help="MA Filter means the tickers with MA filter will be excluded when price below MA at rebalancing. This helps avoid buying assets that are in a downtrend."
     )
 
     # MA controls (only show when MA filter is enabled)
@@ -8034,7 +8118,7 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
                                    options=["SMA", "EMA"], 
                                    index=0 if st.session_state.get("alloc_active_ma_type", "SMA") == "SMA" else 1,
                                    key="alloc_active_ma_type",
-                                   help="Select the type of moving average")
+                                   help="SMA (Simple Moving Average): Equal weight to all prices in the window. EMA (Exponential Moving Average): More weight to recent prices, reacts faster to price changes.")
             active_portfolio['ma_type'] = ma_type
         
         with col_ma_window:
@@ -8050,7 +8134,7 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
                 value=st.session_state.get("alloc_active_sma_window", 200),
                 step=10,
                 key="alloc_active_sma_window",
-                help="Number of days for the Moving Average calculation"
+                help="Number of days to calculate the moving average. Longer windows = smoother trend, shorter windows = more responsive to price changes."
             )
             active_portfolio['sma_window'] = ma_window
         
@@ -8064,9 +8148,9 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
             min_value=1.0,
             max_value=3.0,
             value=st.session_state.get("alloc_active_ma_multiplier", 1.48),
+            help="Multiplier to convert market days to calendar days. 1.48 means 200 market days = 296 calendar days (accounts for weekends and holidays).",
             step=0.01,
-            key="alloc_active_ma_multiplier",
-            help="Multiplier to convert market days to calendar days (default 1.48 for ffill data)"
+            key="alloc_active_ma_multiplier"
         )
         active_portfolio['ma_multiplier'] = ma_multiplier
         
@@ -8080,7 +8164,7 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
         ma_cross_rebalance = st.checkbox(
             "Immediate Rebalance on MA Cross",
             key="alloc_active_ma_cross_rebalance",
-            help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule"
+            help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule. This allows faster response to trend changes."
         )
         active_portfolio['ma_cross_rebalance'] = ma_cross_rebalance
         
@@ -8100,9 +8184,9 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
                     min_value=0.0,
                     max_value=10.0,
                     value=st.session_state.get("alloc_active_ma_tolerance", 2.0),
+                    help="Tolerance band around the moving average. Only trigger rebalancing if price moves beyond this percentage from the MA. Prevents whipsaw from small price fluctuations.",
                     step=0.1,
-                    key="alloc_active_ma_tolerance",
-                    help="Percentage band that price must exceed MA by to be considered a valid cross"
+                    key="alloc_active_ma_tolerance"
                 )
                 active_portfolio['ma_tolerance_percent'] = tolerance_percent
             
@@ -8116,9 +8200,9 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
                     min_value=0,
                     max_value=10,
                     value=st.session_state.get("alloc_active_ma_delay", 3),
+                    help="Number of days to wait before confirming an MA cross. Prevents false signals from temporary price movements. Higher values = more conservative approach.",
                     step=1,
-                    key="alloc_active_ma_delay",
-                    help="Number of days the crossing must persist without recrossing to be confirmed"
+                    key="alloc_active_ma_delay"
                 )
                 active_portfolio['ma_confirmation_days'] = confirmation_days
         else:
@@ -8147,7 +8231,7 @@ if not st.session_state.get('alloc_active_use_momentum', False) and not st.sessi
         "Enable Targeted Rebalancing", 
         key="alloc_active_use_targeted_rebalancing", 
         on_change=update_use_targeted_rebalancing,
-        help="Automatically rebalance when ticker allocations exceed min/max thresholds"
+        help="Rebalance at the next scheduled rebalancing date when ticker allocations exceed min/max thresholds. Does not trigger immediate rebalancing, only checks thresholds on rebalance dates."
     )
     
     # Update active portfolio with current targeted rebalancing state
@@ -8426,6 +8510,33 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
 # Validation constants
 _TOTAL_TOL = 1.0
 _ALLOC_TOL = 1.0
+
+# Clear ticker cache button
+if st.sidebar.button("🗑️ Clear Ticker Cache", 
+                    help="Clear the 4-hour ticker cache to force fresh data downloads", 
+                    use_container_width=True):
+    total_cleared = 0
+    
+    # Clear ticker historical data cache
+    cache_dir = '.streamlit/ticker_cache'
+    if os.path.exists(cache_dir):
+        disk_cache = dc.Cache(cache_dir)
+        cache_size = len(disk_cache)
+        disk_cache.clear()
+        total_cleared += cache_size
+    
+    # Clear ticker info cache (PE/valuations)
+    info_cache_dir = '.streamlit/ticker_info_cache'
+    if os.path.exists(info_cache_dir):
+        info_cache = dc.Cache(info_cache_dir)
+        info_cache_size = len(info_cache)
+        info_cache.clear()
+        total_cleared += info_cache_size
+    
+    if total_cleared > 0:
+        st.sidebar.success(f"✅ Cleared {total_cleared} cached items (tickers + PE/valuations)")
+    else:
+        st.sidebar.info("No cache to clear")
 
 # Clear all portfolios button - quick access for single portfolio pages
 if st.sidebar.button("🗑️ Clear All Portfolios", key="alloc_clear_all_portfolios_immediate", 
@@ -9523,7 +9634,7 @@ if st.session_state.get('alloc_backtest_run', False):
     metrics_for_portfolio = st.session_state.get('alloc_all_metrics', {}).get(active_name) if st.session_state.get('alloc_all_metrics') else None
 
     if not allocs_for_portfolio and not metrics_for_portfolio:
-        st.info("No allocation or rebalancing history available. If you have precomputed allocation snapshots, store them in session state keys `alloc_all_allocations` and `alloc_all_metrics` under this portfolio name.")
+        st.info("No allocation or rebalancing history available. If you have allocation snapshots, store them in session state keys `alloc_all_allocations` and `alloc_all_metrics` under this portfolio name.")
     else:
         # --- Calculate timer variables for rebalancing timer ---
         last_rebal_date = None
@@ -9781,6 +9892,28 @@ if st.session_state.get('alloc_backtest_run', False):
             
             if labels_today and vals_today:
                 st.markdown(f"## Rebalance as of Today ({pd.Timestamp.now().strftime('%Y-%m-%d')})")
+                
+                # Check if targeted rebalancing is enabled for this portfolio and show warning
+                if active_portfolio.get('use_targeted_rebalancing', False):
+                    targeted_settings = active_portfolio.get('targeted_rebalancing_settings', {})
+                    enabled_tickers = [ticker for ticker, settings in targeted_settings.items() if settings.get('enabled', False)]
+                    
+                    if enabled_tickers:
+                        st.warning(f"""
+                        ⚠️ **Important Notice for Targeted Rebalancing Strategy**
+                        
+                        This portfolio uses **Targeted Rebalancing** for: {', '.join(enabled_tickers)}
+                        
+                        **Unlike momentum strategies**, the "Target Allocation if Rebalanced Today" depends on the **backtest start date**. 
+                        The allocation shown here reflects what would happen if rebalanced today based on the current portfolio state, 
+                        but this is **not a standalone strategy** that can be copied independently.
+                        
+                        **Key Points:**
+                        - The allocation depends on when the backtest started
+                        - It's based on the current portfolio drift from initial allocations
+                        - This is **not** a momentum-based allocation like other strategies
+                        """)
+                
                 fig_today = go.Figure(data=[go.Pie(
                     labels=labels_today,
                     values=vals_today,
@@ -9921,7 +10054,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 """
                 Build a comprehensive table with all available financial indicators from Yahoo Finance
                 """
-                st.markdown("### 📊 Comprehensive Portfolio Data")
+                st.markdown("### Comprehensive Portfolio Data")
                 st.markdown("#### Detailed financial indicators for each position")
                 
                 # Get current date for data freshness
@@ -10655,545 +10788,8 @@ if st.session_state.get('alloc_backtest_run', False):
                     st.markdown("- **Realistic ranges**: <1.0 (undervalued), 1.0-1.5 (fair), >2.0 (overvalued)")
             
         
-        # Add Portfolio Weighted Returns before Shares table
-        st.markdown("### 📈 **Portfolio Weighted Returns**")
-        
-        # PE is now calculated directly and always up-to-date - no warning needed
-        
-        def calculate_portfolio_weighted_returns(available_data=None):
-            """Calculate weighted portfolio returns for different periods"""
-            try:
-                # Get raw data
-                snapshot = st.session_state.get('alloc_snapshot_data', {})
-                raw_data = snapshot.get('raw_data') if snapshot and snapshot.get('raw_data') is not None else st.session_state.get('alloc_raw_data', {})
-                
-                if not raw_data:
-                    return None
-                
-                today = pd.Timestamp.now().date()
-                
-                # Calculate different period returns using calendar-day lookbacks
-                # This ensures assets that trade 7 days/week (e.g., BITCOIN) are correct
-                periods = {
-                    '1W': 7,      # 7 calendar days
-                    '1M': 30,     # 30 calendar days per month (more representative)
-                    '3M': 90,     # ~90 calendar days per quarter
-                    '6M': 180,    # ~180 calendar days per half year
-                    '1Y': 365     # ~365 calendar days per year
-                }
-                
-                def _get_value_days_ago(series, days):
-                    """Return value exactly days ago with forward fill for weekends/holidays."""
-                    if series is None or len(series) == 0:
-                        return None
-                    last_date = pd.to_datetime(series.index[-1])
-                    target_date = last_date - pd.Timedelta(days=days)
-                    # Ensure datetime index
-                    series.index = pd.to_datetime(series.index)
-                    
-                    # Forward fill to handle weekends/holidays - create complete daily series
-                    date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
-                    series_filled = series.reindex(date_range).fillna(method='ffill')
-                    
-                    # Now get exact date (should exist after ffill)
-                    if target_date in series_filled.index:
-                        return series_filled.loc[target_date]
-                    else:
-                        # Fallback if target_date is before series start
-                        return series_filled.iloc[0]
-
-                def get_value_days_ago(series, days):
-                    """Return the series value exactly days ago with forward fill for weekends/holidays."""
-                    if series is None or len(series) == 0:
-                        return None
-                    last_date = series.index[-1]
-                    target_date = last_date - pd.Timedelta(days=days)
-                    # Ensure datetime index
-                    series.index = pd.to_datetime(series.index)
-                    
-                    # Forward fill to handle weekends/holidays - create complete daily series
-                    date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
-                    series_filled = series.reindex(date_range).fillna(method='ffill')
-                    
-                    # Now get exact date (should exist after ffill)
-                    if target_date in series_filled.index:
-                        return series_filled.loc[target_date]
-                    else:
-                        # Fallback if target_date is before series start
-                        return series_filled.iloc[0]
-                    return prior.iloc[-1]
-                
-                
-                portfolio_data = []
-                
-                # 1. PORTFOLIO (Historical) - Use same raw data as Current method for consistency
-                historical_returns = {}
-                try:
-                    # Use the same current_weights and raw_data as Current method
-                    current_weights = {**today_weights, 'CASH': today_weights.get('CASH', 0)}
-                    
-                    for period_name, days in periods.items():
-                        try:
-                            weighted_return = 0.0
-                            total_weight = 0.0
-                            
-                            for ticker, weight in current_weights.items():
-                                if ticker == 'CASH' or weight <= 0:
-                                    continue
-                                    
-                                if ticker in raw_data and not raw_data[ticker].empty:
-                                    df = raw_data[ticker].copy()
-                                    if 'Close' not in df.columns or len(df) < days + 1:
-                                        continue
-                                    
-                                    try:
-                                        # Ensure datetime index
-                                        df.index = pd.to_datetime(df.index)
-                                        current_price = df['Close'].iloc[-1]
-                                        past_price = _get_value_days_ago(df['Close'], days)
-                                        
-                                        if past_price is not None and past_price > 0:
-                                            return_pct = ((current_price - past_price) / past_price) * 100
-                                            weighted_return += return_pct * weight
-                                            total_weight += weight
-                                    except Exception:
-                                        continue
-                            
-                            if total_weight > 0:
-                                final_return = weighted_return / total_weight
-                                historical_returns[period_name] = f"{final_return:+.2f}%"
-                            else:
-                                historical_returns[period_name] = 'N/A'
-                                
-                        except Exception:
-                            historical_returns[period_name] = 'N/A'
-                            
-                except Exception as e:
-                    print(f"[PORTFOLIO DEBUG] Error getting historical results: {e}")
-                    for period_name in periods.keys():
-                        historical_returns[period_name] = 'N/A'
-                
-                # NUCLEAR OPTION: Use backtest results directly (same as performance calculations)
-                portfolio_pe_calculated = 'N/A'
-                try:
-                    # Use the SAME data source as performance calculations: alloc_all_results
-                    all_results = st.session_state.get('alloc_all_results', {})
-                    if active_name in all_results:
-                        # Get portfolio info directly from backtest results
-                        # Try to get PE from session state (calculated during backtest)
-                        session_pe = getattr(st.session_state, 'portfolio_pe', None)
-                        if session_pe is not None and not pd.isna(session_pe):
-                            portfolio_pe_calculated = f"{session_pe:.2f}"
-                        else:
-                            # EMERGENCY FALLBACK: Calculate PE directly from portfolio config (like performance does)
-                            if active_portfolio and 'stocks' in active_portfolio:
-                                portfolio_tickers = [stock['ticker'] for stock in active_portfolio['stocks'] if stock.get('ticker')]
-                                portfolio_allocations = {stock['ticker']: stock.get('allocation', 0) for stock in active_portfolio['stocks'] if stock.get('ticker')}
-                                
-                                if portfolio_tickers:
-                                    # Fetch fresh info for portfolio tickers
-                                    portfolio_info = get_multiple_tickers_info_batch(portfolio_tickers)
-                                    
-                                    # Calculate weighted PE
-                                    total_weighted_pe = 0.0
-                                    total_weight = 0.0
-                                    valid_pe_count = 0
-                                    
-                                    for ticker in portfolio_tickers:
-                                        weight = portfolio_allocations.get(ticker, 0)
-                                        if weight <= 0:
-                                            continue
-                                            
-                                        info = portfolio_info.get(ticker, {})
-                                        pe = info.get('trailingPE')
-                                        
-                                        if pe is not None and pe > 0 and pe <= 1000:
-                                            total_weighted_pe += pe * weight
-                                            total_weight += weight
-                                            valid_pe_count += 1
-                                    
-                                    if total_weight > 0 and valid_pe_count > 0:
-                                        weighted_pe = total_weighted_pe / total_weight
-                                        portfolio_pe_calculated = f"{weighted_pe:.2f}"
-                    else:
-                        pass
-                    
-                    # Fallback to df_comprehensive if available (but this is secondary)
-                    if portfolio_pe_calculated == 'N/A' and hasattr(st.session_state, 'df_comprehensive') and st.session_state.df_comprehensive is not None:
-                        df_comp = st.session_state.df_comprehensive
-                        if not df_comp.empty and 'P/E Ratio' in df_comp.columns and '% of Portfolio' in df_comp.columns:
-                            # Convert PE Ratio to numeric, replacing 'N/A' with NaN
-                            pe_numeric = pd.to_numeric(df_comp['P/E Ratio'], errors='coerce')
-                            
-                            # Convert % of Portfolio to numeric, handling percentage strings like '24.83%'
-                            portfolio_pct_str = df_comp['% of Portfolio'].astype(str)
-                            portfolio_pct_numeric = portfolio_pct_str.str.replace('%', '').apply(pd.to_numeric, errors='coerce')
-                            
-                            # Apply same logic as weighted_average function
-                            valid_mask = pe_numeric.notna() & portfolio_pct_numeric.notna()
-                            valid_mask = valid_mask & (pe_numeric > 0) & (pe_numeric <= 1000)
-                            
-                            if valid_mask.sum() > 0:
-                                valid_pe_numeric = pe_numeric[valid_mask]
-                                valid_portfolio_pct = portfolio_pct_numeric[valid_mask]
-                                
-                                # Calculate weighted average (weights are already in percentage)
-                                weighted_pe = (valid_pe_numeric * valid_portfolio_pct / 100).sum() / (valid_portfolio_pct.sum() / 100)
-                                portfolio_pe_calculated = f"{weighted_pe:.2f}"
-                            else:
-                                pass
-                        else:
-                            pass
-                    else:
-                        # TEMPORARY: Check if we have session state PE as fallback
-                        session_pe = getattr(st.session_state, 'portfolio_pe', None)
-                        if session_pe is not None and not pd.isna(session_pe):
-                            portfolio_pe_calculated = f"{session_pe:.2f}"
-                        else:
-                            pass
-                except Exception as e:
-                    import traceback
-                    traceback.print_exc()
-                    pass
-                
-                # Calculate Volatility and Beta for historical portfolio (last 365 calendar days / ~1 year)
-                portfolio_volatility = 'N/A'
-                portfolio_beta = 'N/A'
-                try:
-                    # Use same method as Current portfolio for consistency
-                    weighted_volatility = 0.0
-                    weighted_beta = 0.0
-                    total_weight_vol = 0.0
-                    
-                    for ticker, weight in current_weights.items():
-                        if ticker == 'CASH' or weight <= 0:
-                            continue
-                            
-                        if ticker in raw_data and not raw_data[ticker].empty:
-                            df = raw_data[ticker].copy()
-                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
-                                # Use last 365 calendar days (same as performance calculations)
-                                df_local = df.copy()
-                                df_local.index = pd.to_datetime(df_local.index)
-                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
-                                df_1y = df_local.loc[start_date:]
-                                ticker_returns = df_1y['Close'].pct_change().dropna()
-                                
-                                if len(ticker_returns) > 0:
-                                    ticker_volatility = ticker_returns.std() * np.sqrt(365.25) * 100
-                                    weighted_volatility += ticker_volatility * weight
-                                    total_weight_vol += weight
-                    
-                    if total_weight_vol > 0:
-                        final_volatility = weighted_volatility / total_weight_vol
-                        portfolio_volatility = f"{final_volatility:.2f}%"
-                except Exception:
-                    pass
-                
-                # Calculate Beta using same method as Current portfolio
-                try:
-                    if 'SPY' in raw_data and not raw_data['SPY'].empty:
-                        spy_data = raw_data['SPY'].copy()
-                        if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                            spy_data.index = pd.to_datetime(spy_data.index)
-                            start_date = spy_data.index[-1] - pd.Timedelta(days=365)
-                            spy_1y = spy_data.loc[start_date:]
-                            spy_returns = spy_1y['Close'].pct_change().dropna()
-                            
-                            # Calculate portfolio returns using same method as Current
-                            portfolio_returns_list = []
-                            for ticker, weight in current_weights.items():
-                                if ticker == 'CASH' or weight <= 0:
-                                    continue
-                                if ticker in raw_data and not raw_data[ticker].empty:
-                                    df = raw_data[ticker].copy()
-                                    if 'Close' in df.columns and len(df) >= 365:
-                                        df.index = pd.to_datetime(df.index)
-                                        start_date = df.index[-1] - pd.Timedelta(days=365)
-                                        df_1y = df.loc[start_date:]
-                                        ticker_returns = df_1y['Close'].pct_change().dropna()
-                                        if len(ticker_returns) > 0:
-                                            portfolio_returns_list.append(ticker_returns * weight)
-                            
-                            if portfolio_returns_list and len(spy_returns) > 0:
-                                # Align dates and calculate weighted portfolio returns
-                                common_dates = spy_returns.index
-                                portfolio_returns_aligned = pd.Series(0, index=common_dates)
-                                
-                                for ticker_returns in portfolio_returns_list:
-                                    aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
-                                    portfolio_returns_aligned += aligned_returns
-                                
-                                # Calculate correlation and beta
-                                portfolio_returns_clean = portfolio_returns_aligned.dropna()
-                                spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
-                                
-                                if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
-                                    correlation = portfolio_returns_clean.corr(spy_returns_clean)
-                                    port_vol = portfolio_returns_clean.std()
-                                    spy_vol = spy_returns_clean.std()
-                                    
-                                    if spy_vol > 0 and not np.isnan(correlation):
-                                        beta = correlation * (port_vol / spy_vol)
-                                        portfolio_beta = f"{beta:.2f}"
-                                    else:
-                                        portfolio_beta = "1.00"
-                                else:
-                                    portfolio_beta = "1.00"
-                            else:
-                                portfolio_beta = "1.00"
-                        else:
-                            portfolio_beta = "1.00"
-                    else:
-                        portfolio_beta = "1.00"
-                except Exception:
-                    pass
-                
-                historical_returns['Ticker'] = 'PORTFOLIO (Historical)'
-                historical_returns['PE'] = portfolio_pe_calculated
-                historical_returns['Volatility'] = portfolio_volatility
-                historical_returns['Beta'] = portfolio_beta
-                portfolio_data.append(historical_returns)
-                
-                # 2. PORTFOLIO (Current) - What current allocations would have done
-                current_returns = {}
-                current_weights = {**today_weights, 'CASH': today_weights.get('CASH', 0)}
-                
-                for period_name, days in periods.items():
-                    try:
-                        weighted_return = 0.0
-                        total_weight = 0.0
-                        
-                        for ticker, weight in current_weights.items():
-                            if ticker == 'CASH' or weight <= 0:
-                                continue
-                                
-                            if ticker in raw_data and not raw_data[ticker].empty:
-                                df = raw_data[ticker].copy()
-                                if 'Close' not in df.columns or len(df) < days + 1:
-                                    continue
-                                
-                                try:
-                                    # Ensure datetime index
-                                    df.index = pd.to_datetime(df.index)
-                                    current_price = df['Close'].iloc[-1]
-                                    past_price = _get_value_days_ago(df['Close'], days)
-                                    
-                                    if past_price is not None and past_price > 0:
-                                        return_pct = ((current_price - past_price) / past_price) * 100
-                                        weighted_return += return_pct * weight
-                                        total_weight += weight
-                                except Exception:
-                                    continue
-                        
-                        if total_weight > 0:
-                            # Normalize by total weight to get weighted average return
-                            final_weighted_return = weighted_return / total_weight
-                            current_returns[period_name] = f"{final_weighted_return:+.2f}%"
-                        else:
-                            current_returns[period_name] = 'N/A'
-                            
-                    except Exception:
-                        current_returns[period_name] = 'N/A'
-                
-                # Calculate Volatility and Beta for current portfolio (last 365 calendar days / ~1 year)
-                current_volatility = 'N/A'
-                current_beta = 'N/A'
-                try:
-                    weighted_volatility = 0.0
-                    weighted_beta = 0.0
-                    total_weight_vol = 0.0
-                    
-                    for ticker, weight in current_weights.items():
-                        if ticker == 'CASH' or weight <= 0:
-                            continue
-                            
-                        if ticker in raw_data and not raw_data[ticker].empty:
-                            df = raw_data[ticker].copy()
-                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
-                                # Use last 365 calendar days (same as performance calculations)
-                                df_local = df.copy()
-                                df_local.index = pd.to_datetime(df_local.index)
-                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
-                                ticker_window = df_local['Close'].loc[start_date:]
-                                ticker_returns = ticker_window.pct_change().dropna()
-                                if len(ticker_returns) >= 60:  # Allow some flexibility
-                                    # Annualize using 365 for consistency
-                                    ticker_vol = ticker_returns.std() * np.sqrt(365.25) * 100
-                                    weighted_volatility += ticker_vol * weight
-                                    
-                                    # Simple Beta calculation for this ticker
-                                    try:
-                                        # Use available_data for consistency
-                                        if 'SPY' in available_data and not available_data['SPY'].empty:
-                                            spy_data = available_data['SPY'].copy()
-                                            if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                                spy_close = spy_data['Close'].iloc[-252:]
-                                                spy_returns = spy_close.pct_change().dropna()
-                                                
-                                                # Take same length for both
-                                                min_len = min(len(ticker_returns), len(spy_returns))
-                                                if min_len >= 200:
-                                                    ticker_ret = ticker_returns.iloc[-min_len:]
-                                                    spy_ret = spy_returns.iloc[-min_len:]
-                                                    
-                                                    # Simple beta = correlation * (ticker_vol / market_vol)
-                                                    correlation = ticker_ret.corr(spy_ret)
-                                                    ticker_vol = ticker_ret.std()
-                                                    spy_vol = spy_ret.std()
-                                                    
-                                                    if spy_vol > 0 and not np.isnan(correlation):
-                                                        ticker_beta = correlation * (ticker_vol / spy_vol)
-                                                        weighted_beta += ticker_beta * weight
-                                    except Exception:
-                                        pass
-                                    
-                                    total_weight_vol += weight
-                    
-                    if total_weight_vol > 0:
-                        final_volatility = weighted_volatility / total_weight_vol
-                        current_volatility = f"{final_volatility:.2f}%"
-                        final_beta = weighted_beta / total_weight_vol
-                        current_beta = f"{final_beta:.2f}"
-                except Exception:
-                    pass
-                
-                current_returns['Ticker'] = 'PORTFOLIO (Current)'
-                current_returns['PE'] = portfolio_pe_calculated
-                current_returns['Volatility'] = current_volatility
-                current_returns['Beta'] = current_beta
-                portfolio_data.append(current_returns)
-                
-                return portfolio_data
-                
-            except Exception as e:
-                print(f"[PORTFOLIO RETURNS DEBUG] Error calculating portfolio returns: {e}")
-                return None
-        
-        # Get available data for both functions
-        snapshot = st.session_state.get('alloc_snapshot_data', {})
-        raw_data = snapshot.get('raw_data') if snapshot and snapshot.get('raw_data') is not None else st.session_state.get('alloc_raw_data', {})
-        
-        # Prepare available_data for both portfolio and benchmark calculations
-        available_data = {}
-        benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
-        
-        for ticker in benchmark_tickers:
-            if raw_data and ticker in raw_data and not raw_data[ticker].empty:
-                available_data[ticker] = raw_data[ticker].copy()
-        
-        # Download missing benchmarks if needed
-        missing_tickers = [ticker for ticker in benchmark_tickers if ticker not in available_data]
-        if missing_tickers:
-            try:
-                # Handle BITCOIN specially
-                if 'BITCOIN' in missing_tickers:
-                    try:
-                        from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
-                        bitcoin_data = create_bitcoin_complete_ticker()
-                        if bitcoin_data is not None and not bitcoin_data.empty:
-                            available_data['BITCOIN'] = bitcoin_data
-                        missing_tickers.remove('BITCOIN')
-                    except Exception:
-                        pass
-                
-                # Download other missing tickers
-                if missing_tickers:
-                    import yfinance as yf
-                    batch_data = yf.download(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
-                    if not batch_data.empty:
-                        for ticker in missing_tickers:
-                            if ticker in batch_data.columns.get_level_values(0):
-                                df = batch_data[ticker].copy()
-                                if df is not None and not df.empty and 'Close' in df.columns:
-                                    available_data[ticker] = df
-            except Exception:
-                pass
-        
-        portfolio_returns_data = calculate_portfolio_weighted_returns(available_data)
-        if portfolio_returns_data:
-            # Create DataFrame from the list of portfolio returns
-            df_portfolio_returns = pd.DataFrame(portfolio_returns_data)
-            
-            # Reorder columns to put Ticker first, then PE, then periods, then Volatility and Beta at the end
-            period_cols = [col for col in df_portfolio_returns.columns if col not in ['Ticker', 'PE', 'Volatility', 'Beta']]
-            columns = ['Ticker', 'PE'] + period_cols + ['Volatility', 'Beta']
-            df_portfolio_returns = df_portfolio_returns[columns]
-            
-            # Style the dataframe
-            styled_portfolio_returns = df_portfolio_returns.style
-            
-            # Apply coloring to each column separately
-            for col in df_portfolio_returns.columns:
-                if col == 'PE':
-                    def style_pe(val):
-                        if isinstance(val, str) and val != 'N/A' and not val.endswith('%'):
-                            try:
-                                pe_val = float(val)
-                                if pe_val >= 35:
-                                    return 'color: #ff4444; font-weight: bold'  # Red for PE >= 35 (Overvalued)
-                                elif pe_val >= 25:
-                                    return 'color: #ffaa00; font-weight: bold'  # Orange for PE 25-35 (Expensive)
-                                elif pe_val >= 15:
-                                    return 'color: #00ff00; font-weight: bold'  # Green for PE 15-25 (Fair Value)
-                                else:
-                                    return 'color: #00ff00; font-weight: bold'  # Green for PE < 15 (Undervalued)
-                            except:
-                                pass
-                        return ''
-                    styled_portfolio_returns = styled_portfolio_returns.applymap(style_pe, subset=[col])
-                elif col not in ['Ticker', 'Beta', 'Volatility']:
-                    def style_returns(val):
-                        if isinstance(val, str) and val.endswith('%'):
-                            try:
-                                num_val = float(val.replace('%', '').replace('+', ''))
-                                if num_val > 0:
-                                    return 'color: #00ff00; font-weight: bold'
-                                elif num_val < 0:
-                                    return 'color: #ff4444; font-weight: bold'
-                            except:
-                                pass
-                        return ''
-                    styled_portfolio_returns = styled_portfolio_returns.applymap(style_returns, subset=[col])
-            
-            # Highlight the PORTFOLIO rows
-            def highlight_portfolio_rows(row):
-                if 'PORTFOLIO' in row['Ticker']:
-                    return ['background-color: #333333; font-weight: bold; border: 2px solid #ffff00' for _ in row]
-                return ['' for _ in row]
-            
-            # Apply row highlighting
-            styled_portfolio_returns = styled_portfolio_returns.apply(highlight_portfolio_rows, axis=1)
-            
-            # Add custom CSS for uniform column widths
-            st.markdown("""
-            <style>
-            /* Uniform column widths for Portfolio Returns table */
-            .stDataFrame table {
-                table-layout: fixed !important;
-                width: 100% !important;
-            }
-            .stDataFrame table th:nth-child(1),
-            .stDataFrame table td:nth-child(1) {
-                width: 20% !important; /* Ticker column */
-            }
-            .stDataFrame table th:nth-child(2),
-            .stDataFrame table td:nth-child(2) {
-                width: 10% !important; /* PE column */
-            }
-            .stDataFrame table th:nth-child(n+3),
-            .stDataFrame table td:nth-child(n+3) {
-                width: 11.4% !important; /* Period columns (7 columns = 80% / 7) */
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            
-            st.dataframe(styled_portfolio_returns, )
-        else:
-            st.info("Portfolio returns data not available.")
-        
         # Add Benchmark Comparison Table
-        st.markdown("### 📊 **Benchmark Comparison**")
+        st.markdown("### Benchmark Comparison")
         # Clarify that figures are approximate snapshots
         st.caption("Approximate price-return snapshots using calendar lookbacks; may differ from total-return or month-end sources.")
         
@@ -11255,74 +10851,82 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 # available_data is already prepared outside this function
                 
-                # Add PORTFOLIO row first for comparison (using same raw data as Current method)
+                # Copy EXACTLY the same data as Portfolio Weighted Returns table
                 portfolio_returns_dict = {}
-                
-                # Use same method as Current portfolio for consistency
                 try:
-                    # Get current weights from snapshot
-                    snapshot = st.session_state.get('alloc_snapshot_data', {})
-                    today_weights_map = snapshot.get('today_weights_map', {}) if snapshot else {}
-                    current_weights = today_weights_map.get(active_name, {})
-                    if not current_weights:
-                        current_weights = {**today_weights_map.get(active_name, {}), 'CASH': today_weights_map.get(active_name, {}).get('CASH', 0)}
-                    
-                    for period_name, days in periods.items():
-                        try:
-                            weighted_return = 0.0
-                            total_weight = 0.0
+                    # Get EXACT same data as Portfolio Weighted Returns table
+                    all_results = st.session_state.get('alloc_all_results', {})
+                    if active_name in all_results:
+                        portfolio_result = all_results[active_name]
+                        total_series = portfolio_result.get('no_additions', None)
+                        if total_series is not None and len(total_series) > 0:
+                            # Calculate returns EXACTLY like the first table
+                            historical_returns = {}
+                            for period_name, days in periods.items():
+                                try:
+                                    if len(total_series) >= days:
+                                        current_value = total_series.iloc[-1]
+                                        historical_value = total_series.iloc[-days] if len(total_series) >= days else total_series.iloc[0]
+                                        if historical_value > 0:
+                                            historical_return = (current_value - historical_value) / historical_value * 100
+                                            historical_returns[period_name] = f"{historical_return:+.2f}%"
+                                    else:
+                                        historical_returns[period_name] = 'N/A'
+                                except Exception:
+                                    historical_returns[period_name] = 'N/A'
                             
-                            for ticker, weight in current_weights.items():
-                                if ticker == 'CASH' or weight <= 0:
-                                    continue
-                                    
-                                if ticker in raw_data and not raw_data[ticker].empty:
-                                    df = raw_data[ticker].copy()
-                                    if 'Close' not in df.columns or len(df) < days + 1:
-                                        continue
-                                    
-                                    try:
-                                        # Ensure datetime index
-                                        df.index = pd.to_datetime(df.index)
-                                        current_price = df['Close'].iloc[-1]
-                                        past_price = get_value_days_ago(df['Close'], days)
-                                        
-                                        if past_price is not None and past_price > 0:
-                                            return_pct = ((current_price - past_price) / past_price) * 100
-                                            weighted_return += return_pct * weight
-                                            total_weight += weight
-                                    except Exception:
-                                        continue
+                            # Copy historical returns to portfolio_returns_dict
+                            for period_name, return_value in historical_returns.items():
+                                portfolio_returns_dict[period_name] = return_value
                             
-                            if total_weight > 0:
-                                final_return = weighted_return / total_weight
-                                portfolio_returns_dict[period_name] = f"{final_return:+.2f}%"
-                            else:
+                            # Add PORTFOLIO as first row
+                            portfolio_returns_dict['Ticker'] = 'PORTFOLIO (Historical)'
+                        else:
+                            # Fallback if no data
+                            portfolio_returns_dict = {
+                                'Ticker': 'PORTFOLIO (Historical)',
+                                'PE': 'N/A',
+                                'Volatility': 'N/A',
+                                'Beta': 'N/A'
+                            }
+                            for period_name in periods.keys():
                                 portfolio_returns_dict[period_name] = 'N/A'
-                                
-                        except Exception:
+                    else:
+                        # Fallback if no results
+                        portfolio_returns_dict = {
+                            'Ticker': 'PORTFOLIO (Historical)',
+                            'PE': 'N/A',
+                            'Volatility': 'N/A',
+                            'Beta': 'N/A'
+                        }
+                        for period_name in periods.keys():
                             portfolio_returns_dict[period_name] = 'N/A'
                             
                 except Exception as e:
                     print(f"[PORTFOLIO DEBUG] Error getting backtest results: {e}")
                     # Fallback: all N/A if error
+                    portfolio_returns_dict = {
+                        'Ticker': 'PORTFOLIO (Historical)',
+                        'PE': 'N/A',
+                        'Volatility': 'N/A',
+                        'Beta': 'N/A'
+                    }
                     for period_name in periods.keys():
                         portfolio_returns_dict[period_name] = 'N/A'
                 
-                # Add PORTFOLIO as first row
-                portfolio_returns_dict['Ticker'] = 'PORTFOLIO'
-                
-                # NUCLEAR OPTION: Use backtest results directly (same as performance calculations)
+                # Get PE, Volatility, and Beta EXACTLY like the first table
                 portfolio_pe_calculated = 'N/A'
                 try:
-                    # Use the SAME data source as performance calculations: alloc_all_results
+                    # Get EXACT same data as Portfolio Weighted Returns table
                     all_results = st.session_state.get('alloc_all_results', {})
                     if active_name in all_results:
-                        # Get portfolio info directly from backtest results
-                        # Try to get PE from session state (calculated during backtest)
-                        session_pe = getattr(st.session_state, 'portfolio_pe', None)
-                        if session_pe is not None and not pd.isna(session_pe):
-                            portfolio_pe_calculated = f"{session_pe:.2f}"
+                        portfolio_result = all_results[active_name]
+                        total_series = portfolio_result.get('no_additions', None)
+                        if total_series is not None and len(total_series) > 0:
+                            # Get PE from session state
+                            session_pe = getattr(st.session_state, 'portfolio_pe', None)
+                            if session_pe is not None and not pd.isna(session_pe):
+                                portfolio_pe_calculated = f"{session_pe:.2f}"
                         else:
                             # EMERGENCY FALLBACK: Calculate PE directly from portfolio config (like performance does)
                             if active_portfolio and 'stocks' in active_portfolio:
@@ -11394,103 +10998,61 @@ if st.session_state.get('alloc_backtest_run', False):
                     import traceback
                     traceback.print_exc()
                     pass
-                portfolio_volatility_calculated = 'N/A'
-                portfolio_beta_calculated = 'N/A'
-                
-                # Calculate Volatility and Beta using same method as Current portfolio
+                # Calculate Volatility and Beta EXACTLY like the first table
+                portfolio_volatility = 'N/A'
+                portfolio_beta = 'N/A'
                 try:
-                    # Use same method as Current portfolio for consistency
-                    weighted_volatility = 0.0
-                    weighted_beta = 0.0
-                    total_weight_vol = 0.0
-                    
-                    for ticker, weight in current_weights.items():
-                        if ticker == 'CASH' or weight <= 0:
-                            continue
-                            
-                        if ticker in raw_data and not raw_data[ticker].empty:
-                            df = raw_data[ticker].copy()
-                            if 'Close' in df.columns and len(df) >= 60:  # Allow flexibility for weekends/holidays
-                                # Use last 365 calendar days (same as performance calculations)
-                                df_local = df.copy()
-                                df_local.index = pd.to_datetime(df_local.index)
-                                start_date = df_local.index[-1] - pd.Timedelta(days=365)
-                                df_1y = df_local.loc[start_date:]
-                                ticker_returns = df_1y['Close'].pct_change().dropna()
+                    all_results = st.session_state.get('alloc_all_results', {})
+                    if active_name in all_results:
+                        portfolio_result = all_results[active_name]
+                        total_series = portfolio_result.get('no_additions', None)
+                        if total_series is not None and len(total_series) > 365:
+                            last_365_days = total_series.tail(365)
+                            returns = last_365_days.pct_change().dropna()
+                            if len(returns) > 1:
+                                vol = calculate_volatility(returns)
+                                if not np.isnan(vol):
+                                    portfolio_volatility = f"{vol * 100:.2f}%"
                                 
-                                if len(ticker_returns) > 0:
-                                    ticker_volatility = ticker_returns.std() * np.sqrt(365.25) * 100
-                                    weighted_volatility += ticker_volatility * weight
-                                    total_weight_vol += weight
-                    
-                    if total_weight_vol > 0:
-                        final_volatility = weighted_volatility / total_weight_vol
-                        portfolio_volatility_calculated = f"{final_volatility:.2f}%"
-                    
-                    # Calculate Beta using same method as Current portfolio
-                    try:
-                        if 'SPY' in raw_data and not raw_data['SPY'].empty:
-                            spy_data = raw_data['SPY'].copy()
-                            if 'Close' in spy_data.columns and len(spy_data) >= 252:
-                                spy_data.index = pd.to_datetime(spy_data.index)
-                                start_date = spy_data.index[-1] - pd.Timedelta(days=365)
-                                spy_1y = spy_data.loc[start_date:]
-                                spy_returns = spy_1y['Close'].pct_change().dropna()
-                                
-                                # Calculate portfolio returns using same method as Current
-                                portfolio_returns_list = []
-                                for ticker, weight in current_weights.items():
-                                    if ticker == 'CASH' or weight <= 0:
-                                        continue
-                                    if ticker in raw_data and not raw_data[ticker].empty:
-                                        df = raw_data[ticker].copy()
-                                        if 'Close' in df.columns and len(df) >= 365:
-                                            df.index = pd.to_datetime(df.index)
-                                            start_date = df.index[-1] - pd.Timedelta(days=365)
-                                            df_1y = df.loc[start_date:]
-                                            ticker_returns = df_1y['Close'].pct_change().dropna()
-                                            if len(ticker_returns) > 0:
-                                                portfolio_returns_list.append(ticker_returns * weight)
-                                
-                                if portfolio_returns_list and len(spy_returns) > 0:
-                                    # Align dates and calculate weighted portfolio returns
-                                    common_dates = spy_returns.index
-                                    portfolio_returns_aligned = pd.Series(0, index=common_dates)
+                                # Calculate beta against benchmark ticker
+                                try:
+                                    benchmark_ticker = active_portfolio.get('benchmark_ticker', '^GSPC')
+                                    benchmark_data_beta = None
+                                    raw_data = st.session_state.get('alloc_raw_data', {})
                                     
-                                    for ticker_returns in portfolio_returns_list:
-                                        aligned_returns = ticker_returns.reindex(common_dates).fillna(0)
-                                        portfolio_returns_aligned += aligned_returns
+                                    if benchmark_ticker in raw_data and not raw_data[benchmark_ticker].empty:
+                                        benchmark_data_beta = raw_data[benchmark_ticker]
+                                    elif benchmark_ticker in all_results:
+                                        benchmark_data_beta = all_results[benchmark_ticker]
                                     
-                                    # Calculate correlation and beta
-                                    portfolio_returns_clean = portfolio_returns_aligned.dropna()
-                                    spy_returns_clean = spy_returns.reindex(portfolio_returns_clean.index).dropna()
-                                    
-                                    if len(portfolio_returns_clean) > 30 and len(spy_returns_clean) > 30:
-                                        correlation = portfolio_returns_clean.corr(spy_returns_clean)
-                                        port_vol = portfolio_returns_clean.std()
-                                        spy_vol = spy_returns_clean.std()
+                                    if benchmark_data_beta is not None and isinstance(benchmark_data_beta, pd.DataFrame) and 'Close' in benchmark_data_beta.columns:
+                                        benchmark_series = benchmark_data_beta['Close']
+                                        benchmark_series_filled = benchmark_series.reindex(last_365_days.index, method='ffill')
+                                        portfolio_aligned = last_365_days.reindex(benchmark_series_filled.index).dropna()
+                                        benchmark_aligned = benchmark_series_filled.reindex(portfolio_aligned.index).dropna()
                                         
-                                        if spy_vol > 0 and not np.isnan(correlation):
-                                            beta = correlation * (port_vol / spy_vol)
-                                            portfolio_beta_calculated = f"{beta:.2f}"
-                                        else:
-                                            portfolio_beta_calculated = "1.00"
-                                    else:
-                                        portfolio_beta_calculated = "1.00"
-                                else:
-                                    portfolio_beta_calculated = "1.00"
-                            else:
-                                portfolio_beta_calculated = "1.00"
-                        else:
-                            portfolio_beta_calculated = "1.00"
-                    except Exception:
-                        portfolio_beta_calculated = "1.00"
+                                        if len(portfolio_aligned) > 1 and len(benchmark_aligned) > 1:
+                                            portfolio_returns = portfolio_aligned.pct_change().fillna(0)
+                                            benchmark_returns = benchmark_aligned.pct_change().fillna(0)
+                                            common_idx = portfolio_returns.index.intersection(benchmark_returns.index)
+                                            if len(common_idx) >= 2:
+                                                pr = portfolio_returns.reindex(common_idx).dropna()
+                                                br = benchmark_returns.reindex(common_idx).dropna()
+                                                common_idx2 = pr.index.intersection(br.index)
+                                                if len(common_idx2) >= 2 and br.loc[common_idx2].var() != 0:
+                                                    cov = pr.loc[common_idx2].cov(br.loc[common_idx2])
+                                                    var = br.loc[common_idx2].var()
+                                                    beta = cov / var
+                                                    if not np.isnan(beta):
+                                                        portfolio_beta = f"{beta:.2f}"
+                                except Exception:
+                                    pass
                 except Exception:
                     pass
                 
                 portfolio_returns_dict['PE'] = portfolio_pe_calculated
-                portfolio_returns_dict['Volatility'] = portfolio_volatility_calculated
-                portfolio_returns_dict['Beta'] = portfolio_beta_calculated
+                portfolio_returns_dict['Volatility'] = portfolio_volatility
+                portfolio_returns_dict['Beta'] = portfolio_beta
                 benchmark_data.append(portfolio_returns_dict)
                 
                 # Calculate returns for all available benchmarks
@@ -11594,6 +11156,46 @@ if st.session_state.get('alloc_backtest_run', False):
                 pass
                 return None
         
+        # Get available data for benchmark calculations
+        snapshot = st.session_state.get('alloc_snapshot_data', {})
+        raw_data = snapshot.get('raw_data') if snapshot and snapshot.get('raw_data') is not None else st.session_state.get('alloc_raw_data', {})
+        
+        # Prepare available_data for benchmark calculations
+        available_data = {}
+        benchmark_tickers = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
+        
+        for ticker in benchmark_tickers:
+            if raw_data and ticker in raw_data and not raw_data[ticker].empty:
+                available_data[ticker] = raw_data[ticker].copy()
+        
+        # Download missing benchmarks if needed
+        missing_tickers = [ticker for ticker in benchmark_tickers if ticker not in available_data]
+        if missing_tickers:
+            try:
+                # Handle BITCOIN specially
+                if 'BITCOIN' in missing_tickers:
+                    try:
+                        from Complete_Tickers.BITCOIN_COMPLETE_TICKER import create_bitcoin_complete_ticker
+                        bitcoin_data = create_bitcoin_complete_ticker()
+                        if bitcoin_data is not None and not bitcoin_data.empty:
+                            available_data['BITCOIN'] = bitcoin_data
+                        missing_tickers.remove('BITCOIN')
+                    except Exception:
+                        pass
+                
+                # Download other missing tickers
+                if missing_tickers:
+                    import yfinance as yf
+                    batch_data = yf.download(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
+                    if not batch_data.empty:
+                        for ticker in missing_tickers:
+                            if ticker in batch_data.columns.get_level_values(0):
+                                df = batch_data[ticker].copy()
+                                if df is not None and not df.empty and 'Close' in df.columns:
+                                    available_data[ticker] = df
+            except Exception:
+                pass
+        
         # Preload benchmark ticker info BEFORE calculating returns to ensure PE ratios are available immediately
         # NUCLEAR OPTION: Portfolio PE is already calculated and stored in session state, no need to preload portfolio tickers!
         benchmark_tickers_to_preload = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
@@ -11673,7 +11275,10 @@ if st.session_state.get('alloc_backtest_run', False):
         else:
             st.info("Benchmark data not available.")
         
-        build_table_from_alloc({**today_weights, 'CASH': today_weights.get('CASH', 0)}, None, f"Shares if Rebalanced Today (snapshot)")
+        st.markdown("---")
+        st.markdown("### Shares if Rebalanced Today (Snapshot)")
+        st.caption("Current allocation weights converted to actual share quantities at today's prices")
+        build_table_from_alloc({**today_weights, 'CASH': today_weights.get('CASH', 0)}, None, "")
 
     if allocs_for_portfolio:
         st.markdown("**Historical Allocations**")
@@ -11964,7 +11569,41 @@ if st.session_state.get('alloc_backtest_run', False):
         try:
             alloc_dates = sorted(list(allocs_for_portfolio.keys()))
             final_date = alloc_dates[-1]
-            last_rebal_date = alloc_dates[-2] if len(alloc_dates) > 1 else alloc_dates[-1]
+            
+            # Get last rebalance date using same logic as Page 4
+            last_rebal_date = None
+            if alloc_dates:
+                # Try to find the actual last rebalancing date
+                if active_portfolio:
+                    rebalancing_frequency = active_portfolio.get('rebalancing_frequency', 'Monthly')
+                    
+                    if rebalancing_frequency != 'Never' and rebalancing_frequency != 'never' and rebalancing_frequency != 'none':
+                        # Get sim_index from the portfolio results
+                        sim_index = None
+                        if 'alloc_all_results' in st.session_state and st.session_state.alloc_all_results:
+                            portfolio_results = st.session_state.alloc_all_results.get(active_name)
+                            if portfolio_results:
+                                if isinstance(portfolio_results, dict) and 'no_additions' in portfolio_results:
+                                    sim_index = portfolio_results['no_additions'].index
+                                elif isinstance(portfolio_results, pd.Series):
+                                    sim_index = portfolio_results.index
+                        
+                        if sim_index is not None:
+                            # Get rebalancing dates based on frequency
+                            rebalancing_dates = get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index)
+                            
+                            if rebalancing_dates:
+                                # Find the last rebalancing date before or on the final date
+                                for date in reversed(sorted(rebalancing_dates)):
+                                    if date <= final_date:
+                                        last_rebal_date = date
+                                        break
+            
+                        # Fallback to second-to-last date if no rebalancing date found
+                        if not last_rebal_date and len(alloc_dates) > 1:
+                            last_rebal_date = alloc_dates[-2]
+                        elif not last_rebal_date:
+                            last_rebal_date = alloc_dates[-1]
             final_alloc = allocs_for_portfolio.get(final_date, {})
             rebal_alloc = allocs_for_portfolio.get(last_rebal_date, {})
 
@@ -12419,3 +12058,18 @@ if st.session_state.get('alloc_backtest_run', False):
         except Exception as e:
             st.error(f"❌ Error generating PDF: {str(e)}")
             st.exception(e)
+    
+    # Footer - Always visible
+    st.markdown("---")
+    st.markdown("""
+    <div style="
+        text-align: center; 
+        color: #666; 
+        margin: 2rem 0; 
+        padding: 1rem; 
+        font-size: 0.9rem;
+        font-weight: 500;
+    ">
+        Made by Nicolas Cool
+    </div>
+    """, unsafe_allow_html=True)
