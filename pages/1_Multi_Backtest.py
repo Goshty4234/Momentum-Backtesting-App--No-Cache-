@@ -20,6 +20,7 @@ import threading
 import logging
 import warnings
 import multiprocessing as mp
+import diskcache as dc
 
 # Suppress specific Streamlit threading warnings
 warnings.filterwarnings('ignore')
@@ -1179,12 +1180,14 @@ def get_goldsim_complete_data(period="max"):
 
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
-    Smart batch download with fallback to individual downloads.
+    Smart batch download with fallback to individual downloads + disk cache.
     
     Strategy:
-    1. Try batch download (fast - 1 API call for all tickers)
-    2. If batch fails → fallback to individual downloads (reliable)
-    3. Invalid tickers are skipped, others continue
+    1. Check disk cache first (4-hour TTL, survives reloads)
+    2. Try batch download (fast - 1 API call for all tickers)
+    3. If batch fails → fallback to individual downloads (reliable)
+    4. Invalid tickers are skipped, others continue
+    5. Store in disk cache for 4 hours
     
     Args:
         ticker_list: List of ticker symbols (can include leverage format)
@@ -1197,7 +1200,47 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     if not ticker_list:
         return {}
     
+    # Initialize disk cache (survives page reloads)
+    # Create cache directory if it doesn't exist
+    cache_dir = '.streamlit/ticker_cache'
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Initialize disk cache with 4-hour TTL
+    disk_cache = dc.Cache(cache_dir)
+    
+    # Check cache first
     results = {}
+    cache_hits = 0
+    cache_misses = []
+    
+    # Generate cache keys and check disk cache
+    for ticker_symbol in ticker_list:
+        cache_key = f"{ticker_symbol}_{period}_{auto_adjust}"
+        
+        # Try to get from disk cache
+        cached_data = disk_cache.get(cache_key)
+        
+        if cached_data is not None:
+            # Data found in disk cache (4h TTL is handled by diskcache)
+            try:
+                results[ticker_symbol] = cached_data.copy()
+                cache_hits += 1
+                continue
+            except:
+                # If deserialization fails, mark as miss
+                pass
+        
+        cache_misses.append(ticker_symbol)
+    
+    if cache_hits > 0:
+        st.write(f"✅ Cache hit: {cache_hits}/{len(ticker_list)} tickers (from cache, < 4h old)")
+    
+    # If everything was cached, return early
+    if not cache_misses:
+        return results
+    
+    if cache_misses:
+        st.write(f"📥 Downloading {len(cache_misses)} tickers from Yahoo Finance...")
     
     # Separate tickers into Yahoo-fetchable vs custom
     yahoo_tickers = []
@@ -1233,9 +1276,15 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     # Extract just the resolved tickers for batch download
     resolved_list = list(set([resolved for _, resolved, _, _ in yahoo_tickers]))
     
+    # CRITICAL: We must use individual downloads, not batch downloads
+    # Batch downloads force ALL tickers to have the SAME date range (intersection of all dates)
+    # This breaks backtesting because each ticker should have its own unique history
+    # Individual downloads preserve each ticker's actual historical data range
+    USE_BATCH_DOWNLOAD = False  # Set to False to preserve unique date ranges
+    
     try:
         # BATCH DOWNLOAD - Fast path (1 API call for all)
-        if len(resolved_list) > 1:
+        if USE_BATCH_DOWNLOAD and len(resolved_list) > 1:
             batch_data = yf.download(
                 resolved_list,
                 period=period,
@@ -1284,10 +1333,18 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                     if leverage != 1.0 or expense_ratio != 0.0:
                         hist = apply_daily_leverage(hist, leverage, expense_ratio)
                     results[ticker_symbol] = hist
+                    
+                    # Store in disk cache (4h TTL)
+                    cache_key = f"{ticker_symbol}_{period}_{auto_adjust}"
+                    disk_cache.set(cache_key, hist.copy(), expire=4*3600)  # 4 hours in seconds
                 else:
                     results[ticker_symbol] = pd.DataFrame()
             except:
                 results[ticker_symbol] = pd.DataFrame()
+    
+    if cache_misses and results:
+        downloaded_count = len([r for r in results.values() if r is not None and not r.empty])
+        st.write(f"📥 Downloaded {downloaded_count} new tickers (cached for 4h)")
     
     return results
 
@@ -4113,7 +4170,7 @@ def precompute_individual_portfolio_charts():
                 # Store everything in the cache
                 st.session_state.individual_portfolio_cache[portfolio_name] = portfolio_cache
         
-        st.success(f"✅ Pre-computed ALL data for {len(all_results)} portfolios")
+        st.success(f"✅ Processed ALL data for {len(all_results)} portfolios (with 4h ticker cache)")
         
     except Exception as e:
         st.error(f"Error pre-computing portfolio data: {str(e)}")
@@ -5448,6 +5505,15 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     # Dictionaries to store historical data for new tables
     historical_allocations = {}
     historical_metrics = {}
+    
+    # Precompute start dates for all tickers (same as Page 5)
+    start_dates_config = {}
+    for t in tickers:
+        if t in reindexed_data and isinstance(reindexed_data.get(t), pd.DataFrame):
+            fd = reindexed_data[t].first_valid_index()
+            start_dates_config[t] = fd if fd is not None else pd.NaT
+        else:
+            start_dates_config[t] = pd.NaT
 
     def calculate_momentum(date, current_assets, momentum_windows, stocks_config=None):
         cumulative_returns, valid_assets = {}, []
@@ -5464,6 +5530,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             
             # Only calculate momentum for filtered assets
             assets_to_calculate = filtered_assets
+        else:
+            # No MA filter - use all assets
+            pass
         filtered_windows = [w for w in momentum_windows if w["weight"] > 0]
         # Normalize weights so they sum to 1 (same as app.py)
         total_weight = sum(w["weight"] for w in filtered_windows)
@@ -5471,27 +5540,41 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             normalized_weights = [0 for _ in filtered_windows]
         else:
             normalized_weights = [w["weight"] / total_weight for w in filtered_windows]
-        start_dates_config = {t: reindexed_data[t].first_valid_index() for t in tickers if t in reindexed_data and not isinstance(reindexed_data[t], str)}
+        
+        # Only consider assets that exist in current_data (filtered earlier)
+        candidate_assets = [t for t in assets_to_calculate if t in current_data]
         
         # Calculate momentum only for SMA-filtered assets
-        for t in assets_to_calculate:
+        for t in candidate_assets:
             is_valid, asset_returns = True, 0.0
+            df_t = current_data.get(t)
+            if not (isinstance(df_t, pd.DataFrame) and 'Close' in df_t.columns and not df_t['Close'].dropna().empty):
+                # no usable data for this ticker
+                continue
             for idx, window in enumerate(filtered_windows):
                 lookback, exclude = window["lookback"], window["exclude"]
                 weight = normalized_weights[idx]
                 start_mom = date - pd.Timedelta(days=lookback)
                 end_mom = date - pd.Timedelta(days=exclude)
-                if start_dates_config.get(t, pd.Timestamp.max) > start_mom:
-                    is_valid = False; break
-                df_t = current_data[t]
-                price_start_index = df_t.index.asof(start_mom)
-                price_end_index = df_t.index.asof(end_mom)
+                sd = start_dates_config.get(t, pd.NaT)
+                # If no start date or asset starts after required lookback, mark invalid
+                if pd.isna(sd) or sd > start_mom:
+                    is_valid = False
+                    break
+                try:
+                    price_start_index = df_t.index.asof(start_mom)
+                    price_end_index = df_t.index.asof(end_mom)
+                except Exception:
+                    is_valid = False
+                    break
                 if pd.isna(price_start_index) or pd.isna(price_end_index):
-                    is_valid = False; break
+                    is_valid = False
+                    break
                 price_start = df_t.loc[price_start_index, "Close"]
                 price_end = df_t.loc[price_end_index, "Close"]
                 if pd.isna(price_start) or pd.isna(price_end) or price_start == 0:
-                    is_valid = False; break
+                    is_valid = False
+                    break
                 
                 # ACADEMIC FIX: Include dividends in momentum calculation if configured (Jegadeesh & Titman 1993)
                 if include_dividends.get(t, False):
@@ -9317,6 +9400,35 @@ if len(st.session_state.multi_backtest_portfolio_configs) > 1:
 if st.sidebar.button("Reset Selected Portfolio", on_click=reset_portfolio_callback):
     pass
 
+# Clear ticker cache button
+if st.sidebar.button("🗑️ Clear Ticker Cache", 
+                    help="Clear the 4-hour ticker cache to force fresh data downloads"):
+    import diskcache as dc
+    import os
+    
+    total_cleared = 0
+    
+    # Clear ticker historical data cache
+    cache_dir = '.streamlit/ticker_cache'
+    if os.path.exists(cache_dir):
+        disk_cache = dc.Cache(cache_dir)
+        cache_size = len(disk_cache)
+        disk_cache.clear()
+        total_cleared += cache_size
+    
+    # Clear ticker info cache (PE/valuations)
+    info_cache_dir = '.streamlit/ticker_info_cache'
+    if os.path.exists(info_cache_dir):
+        info_cache = dc.Cache(info_cache_dir)
+        info_cache_size = len(info_cache)
+        info_cache.clear()
+        total_cleared += info_cache_size
+    
+    if total_cleared > 0:
+        st.sidebar.success(f"✅ Cleared {total_cleared} cached items (tickers + PE/valuations)")
+    else:
+        st.sidebar.info("No cache to clear")
+
 # Quick convert to SPY portfolio button
 if st.sidebar.button("📊 Convert to SPY Portfolio", 
                     help="Transform selected portfolio to SPY benchmark: 100% SPY, $10k initial + $10k/year"):
@@ -9348,6 +9460,33 @@ if st.sidebar.button("📈 Convert to SPY Total Return",
     
     st.toast("✅ Portfolio converted to SPY Total Return!")
     st.rerun()
+
+# Clear ticker cache button
+if st.sidebar.button("🗑️ Clear Ticker Cache", 
+                    help="Clear the 4-hour ticker cache to force fresh data downloads", 
+                    use_container_width=True):
+    total_cleared = 0
+    
+    # Clear ticker historical data cache
+    cache_dir = '.streamlit/ticker_cache'
+    if os.path.exists(cache_dir):
+        disk_cache = dc.Cache(cache_dir)
+        cache_size = len(disk_cache)
+        disk_cache.clear()
+        total_cleared += cache_size
+    
+    # Clear ticker info cache (PE/valuations)
+    info_cache_dir = '.streamlit/ticker_info_cache'
+    if os.path.exists(info_cache_dir):
+        info_cache = dc.Cache(info_cache_dir)
+        info_cache_size = len(info_cache)
+        info_cache.clear()
+        total_cleared += info_cache_size
+    
+    if total_cleared > 0:
+        st.sidebar.success(f"✅ Cleared {total_cleared} cached items (tickers + PE/valuations)")
+    else:
+        st.sidebar.info("No cache to clear")
 
 # Clear all portfolios button - quick access outside dropdown
 if st.sidebar.button("🗑️ Clear All Portfolios", key="multi_backtest_clear_all_portfolios_immediate", 
@@ -9976,8 +10115,8 @@ st.sidebar.radio(
     ["all", "oldest"],
     format_func=lambda x: "Start when ALL assets are available" if x == "all" else "Start with OLDEST asset",
     help="""
-    **All:** Starts the backtest when all selected assets are available.
-    **Oldest:** Starts at the oldest date of any asset and adds assets as they become available.
+    **All:** Wait until all selected assets have data before starting the backtest. Ensures complete portfolio from day 1.
+    **Oldest:** Start immediately with the oldest available asset, then add other assets as their data becomes available. May have incomplete portfolio initially, but allocation is still normalized to 100%.
     """,
     key="multi_backtest_start_with_radio",
     on_change=update_start_with
@@ -9991,8 +10130,8 @@ st.sidebar.radio(
     ["rebalancing_date", "momentum_window_complete"],
     format_func=lambda x: "First rebalance on rebalancing date" if x == "rebalancing_date" else "First rebalance when momentum window complete",
     help="""
-    **First rebalance on rebalancing date:** Wait for the momentum window to complete, then rebalance on the next regular rebalancing date (e.g., wait a few more days to get to the 1st of the month).
-    **First rebalance when momentum window complete:** Rebalance immediately on an irregular date as soon as the momentum window is completed (e.g., on a random day like the 15th).
+    **First rebalance on rebalancing date:** Wait for momentum calculation, then rebalance on the next scheduled date (e.g., 1st of month). More realistic but may delay start.
+    **First rebalance when momentum window complete:** Rebalance immediately when momentum data is ready, even on irregular dates. Faster start but less realistic timing.
     """,
     key="multi_backtest_first_rebalance_strategy_radio",
     on_change=update_first_rebalance_strategy
@@ -11730,7 +11869,7 @@ for i in range(len(active_portfolio['stocks'])):
                 format="%d", 
                 key=max_cap_key, 
                 label_visibility="visible",
-                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled)"
+                help="Individual cap for this ticker (0 = no cap, uses global cap if enabled). This overrides the Min and Max Threshold filters for this specific ticker."
             )
             
             # Update the portfolio config
@@ -12479,7 +12618,8 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             "Momentum strategy when NOT all negative:",
             ["Classic", "Relative Momentum", "Near-Zero Symmetry"],
             index=["Classic", "Relative Momentum", "Near-Zero Symmetry"].index(active_portfolio.get('momentum_strategy', 'Classic')),
-            key=f"multi_backtest_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
+            key=f"multi_backtest_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}",
+            help="Classic: Uses absolute momentum values. Only assets with positive momentum get allocated, weighted by their momentum strength. Assets with negative momentum get 0% allocation.\n\nRelative Momentum: Shifts all momentum scores to be positive by adding an offset, then allocates proportionally. This ensures all assets get some allocation even when all have negative momentum.\n\nNear-Zero Symmetry: Creates a neutral zone around 0% momentum (±5%). Assets in this zone get similar allocations, while negative assets get progressively compressed allocations."
         )
         # Check if this is SP500TOP20 to set default to Relative instead of Cash
         is_sp500top20 = any(is_special_dynamic_ticker(stock['ticker']) for stock in active_portfolio.get('stocks', []))
@@ -12492,7 +12632,8 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             "Strategy when ALL momentum scores are negative:",
             ["Cash", "Equal weight", "Relative momentum", "Near-Zero Symmetry"],
             index=["Cash", "Equal weight", "Relative momentum", "Near-Zero Symmetry"].index(current_negative_strategy),
-            key=f"multi_backtest_negative_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}"
+            key=f"multi_backtest_negative_momentum_strategy_{st.session_state.multi_backtest_active_portfolio_index}",
+            help="Cash: All assets get 0% allocation, portfolio goes to 100% cash when all momentum scores are negative.\n\nEqual weight: All assets get equal allocation (1/n) regardless of their negative momentum values.\n\nRelative momentum: Shifts all negative momentum scores to be positive by adding an offset, then allocates proportionally based on relative performance.\n\nNear-Zero Symmetry: Creates a neutral zone around 0% momentum (±5%). Assets in this zone get similar allocations, while more negative assets get progressively compressed allocations."
         )
         
         # Show warning for SP500TOP20 if Cash is selected
@@ -12505,7 +12646,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
     with col_beta_vol:
         if "multi_backtest_active_calc_beta" not in st.session_state:
             st.session_state["multi_backtest_active_calc_beta"] = active_portfolio['calc_beta']
-        st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Incorporates a stock's Beta (volatility relative to the benchmark) into its momentum score. The momentum scores will be divided by Beta and then normalized.")
+        st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Penalizes high-beta stocks by reducing their allocation. Stocks with Beta > 1.0 (more volatile than market) get lower weights, while stocks with Beta < 1.0 (less volatile) get higher weights. This reduces portfolio risk by favoring stable stocks.")
         # Reset Beta button
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
             pass
@@ -12523,7 +12664,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
             st.session_state["multi_backtest_active_calc_vol"] = active_portfolio['calc_volatility']
-        st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Incorporates a stock's volatility (standard deviation of returns) into its momentum score. The momentum scores will be divided by Volatility and then normalized.")
+        st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Penalizes high-volatility stocks by reducing their allocation. Stocks with high price swings get lower weights, while stable stocks get higher weights. This reduces portfolio risk by favoring less volatile investments.")
         # Reset Volatility button
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
             pass
@@ -12711,7 +12852,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
     st.checkbox("Enable MA Filter", 
                 key=ma_filter_key,
                 on_change=update_use_sma_filter,
-                help="Enable the Moving Average filter")
+                help="MA Filter means the tickers with MA filter will be excluded when price below MA at rebalancing. This helps avoid buying assets that are in a downtrend.")
 
     # MA Type and Window (only show when MA filter is enabled)
     if st.session_state.get(ma_filter_key, False):
@@ -12722,7 +12863,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                                    options=["SMA", "EMA"], 
                                    index=0 if st.session_state.get(ma_type_key, "SMA") == "SMA" else 1,
                                    key=f"ma_type_main_{st.session_state.multi_backtest_active_portfolio_index}",
-                                   help="Select the type of moving average")
+                                   help="SMA (Simple Moving Average): Equal weight to all prices in the window. EMA (Exponential Moving Average): More weight to recent prices, reacts faster to price changes.")
             st.session_state[ma_type_key] = ma_type
         
         with col_ma2:
@@ -12731,7 +12872,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                                        min_value=1,
                                        max_value=1000,
                                        key=f"ma_window_main_{st.session_state.multi_backtest_active_portfolio_index}",
-                                       help="Moving average window in days")
+                                       help="Number of days to calculate the moving average. Longer windows = smoother trend, shorter windows = more responsive to price changes.")
             st.session_state[ma_window_key] = ma_window
         
         # MA Multiplier - USING WORKING LOGIC FROM TEST WIDGET
@@ -12749,7 +12890,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                                        max_value=3.0,
                                        step=0.01,
                                        key=ma_multiplier_key,
-                                       help="Multiplier to convert market days to calendar days (default 1.48 for ffill data)")
+                                       help="Multiplier to convert market days to calendar days. 1.48 means 200 market days = 296 calendar days (accounts for weekends and holidays).")
         
         # Update portfolio with widget value (widget controls portfolio)
         actual_portfolio['ma_multiplier'] = ma_multiplier
@@ -12767,7 +12908,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
         
         st.checkbox("Immediate Rebalance on MA Cross", 
                    key=ma_cross_rebalance_key,
-                   help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule")
+                   help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule. This allows faster response to trend changes.")
         
         # Store the new option in active portfolio - ALWAYS sync
         active_portfolio['ma_cross_rebalance'] = st.session_state.get(ma_cross_rebalance_key, False)
@@ -12792,7 +12933,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                                              max_value=10.0,
                                              step=0.1,
                                              key=f"ma_tolerance_input_{st.session_state.multi_backtest_active_portfolio_index}",
-                                             help="Price must exceed MA by this percentage to trigger rebalancing")
+                                             help="Tolerance band around the moving average. Only trigger rebalancing if price moves beyond this percentage from the MA. Prevents whipsaw from small price fluctuations.")
                 st.session_state[ma_tolerance_key] = ma_tolerance
             
             with col_delay:
@@ -12809,7 +12950,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                                         max_value=10,
                                         step=1,
                                         key=f"ma_delay_input_{st.session_state.multi_backtest_active_portfolio_index}",
-                                        help="Crossing must persist for this many days to trigger rebalancing (0 = immediate)")
+                                        help="Number of days to wait before confirming an MA cross. Prevents false signals from temporary price movements. Higher values = more conservative approach.")
                 st.session_state[ma_delay_key] = ma_delay
             
             # Store the anti-whipsaw settings in active portfolio
@@ -12843,7 +12984,7 @@ if not st.session_state.get(ma_filter_key, False) and not st.session_state.get('
         "Enable Targeted Rebalancing", 
         key="multi_backtest_active_use_targeted_rebalancing", 
         on_change=update_use_targeted_rebalancing,
-        help="Automatically rebalance when ticker allocations exceed min/max thresholds"
+        help="Rebalance at the next scheduled rebalancing date when ticker allocations exceed min/max thresholds. Does not trigger immediate rebalancing, only checks thresholds on rebalance dates."
     )
 
     # Update active portfolio with current targeted rebalancing state
@@ -13509,7 +13650,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios with enhanced reliability & caching...**")
+                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios (with 4h ticker cache)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -13603,6 +13744,62 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                             ticker = stock.get('ticker', '').strip()
                                             if ticker:
                                                 today_weights_map[ticker] = stock.get('allocation', 0)
+                                        
+                                        # Apply Targeted Rebalancing logic if enabled
+                                        if cfg.get('use_targeted_rebalancing', False):
+                                            targeted_settings = cfg.get('targeted_rebalancing_settings', {})
+                                            rebalanced_allocations = {}
+                                            
+                                            # Apply min/max thresholds
+                                            for ticker, allocation in today_weights_map.items():
+                                                if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
+                                                    min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
+                                                    max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
+                                                    
+                                                    # Apply thresholds
+                                                    capped_allocation = max(min_threshold, min(allocation, max_threshold))
+                                                    rebalanced_allocations[ticker] = capped_allocation
+                                                else:
+                                                    rebalanced_allocations[ticker] = allocation
+                                            
+                                            # Redistribute excess/deficit proportionally
+                                            total_capped = sum(rebalanced_allocations.values())
+                                            if total_capped != 1.0:
+                                                # Calculate excess/deficit
+                                                excess = total_capped - 1.0
+                                                
+                                                # Find eligible tickers for redistribution (not at their limits)
+                                                eligible_tickers = {}
+                                                for ticker, allocation in rebalanced_allocations.items():
+                                                    if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
+                                                        min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
+                                                        max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
+                                                        
+                                                        # Check if ticker can receive more allocation
+                                                        if allocation < max_threshold:
+                                                            eligible_tickers[ticker] = allocation
+                                                    else:
+                                                        # Non-targeted tickers can always be adjusted
+                                                        eligible_tickers[ticker] = allocation
+                                                
+                                                # Redistribute excess/deficit proportionally
+                                                if eligible_tickers:
+                                                    total_eligible = sum(eligible_tickers.values())
+                                                    if total_eligible > 0:
+                                                        for ticker in eligible_tickers:
+                                                            proportion = eligible_tickers[ticker] / total_eligible
+                                                            additional_allocation = excess * proportion
+                                                            new_allocation = rebalanced_allocations[ticker] + additional_allocation
+                                                            
+                                                            # Apply limits again
+                                                            if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
+                                                                min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
+                                                                max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
+                                                                new_allocation = max(min_threshold, min(new_allocation, max_threshold))
+                                                            
+                                                            rebalanced_allocations[ticker] = new_allocation
+                                            
+                                            today_weights_map = rebalanced_allocations
                                         
                                         # Apply MA filter even when momentum is disabled
                                         if cfg.get('use_sma_filter', False):
@@ -14582,7 +14779,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 progress_bar.progress((i + 1) / total_portfolios)
             
             progress_bar.empty()
-            st.success("✅ Charts pre-computed! Portfolio selection is now instantaneous.")
+            st.success("✅ Charts processed! Portfolio selection is now instantaneous.")
 
 # Sidebar JSON export/import for ALL portfolios
 def paste_all_json_callback():
@@ -16612,11 +16809,18 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 # Calculate median drawdown
                                 median_drawdown = drawdown.median()
                                 
-                                # Calculate win/loss rates
+                                # Calculate win/loss rates (normalized to sum to 100%)
                                 positive_returns = returns[returns > 1e-5]
                                 negative_returns = returns[returns < -1e-5]
-                                win_rate = (len(positive_returns) / len(returns)) * 100 if len(returns) > 0 else 0
-                                loss_rate = (len(negative_returns) / len(returns)) * 100 if len(returns) > 0 else 0
+                                neutral_returns = returns[(returns >= -1e-5) & (returns <= 1e-5)]
+                                
+                                total_active = len(positive_returns) + len(negative_returns)
+                                if total_active > 0:
+                                    # Normalize to ensure win_rate + loss_rate = 100%
+                                    win_rate = (len(positive_returns) / total_active) * 100
+                                    loss_rate = (len(negative_returns) / total_active) * 100
+                                else:
+                                    win_rate = loss_rate = 0
                                 
                                 # Calculate median win/loss
                                 median_win = positive_returns.median() * 100 if len(positive_returns) > 0 else 0
@@ -17356,7 +17560,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 st.markdown("---")
                 st.markdown(f"**Historical Allocations for {selected_portfolio_detail}**")
                 
-                # Use pre-computed data from cache - INSTANT ACCESS!
+                # Use processed data - INSTANT ACCESS!
                 portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
                 allocations_df_raw = portfolio_cache.get('allocations_df')
                 all_tickers = portfolio_cache.get('allocations_tickers', [])
@@ -17643,6 +17847,27 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 """, unsafe_allow_html=True)
 
                                 st.dataframe(styler_metrics, use_container_width=True)
+                                
+                                # Add informational message for non-momentum portfolios
+                                portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
+                                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                                
+                                if portfolio_cfg:
+                                    momentum_strategy = portfolio_cfg.get('momentum_strategy', 'none')
+                                    
+                                    # Check if this is a non-momentum portfolio (broader condition)
+                                    is_non_momentum = (
+                                        momentum_strategy.lower() in ['none', 'never', 'disabled', ''] or
+                                        portfolio_cfg.get('name', '').lower().find('no momentum') != -1 or
+                                        portfolio_cfg.get('name', '').lower().find('equal weight') != -1
+                                    )
+                                    
+                                    if is_non_momentum:
+                                        st.info("""
+                                        **Note:** This portfolio does not use momentum-based allocation. 
+                                        The "Momentum Metrics and Calculated Weights" table above can be **completely ignored** 
+                                        as it has no impact on the actual portfolio allocation strategy.
+                                        """)
                         except Exception as e:
                             st.error(f"Error displaying metrics table: {str(e)}")
                             st.write("Raw data (first 1000 rows):")
@@ -17653,27 +17878,52 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             st.markdown("---")
             st.markdown(f"**🔄 Rebalance as of Today ({pd.Timestamp.now().strftime('%Y-%m-%d')})**")
             
-            # Get momentum-based calculated weights for today's rebalancing from stored snapshot
+            # TARGET ALLOCATION IF REBALANCE TODAY - FROM SCRATCH USING ONLY MOMENTUM METRICS
             today_weights = {}
             
-            # Get the stored today_weights_map from snapshot data
-            snapshot = st.session_state.get('multi_backtest_snapshot_data', {})
-            today_weights_map = snapshot.get('today_weights_map', {}) if snapshot else {}
+            # Get portfolio configuration
+            portfolio_cfg = next((cfg for cfg in st.session_state.multi_backtest_portfolio_configs 
+                               if cfg.get('name') == selected_portfolio_detail), None)
+            use_momentum = portfolio_cfg.get('use_momentum', True) if portfolio_cfg else True
             
-            if selected_portfolio_detail in today_weights_map:
-                today_weights = today_weights_map.get(selected_portfolio_detail, {})
+            if use_momentum:
+                # MOMENTUM: Get data ONLY from Momentum Metrics table
+                if selected_portfolio_detail in st.session_state.multi_all_metrics:
+                    metrics_data = st.session_state.multi_all_metrics[selected_portfolio_detail]
+                    
+                    if metrics_data:
+                        # Get the most recent date from Momentum Metrics
+                        most_recent_date = max(metrics_data.keys())
+                        most_recent_metrics = metrics_data[most_recent_date]
+                        
+                        # Extract ONLY Calculated_Weight from Momentum Metrics
+                        for ticker, ticker_metrics in most_recent_metrics.items():
+                            if isinstance(ticker_metrics, dict) and 'Calculated_Weight' in ticker_metrics:
+                                weight = ticker_metrics.get('Calculated_Weight', 0)
+                                if weight > 0:  # Only include positive weights
+                                    today_weights[ticker] = weight
+                        
+                        # Add CASH if total < 1.0
+                        total_weight = sum(today_weights.values())
+                        if total_weight < 1.0:
+                            today_weights['CASH'] = 1.0 - total_weight
+                        else:
+                            today_weights['CASH'] = 0.0
             else:
-                # Fallback to current allocation if no stored weights found
-                if selected_portfolio_detail in st.session_state.multi_all_allocations:
-                    allocation_data = st.session_state.multi_all_allocations[selected_portfolio_detail]
-                    if allocation_data:
-                        # Get the most recent allocation
-                        last_date = max(allocation_data.keys())
-                        today_weights = allocation_data[last_date]
+                # NON-MOMENTUM: Use today_weights_map from backtest data ONLY - NO FALLBACKS
+                if portfolio_cfg and portfolio_cfg.get('stocks'):
+                    # Try to get today_weights from backtest data first (same logic as page 2)
+                    if 'multi_backtest_snapshot_data' in st.session_state:
+                        snapshot = st.session_state.multi_backtest_snapshot_data
+                        today_weights_map = snapshot.get('today_weights_map', {})
+                        if selected_portfolio_detail in today_weights_map:
+                            today_weights = today_weights_map[selected_portfolio_detail]
+                        else:
+                            # NO FALLBACK - if no snapshot data, show nothing
+                            today_weights = {}
                     else:
+                        # NO FALLBACK - if no snapshot data, show nothing
                         today_weights = {}
-                else:
-                    today_weights = {}
             
             # Create labels and values for the plot
             labels_today = [k for k, v in sorted(today_weights.items(), key=lambda x: (-x[1], x[0])) if v > 0]
@@ -17812,45 +18062,37 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             # Create the main "Target Allocation if Rebalanced Today" pie chart (CENTER)
             st.markdown(f"**Target Allocation if Rebalanced Today**")
             
-            # ULTRA-OPTIMIZED: Use comprehensive cache for instant display
-            if 'individual_portfolio_cache' in st.session_state and selected_portfolio_detail in st.session_state.individual_portfolio_cache:
-                # Use pre-computed chart from comprehensive cache - INSTANT!
-                portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
-                fig_today = portfolio_cache.get('pie_chart_figure')
+            # Check if targeted rebalancing is enabled for this portfolio and show warning
+            if portfolio_cfg and portfolio_cfg.get('use_targeted_rebalancing', False):
+                targeted_settings = portfolio_cfg.get('targeted_rebalancing_settings', {})
+                enabled_tickers = [ticker for ticker, settings in targeted_settings.items() if settings.get('enabled', False)]
                 
-                if fig_today is not None:
-                    st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
-                    # Store in session state for PDF export
-                    st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
-                else:
-                    # Fallback if chart not in cache
-                    pie_data = portfolio_cache.get('pie_chart_data', {})
-                    labels_today = pie_data.get('labels', [])
-                    vals_today = pie_data.get('values', [])
+                if enabled_tickers:
+                    st.warning(f"""
+                    ⚠️ **Important Notice for Targeted Rebalancing Strategy**
                     
-                    if labels_today and vals_today:
-                        fig_today = go.Figure()
-                        fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
-                        fig_today.update_traces(textinfo='percent+label')
-                        fig_today.update_layout(
-                            template='plotly_dark', 
-                            margin=dict(t=30),
-                            height=600,
-                            showlegend=True
-                        )
-                        st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
-                        st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
-            else:
-                # Fallback to real-time calculation if comprehensive cache is not available
-                fig_today = go.Figure()
-                fig_today.add_trace(go.Pie(labels=labels_today, values=vals_today, hole=0.3))
+                    This portfolio uses **Targeted Rebalancing** for: {', '.join(enabled_tickers)}
+                    
+                    **Unlike momentum strategies**, the "Target Allocation if Rebalanced Today" depends on the **backtest start date**. 
+                    The allocation shown here reflects what would happen if rebalanced today based on the current portfolio state, 
+                    but this is **not a standalone strategy** that can be copied independently.
+                    
+                    **Key Points:**
+                    - The allocation depends on when the backtest started
+                    - It's based on the current portfolio drift from initial allocations
+                    - This is **not** a momentum-based allocation like other strategies
+                    """)
+            
+            # Always use real-time calculation to ensure momentum metrics are used correctly
+            # DON'T use cache here - we need fresh data from momentum metrics
+            if labels_today and vals_today:
+                fig_today = go.Figure(data=[go.Pie(
+                    labels=labels_today,
+                    values=vals_today,
+                    hole=0.35
+                )])
                 fig_today.update_traces(textinfo='percent+label')
-                fig_today.update_layout(
-                    template='plotly_dark', 
-                    margin=dict(t=30),
-                    height=600,  # Make it bigger as the main chart
-                    showlegend=True
-                )
+                fig_today.update_layout(template='plotly_dark', margin=dict(t=10), height=600)
                 st.plotly_chart(fig_today, use_container_width=True, key=f"multi_today_{selected_portfolio_detail}")
                 # Store in session state for PDF export
                 st.session_state[f'pie_chart_{selected_portfolio_detail}'] = fig_today
@@ -18193,64 +18435,50 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 labels_final = []
                                 vals_final = []
                         
+                        # Use the same prepare_bar_data function as page 2 for consistency
+                        def prepare_bar_data(d):
+                            labels = []
+                            values = []
+                            for k, v in sorted(d.items(), key=lambda x: (-x[1], x[0])):
+                                try:
+                                    val = float(v) * 100
+                                    if val > 0:  # Only include tickers with allocation > 0%
+                                        labels.append(k)
+                                        values.append(val)
+                                except Exception:
+                                    pass  # Skip invalid values
+                            return labels, values
+
                         if rebal_alloc and isinstance(rebal_alloc, dict):
-                            # Filter out non-numeric values and ensure they're valid
-                            valid_rebal = {k: v for k, v in rebal_alloc.items() if isinstance(v, (int, float)) and not pd.isna(v)}
-                            
-                            # NUCLEAR OPTION: Portfolio names are never stored, only individual stocks
-                            
-                            labels_rebal = [k for k, v in sorted(valid_rebal.items(), key=lambda x: (-x[1], x[0])) if v > 0]
-                            vals_rebal = [float(valid_rebal[k]) * 100 for k in labels_rebal]
+                            labels_rebal, vals_rebal = prepare_bar_data(rebal_alloc)
                         else:
                             labels_rebal = []
                             vals_rebal = []
                         
-                        # Use standard pie chart display for all portfolios
+                        # Use standard pie chart display for all portfolios - EXACT COPY FROM PAGE 2
                         col_plot1, col_plot2 = st.columns(2)
                         
                         with col_plot1:
-                            st.markdown(f"**Last Rebalance Allocation (as of {last_rebal_date.date()})**")
-                            if labels_rebal and vals_rebal:
-                                # ULTRA-OPTIMIZED: Use comprehensive cache for instant display
-                                if 'individual_portfolio_cache' in st.session_state and selected_portfolio_detail in st.session_state.individual_portfolio_cache:
-                                    portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
-                                    rebalancing_data = portfolio_cache.get('rebalancing_data', {})
-                                    
-                                    # Use pre-computed data from cache
-                                    labels_rebal = rebalancing_data.get('labels_rebal', labels_rebal)
-                                    vals_rebal = rebalancing_data.get('vals_rebal', vals_rebal)
-                                
-                                fig_rebal = go.Figure()
-                                fig_rebal.add_trace(go.Pie(labels=labels_rebal, values=vals_rebal, hole=0.3))
-                                fig_rebal.update_traces(textinfo='percent+label')
-                                fig_rebal.update_layout(template='plotly_dark', margin=dict(t=30), height=400)
-                                
-                                st.plotly_chart(fig_rebal, use_container_width=True, key=f"multi_rebal_{selected_portfolio_detail}")
-                            else:
-                                st.warning("No valid allocation data for last rebalance.")
+                            st.markdown(f"**Target Allocation at Last Rebalance ({last_rebal_date.date()})**")
+                            fig_rebal_small = go.Figure(data=[go.Pie(
+                                labels=labels_rebal,
+                                values=vals_rebal,
+                                hole=0.35
+                            )])
+                            fig_rebal_small.update_traces(textinfo='percent+label')
+                            fig_rebal_small.update_layout(template='plotly_dark', margin=dict(t=10))
+                            st.plotly_chart(fig_rebal_small, key=f"alloc_rebal_small_{selected_portfolio_detail}")
                         
                         with col_plot2:
-                            st.markdown(f"**Current Allocation (as of {final_date.date()})**")
-                            if final_date == last_rebal_date:
-                                st.info("ℹ️ **Note**: Current allocation shows the same as last rebalance because this portfolio has not been rebalanced yet. After rebalancing, this will show the actual drifted allocation.")
-                            if labels_final and vals_final:
-                                # ULTRA-OPTIMIZED: Use comprehensive cache for instant display
-                                if 'individual_portfolio_cache' in st.session_state and selected_portfolio_detail in st.session_state.individual_portfolio_cache:
-                                    portfolio_cache = st.session_state.individual_portfolio_cache[selected_portfolio_detail]
-                                    rebalancing_data = portfolio_cache.get('rebalancing_data', {})
-                                    
-                                    # Use pre-computed data from cache
-                                    labels_final = rebalancing_data.get('labels_final', labels_final)
-                                    vals_final = rebalancing_data.get('vals_final', vals_final)
-                                
-                                fig_final = go.Figure()
-                                fig_final.add_trace(go.Pie(labels=labels_final, values=vals_final, hole=0.3))
-                                fig_final.update_traces(textinfo='percent+label')
-                                fig_final.update_layout(template='plotly_dark', margin=dict(t=30), height=400)
-                                
-                                st.plotly_chart(fig_final, use_container_width=True, key=f"multi_final_{selected_portfolio_detail}")
-                            else:
-                                st.warning("No valid allocation data for current allocation.")
+                            st.markdown(f"**Portfolio Evolution (Current Allocation)**")
+                            fig_today_small = go.Figure(data=[go.Pie(
+                                labels=labels_final,
+                                values=vals_final,
+                                hole=0.35
+                            )])
+                            fig_today_small.update_traces(textinfo='percent+label')
+                            fig_today_small.update_layout(template='plotly_dark', margin=dict(t=10))
+                            st.plotly_chart(fig_today_small, key=f"alloc_today_small_{selected_portfolio_detail}")
                     else:
                         st.warning("No allocation data available for pie charts.")
                 else:
@@ -19795,25 +20023,43 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             
                             # For fallback, we only have one allocation snapshot, so show it as both current and last rebalance
                             # This is a limitation when we don't have historical rebalancing data
-                            labels_final = list(final_alloc.keys())
-                            vals_final = [float(final_alloc[k]) * 100 for k in labels_final]
+                            # Use the same prepare_bar_data function as page 2 for consistency
+                            def prepare_bar_data_fallback(d):
+                                labels = []
+                                values = []
+                                for k, v in sorted(d.items(), key=lambda x: (-x[1], x[0])):
+                                    try:
+                                        val = float(v) * 100
+                                        if val > 0:  # Only include tickers with allocation > 0%
+                                            labels.append(k)
+                                            values.append(val)
+                                    except Exception:
+                                        pass  # Skip invalid values
+                                return labels, values
+                            
+                            labels_final, vals_final = prepare_bar_data_fallback(final_alloc)
                             
                             col_plot1, col_plot2 = st.columns(2)
                             with col_plot1:
-                                st.markdown(f"**Last Rebalance Allocation (as of {final_date.date()})**")
-                                fig_rebal = go.Figure()
-                                fig_rebal.add_trace(go.Pie(labels=labels_final, values=vals_final, hole=0.3))
-                                fig_rebal.update_traces(textinfo='percent+label')
-                                fig_rebal.update_layout(template='plotly_dark', margin=dict(t=30))
-                                st.plotly_chart(fig_rebal, use_container_width=True, key=f"multi_rebal_fallback_{selected_portfolio_detail}")
+                                st.markdown(f"**Target Allocation at Last Rebalance ({final_date.date()})**")
+                                fig_rebal_small = go.Figure(data=[go.Pie(
+                                    labels=labels_final,
+                                    values=vals_final,
+                                    hole=0.35
+                                )])
+                                fig_rebal_small.update_traces(textinfo='percent+label')
+                                fig_rebal_small.update_layout(template='plotly_dark', margin=dict(t=10))
+                                st.plotly_chart(fig_rebal_small, key=f"alloc_rebal_small_fallback_{selected_portfolio_detail}")
                             with col_plot2:
-                                st.markdown(f"**Current Allocation (as of {final_date.date()})**")
-                                st.info("⚠️ **Note**: Current allocation shows the same as last rebalance because this is the only allocation snapshot available. For accurate current allocation, ensure the portfolio has been rebalanced at least once.")
-                                fig_final = go.Figure()
-                                fig_final.add_trace(go.Pie(labels=labels_final, values=vals_final, hole=0.3))
-                                fig_final.update_traces(textinfo='percent+label')
-                                fig_final.update_layout(template='plotly_dark', margin=dict(t=30))
-                                st.plotly_chart(fig_final, use_container_width=True, key=f"multi_final_fallback_{selected_portfolio_detail}")
+                                st.markdown(f"**Portfolio Evolution (Current Allocation)**")
+                                fig_today_small = go.Figure(data=[go.Pie(
+                                    labels=labels_final,
+                                    values=vals_final,
+                                    hole=0.35
+                                )])
+                                fig_today_small.update_traces(textinfo='percent+label')
+                                fig_today_small.update_layout(template='plotly_dark', margin=dict(t=10))
+                                st.plotly_chart(fig_today_small, key=f"alloc_today_small_fallback_{selected_portfolio_detail}")
                         except Exception as e:
                             pass
 
@@ -20434,3 +20680,18 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         except Exception as e:
             st.error(f"❌ Error generating PDF: {str(e)}")
             st.exception(e)
+    
+    # Footer - Always visible
+    st.markdown("---")
+    st.markdown("""
+    <div style="
+        text-align: center; 
+        color: #666; 
+        margin: 2rem 0; 
+        padding: 1rem; 
+        font-size: 0.9rem;
+        font-weight: 500;
+    ">
+        Made by Nicolas Cool
+    </div>
+    """, unsafe_allow_html=True)
