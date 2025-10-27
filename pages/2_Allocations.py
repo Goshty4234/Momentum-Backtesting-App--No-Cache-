@@ -11292,8 +11292,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 # Download other missing tickers
                 if missing_tickers:
-                    import yfinance as yf
-                    batch_data = yf.download(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
+                    batch_data = get_batch_download_with_cache(missing_tickers, period="2y", interval="1d", progress=False, group_by='ticker')
                     if not batch_data.empty:
                         for ticker in missing_tickers:
                             if ticker in batch_data.columns.get_level_values(0):
