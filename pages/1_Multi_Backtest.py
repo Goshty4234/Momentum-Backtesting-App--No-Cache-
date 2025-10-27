@@ -9559,23 +9559,7 @@ if st.sidebar.button("📈 Convert to SPY Total Return",
 if st.sidebar.button("🗑️ Clear Ticker Cache", 
                     help="Clear the 4-hour ticker cache to force fresh data downloads", 
                     use_container_width=True):
-    total_cleared = 0
-    
-    # Clear ticker historical data cache
-    cache_dir = '.streamlit/ticker_cache'
-    if os.path.exists(cache_dir):
-        disk_cache = dc.Cache(cache_dir)
-        cache_size = len(disk_cache)
-        disk_cache.clear()
-        total_cleared += cache_size
-    
-    # Clear ticker info cache (PE/valuations)
-    info_cache_dir = '.streamlit/ticker_info_cache'
-    if os.path.exists(info_cache_dir):
-        info_cache = dc.Cache(info_cache_dir)
-        info_cache_size = len(info_cache)
-        info_cache.clear()
-        total_cleared += info_cache_size
+    total_cleared = clear_all_yahoo_caches()
     
     if total_cleared > 0:
         st.sidebar.success(f"✅ Cleared {total_cleared} cached items (tickers + PE/valuations)")
