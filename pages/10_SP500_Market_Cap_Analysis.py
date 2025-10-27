@@ -14,7 +14,7 @@ from functools import partial
 
 st.set_page_config(
     page_title="S&P 500 Market Cap Analysis",
-    page_icon="📊",
+    page_icon="📈",
     layout="wide"
 )
 
@@ -639,7 +639,7 @@ def get_market_data_individual(tickers):
     return pd.DataFrame(market_data)
 
 # Main interface
-col_fetch, col_clear, col_debug = st.columns([1, 1, 1])
+col_fetch, col_clear = st.columns([1, 1])
 
 with col_fetch:
     if st.button("📥 Fetch Market Data", type="primary", help="Click to load market data - only when needed!"):
@@ -653,89 +653,13 @@ with col_clear:
         st.success("Cache cleared! Click 'Fetch Market Data' to load fresh data.")
         st.rerun()
 
-with col_debug:
-    if st.button("🔍 Debug Top Companies"):
-        st.session_state['debug_mode'] = True
-
 # Removed redundant "Fetch 1-Year Returns" button - "Fetch Market Data" does everything
 
-# Test single ticker
-if st.button("🧪 Test NVDA Only"):
-    st.session_state['test_nvda'] = True
-
-# Debug section
-if st.session_state.get('debug_mode', False):
-    st.subheader("🔍 Debug: Raw Data from Yahoo Finance")
-    
-    # Debug the key companies
-    debug_tickers = ['NVDA', 'MSFT', 'AAPL', 'META', 'GOOGL', 'AMZN']
-    
-    with st.spinner("Getting debug data..."):
-        debug_results = []
-        for ticker in debug_tickers:
-            debug_info = debug_ticker_data(ticker)
-            debug_results.append(debug_info)
-        
-        debug_df = pd.DataFrame(debug_results)
-        st.dataframe(debug_df, use_container_width=True)
-        
-        # Show which market cap value we're using
-        st.markdown("**Market Cap Calculation Method:**")
-        for result in debug_results:
-            if 'error' not in result:
-                ticker = result['ticker']
-                calculated = result['calculated_market_cap'] / 1e9
-                yahoo = result['yahoo_market_cap'] / 1e9
-                st.write(f"**{ticker}**: Calculated: ${calculated:.1f}B, Yahoo: ${yahoo:.1f}B")
-    
-    if st.button("❌ Close Debug"):
-        st.session_state['debug_mode'] = False
-        st.rerun()
-    
-    # Show what the debug data actually reveals
-    st.markdown("**Debug Data Analysis:**")
-    st.info("🔍 The debug shows our calculated market caps are correct, but there might be a sorting issue in the main table.")
+# Debug section removed
 
 # Removed redundant 1-Year Return Fetcher section - "Fetch Market Data" provides all this data and more
 
-# Test NVDA section
-if st.session_state.get('test_nvda', False):
-    st.subheader("🧪 Test NVDA - Step by Step")
-    
-    try:
-        st.write("**Step 1: Get NVDA ticker**")
-        nvda = yf.Ticker("NVDA")
-        
-        st.write("**Step 2: Get dates**")
-        today = date.today()
-        start = today - timedelta(days=365)
-        st.write(f"Today: {today}")
-        st.write(f"Start: {start}")
-        
-        st.write("**Step 3: Download data**")
-        data = nvda.history(start=start, end=today)
-        st.write(f"Data shape: {data.shape}")
-        st.write(f"Data empty: {data.empty}")
-        
-        if not data.empty:
-            st.write("**Step 4: Get prices**")
-            price_now = data["Close"].iloc[-1]
-            price_old = data["Close"].iloc[0]
-            st.write(f"Price now: ${price_now:.2f}")
-            st.write(f"Price old: ${price_old:.2f}")
-            
-            st.write("**Step 5: Calculate performance**")
-            performance = (price_now / price_old - 1) * 100
-            st.write(f"Performance 365 days NVDA: {performance:.2f}%")
-        else:
-            st.error("No data returned!")
-            
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-    
-    if st.button("❌ Close Test"):
-        st.session_state['test_nvda'] = False
-        st.rerun()
+# Test NVDA section removed
 
 # Get S&P 500 companies (this is fast, no API calls)
 with st.spinner("Loading S&P 500 companies..."):
@@ -745,7 +669,6 @@ if error:
     st.error(f"❌ {error}")
     st.info("💡 Try refreshing the page or check your internet connection")
 elif companies_df is not None and not companies_df.empty:
-    st.success(f"✅ Successfully loaded {len(companies_df)} S&P 500 companies")
     
     # Fix known ticker symbol issues before fetching data
     companies_df = companies_df.copy()
@@ -758,10 +681,6 @@ elif companies_df is not None and not companies_df.empty:
         with st.spinner("📥 Fetching market data using bulk download (this will be fast!)..."):
             market_df = get_market_data(companies_df['Symbol'].tolist())
     else:
-        # Show instructions instead of fetching data
-        st.info("💡 **Click '📥 Fetch Market Data' above to load market data and see the analysis!**")
-        st.info("🎯 **This reduces API requests - data only loads when you need it!**")
-        
         # Create empty dataframe to prevent errors
         market_df = pd.DataFrame()
     
@@ -776,7 +695,7 @@ elif companies_df is not None and not companies_df.empty:
         
         # Calculate percentage of S&P 500 total market cap
         total_sp500_market_cap = df['Market Cap'].sum()
-        df['% of S&P 500'] = (df['Market Cap'] / total_sp500_market_cap * 100).round(3)
+        df['% of S&P 500'] = (df['Market Cap'] / total_sp500_market_cap * 100).round(2)
         
         # Filter out stocks with zero or invalid market cap data
         valid_data = df[df['Market Cap'] > 0].copy()
@@ -818,7 +737,7 @@ elif companies_df is not None and not companies_df.empty:
             st.write("🔍 Debug - Top 10 Market Caps after sorting:")
             debug_sort = df.head(10)[['Symbol', 'Name', 'Market Cap', '% of S&P 500', 'Market Cap (B)', 'Price']].copy()
             debug_sort['Market Cap (B)'] = debug_sort['Market Cap (B)'].round(1)
-            debug_sort['% of S&P 500'] = debug_sort['% of S&P 500'].round(3)
+            debug_sort['% of S&P 500'] = debug_sort['% of S&P 500'].round(2)
             debug_sort['Price'] = debug_sort['Price'].round(2)
             st.dataframe(debug_sort, use_container_width=True, hide_index=True)
         
@@ -837,14 +756,14 @@ elif companies_df is not None and not companies_df.empty:
     with col2:
         st.metric(
             "Average Market Cap", 
-            f"${df['Market Cap (B)'].mean():.1f}B",
+            f"${df['Market Cap (B)'].mean():.2f}B",
             help="Average market cap of S&P 500 companies"
         )
     
     with col3:
         st.metric(
             "Median Market Cap", 
-            f"${df['Market Cap (B)'].median():.1f}B",
+            f"${df['Market Cap (B)'].median():.2f}B",
             help="Median market cap of S&P 500 companies"
         )
     
@@ -906,11 +825,11 @@ elif companies_df is not None and not companies_df.empty:
     
     display_df = df[columns_to_use].copy()
     
-    # Format numeric columns dynamically
+    # Format numeric columns dynamically with explicit decimal formatting
     if '% of S&P 500' in display_df.columns:
-        display_df['% of S&P 500'] = display_df['% of S&P 500'].round(3)
+        display_df['% of S&P 500'] = display_df['% of S&P 500'].round(2)
     if 'Market Cap (B)' in display_df.columns:
-        display_df['Market Cap (B)'] = display_df['Market Cap (B)'].round(1)
+        display_df['Market Cap (B)'] = display_df['Market Cap (B)'].round(2)  # Changed to 2 decimals
     if 'Price' in display_df.columns:
         display_df['Price'] = display_df['Price'].round(2)
     if 'Beta' in display_df.columns:
@@ -924,6 +843,9 @@ elif companies_df is not None and not companies_df.empty:
         if col in display_df.columns:
             display_df[col] = display_df[col].round(2)
     
+    # Apply explicit formatting to ensure 2 decimal places are displayed
+    pd.set_option('display.float_format', '{:.2f}'.format)
+    
     # Color code the performance columns
     def color_performance(val):
         if val > 0:
@@ -935,7 +857,16 @@ elif companies_df is not None and not companies_df.empty:
     
     # Apply styling to all available performance columns
     available_return_columns = [col for col in return_columns if col in display_df.columns]
+    # Create styled dataframe with proper decimal formatting
     styled_df = display_df.style.applymap(color_performance, subset=available_return_columns)
+    
+    # Format numeric columns in the styled dataframe
+    format_dict = {}
+    for col in display_df.columns:
+        if col in ['% of S&P 500', 'Market Cap (B)', 'Price', 'Beta'] + return_columns:
+            format_dict[col] = '{:.2f}'
+    
+    styled_df = styled_df.format(format_dict)
     
     st.dataframe(
         styled_df,
@@ -1016,11 +947,11 @@ elif companies_df is not None and not companies_df.empty:
         
         with col_scatter2:
             avg_volatility = scatter_df['Volatility %'].mean()
-            st.metric("Average Volatility", f"{avg_volatility:.1f}%")
+            st.metric("Average Volatility", f"{avg_volatility:.2f}%")
         
         with col_scatter3:
             avg_return = scatter_df['1Y Return %'].mean()
-            st.metric("Average 1Y Return", f"{avg_return:.1f}%")
+            st.metric("Average 1Y Return", f"{avg_return:.2f}%")
     else:
         st.warning("⚠️ Insufficient data for risk vs return analysis. Please refresh the data.")
     
@@ -1049,9 +980,15 @@ elif companies_df is not None and not companies_df.empty:
             return 'color: orange'
     
     # Apply styling to performance columns in sector analysis
-    styled_sector_stats = sector_stats.style.applymap(color_sector_performance, subset=['Avg YTD Return %', 'Avg 1Y Return %', 'Avg Volatility %'])
+    # Format sector stats with 2 decimal places
+    format_sector_dict = {}
+    for col in sector_stats.columns:
+        if col in ['Total Market Cap (B)', 'Avg Market Cap (B)', '% of S&P 500', 'Avg YTD Return %', 'Avg 1Y Return %', 'Avg Beta', 'Avg Volatility %']:
+            format_sector_dict[col] = '{:.2f}'
     
-    st.dataframe(styled_sector_stats, use_container_width=True)
+    styled_sector_stats = sector_stats.style.applymap(color_sector_performance, subset=['Avg YTD Return %', 'Avg 1Y Return %', 'Avg Volatility %']).format(format_sector_dict)
+    
+    st.dataframe(styled_sector_stats, use_container_width=True, height=450)
     
     # Visualization Section - Pie Charts
     st.subheader("🥧 Market Cap Distribution Visualization")
@@ -1084,7 +1021,7 @@ elif companies_df is not None and not companies_df.empty:
                 per_slice_text.append('')
         
         fig_pie_companies.update_traces(
-            hovertemplate='<b>%{label}</b><br>Market Cap: $%{value:.1f}B<br>Percentage: %{percent}<br>% of S&P 500: %{customdata[0]:.3f}%<extra></extra>',
+            hovertemplate='<b>%{label}</b><br>Market Cap: $%{value:.2f}B<br>Percentage: %{percent}<br>% of S&P 500: %{customdata[0]:.2f}%<extra></extra>',
             customdata=df['% of S&P 500'],
             text=per_slice_text,
             textinfo='text',  # show only provided text values
@@ -1120,7 +1057,7 @@ elif companies_df is not None and not companies_df.empty:
         )
         
         fig_pie_sectors.update_traces(
-            hovertemplate='<b>%{label}</b><br>Total Market Cap: $%{value:.1f}B<br>Percentage: %{percent}<extra></extra>',
+            hovertemplate='<b>%{label}</b><br>Total Market Cap: $%{value:.2f}B<br>Percentage: %{percent}<extra></extra>',
             textinfo='label+percent',
             textposition='outside'
         )
@@ -1209,10 +1146,19 @@ else:
 
 # Footer
 st.markdown("---")
-st.markdown("**💡 Key Metrics Explained:**")
-st.markdown("- **Market Cap**: Total value of all company shares")
-st.markdown("- **YTD Return**: Performance since January 1st of current year")
-st.markdown("- **1Y Return**: Performance over the last 12 months")
-st.markdown("- **Beta**: Volatility relative to the market (1.0 = market average)")
-st.markdown("- **Volatility**: Annualized standard deviation of returns")
 st.markdown("*Data sources: [Wikipedia S&P 500](https://en.wikipedia.org/wiki/List_of_S%26P_500_companies) & [Yahoo Finance](https://finance.yahoo.com)*")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="
+    text-align: center; 
+    color: #666; 
+    margin: 2rem 0; 
+    padding: 1rem; 
+    font-size: 0.9rem;
+    font-weight: 500;
+">
+    Made by Nicolas Cool
+</div>
+""", unsafe_allow_html=True)
