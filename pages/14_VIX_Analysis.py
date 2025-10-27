@@ -628,3 +628,18 @@ st.markdown("- Adjust the threshold slider to analyze different VIX levels")
 st.markdown("- Green dots highlight periods when VIX was below your threshold")
 st.markdown("- Use consecutive periods chart to identify low volatility regimes")
 st.markdown("- Data is cached for 2 hours for faster analysis")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="
+    text-align: center; 
+    color: #666; 
+    margin: 2rem 0; 
+    padding: 1rem; 
+    font-size: 0.9rem;
+    font-weight: 500;
+">
+    Made by Nicolas Cool
+</div>
+""", unsafe_allow_html=True)
