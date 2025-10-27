@@ -29,7 +29,7 @@ warnings.filterwarnings('ignore', message='.*Use `config` instead to specify Plo
 # Page configuration
 st.set_page_config(
     page_title="Options Chain Viewer",
-    page_icon="📊",
+    page_icon="📈",
     layout="wide"
 )
 
@@ -581,22 +581,34 @@ if ticker_symbol:
             if st.session_state.selected_section not in available_sections:
                 st.session_state.selected_section = available_sections[0]
             
-            # ALWAYS SHOW THE SELECTBOX
-            st.markdown("---")
-            selected_section = st.selectbox(
-                "📊 Select Section:",
-                options=available_sections,
-                index=available_sections.index(st.session_state.selected_section),
-                key="section_selector"
-            )
+            # ALWAYS SHOW THE TABS
             st.markdown("---")
             
-            # Update session state when selection changes
-            if selected_section != st.session_state.selected_section:
-                st.session_state.selected_section = selected_section
+            # Create tabs instead of selectbox
+            tab_names = [section.split(" ", 1)[1] for section in available_sections]  # Remove emoji for tab names
+            tab_icons = [section.split(" ", 1)[0] for section in available_sections]  # Extract emojis
+            
+            # Create tabs
+            tabs = st.tabs([f"{icon} {name}" for icon, name in zip(tab_icons, tab_names)])
+            
+            # Find the current tab index
+            current_tab_index = available_sections.index(st.session_state.selected_section)
+            
+            # Update session state when tab changes (this will be handled in each tab)
+            selected_section = st.session_state.selected_section
+            
+            # Create a mapping for easier tab access
+            tab_mapping = {
+                "📅 BY EXPIRATION": 0,
+                "📋 COMPLETE LIST": 1,
+                "📈 CALLS ONLY": 2,
+                "📉 PUTS ONLY": 3,
+                "📊 OPTION EVOLUTION": 4,
+                "⚖️ BARBELL STRATEGY": 5
+            }
             
             # BY EXPIRATION Section
-            if selected_section == "📅 BY EXPIRATION":
+            with tabs[available_sections.index("📅 BY EXPIRATION")]:
                 st.subheader("📅 Options Chain by Expiration")
                 
                 # Display current price with timestamp and cache status
@@ -914,8 +926,8 @@ if ticker_symbol:
                             # Apply advanced styling with colors
                             styled_df = merged_df_clean.style.apply(highlight_options_table, axis=1)
                             
-                            # Display styled table with maximum possible width
-                            st.dataframe(styled_df, width='stretch')
+                            # Display styled table with maximum possible width and much more vertical space
+                            st.dataframe(styled_df, width='stretch', height=800)
                             
                             # Add note about MID price usage
                             st.caption("💡 **Price Calculations**: All intrinsic/extrinsic values and price percentages use MID price (Bid+Ask)/2 when available, otherwise fall back to Last price for more accurate option valuation.")
@@ -953,7 +965,7 @@ if ticker_symbol:
                     st.warning("No options data available")
             
             # COMPLETE LIST Section
-            elif selected_section == "📋 COMPLETE LIST":
+            with tabs[available_sections.index("📋 COMPLETE LIST")]:
                 st.subheader("📋 Complete Options List")
                 
                 # Display current price with timestamp
@@ -1020,7 +1032,7 @@ if ticker_symbol:
                     st.dataframe(puts_display_clean, width='stretch')
             
             # CALLS ONLY Section
-            elif selected_section == "📈 CALLS ONLY":
+            with tabs[available_sections.index("📈 CALLS ONLY")]:
                 if show_calls and not calls_combined.empty:
                         st.subheader(f"📈 CALL Options ({len(calls_combined)} contracts)")
                         
@@ -1072,7 +1084,7 @@ if ticker_symbol:
                     st.warning("No CALL options available")
             
             # PUTS ONLY Section
-            elif selected_section == "📉 PUTS ONLY":
+            with tabs[available_sections.index("📉 PUTS ONLY")]:
                 if show_puts and not puts_combined.empty:
                         st.subheader(f"📉 PUT Options ({len(puts_combined)} contracts)")
                         
@@ -1124,7 +1136,7 @@ if ticker_symbol:
                     st.warning("No PUT options available")
             
             # OPTION EVOLUTION Section
-            elif selected_section == "📊 OPTION EVOLUTION":
+            with tabs[available_sections.index("📊 OPTION EVOLUTION")]:
                 if show_calls or show_puts:
                     st.subheader("📊 Option Evolution Over Time")
                     st.markdown("**Track the same strike across different expirations**")
@@ -2302,7 +2314,7 @@ if ticker_symbol:
                     st.info("👆 Please ensure ticker data is loaded to use Spread Analysis")
             
             # BARBELL STRATEGY Section
-            elif selected_section == "⚖️ BARBELL STRATEGY":
+            with tabs[available_sections.index("⚖️ BARBELL STRATEGY")]:
                 st.subheader("⚖️ Barbell Strategy Calculator")
                 st.markdown("**Simulate LEAPS + Cash strategy - View returns based on underlying movement at expiration**")
                 
@@ -5956,8 +5968,15 @@ if ticker_symbol:
                         type="date"
                     ),
                     yaxis=dict(
-                        # Removed fixedrange and autorange as they are Plotly config arguments
-                        # that should not be in update_layout()
+                        # Enable zoom and pan
+                        fixedrange=False
+                    ),
+                    # Enable selection and zoom tools
+                    dragmode='zoom',
+                    selectdirection='d',  # 'd' for diagonal selection
+                    # Add modebar with selection tools
+                    modebar=dict(
+                        add=['select2d', 'lasso2d', 'drawclosedpath', 'drawopenpath', 'drawline', 'drawrect', 'drawcircle', 'eraseshape']
                     )
                 )
                 
@@ -5983,3 +6002,18 @@ if st.session_state.debug_messages:
         
         # Clear debug messages after displaying
         st.session_state.debug_messages = []
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="
+    text-align: center; 
+    color: #666; 
+    margin: 2rem 0; 
+    padding: 1rem; 
+    font-size: 0.9rem;
+    font-weight: 500;
+">
+    Made by Nicolas Cool
+</div>
+""", unsafe_allow_html=True)
