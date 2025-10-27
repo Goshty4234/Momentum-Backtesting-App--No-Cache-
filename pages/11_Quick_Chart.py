@@ -539,7 +539,7 @@ def generate_chart(ticker_input, ma_window, ma_type, calendar_multiplier=1.48):
 
 st.set_page_config(
     page_title="Quick Chart Calendar", 
-    page_icon="📅", 
+    page_icon="📈", 
     layout="wide"
 )
 
@@ -944,4 +944,19 @@ if st.session_state.quick_chart_calendar_data:
             st.error("No results available for Calendar Days Analysis")
 
 # SMA Analyzer section (Advanced - at the end)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="
+    text-align: center; 
+    color: #666; 
+    margin: 2rem 0; 
+    padding: 1rem; 
+    font-size: 0.9rem;
+    font-weight: 500;
+">
+    Made by Nicolas Cool
+</div>
+""", unsafe_allow_html=True)
 
