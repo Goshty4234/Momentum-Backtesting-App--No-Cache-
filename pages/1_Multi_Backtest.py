@@ -1290,7 +1290,7 @@ def get_goldsim_complete_data(period="max"):
     except ImportError as e:
         print(f"⚠️ WARNING: GOLDSIM import error: {e}, falling back to GLD")
         # Fallback to GLD if import fails
-        ticker = yf.Ticker("GLD")
+        ticker = get_ticker_with_cache("GLD")
         return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
     except Exception as e:
         print(f"⚠️ WARNING: GOLDSIM function error: {e}, falling back to GLD")
@@ -15660,7 +15660,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         fig_vix = go.Figure()
         try:
             # Get VIX data for the same date range
-            vix_data = yf.download('^VIX', start=first_date, end=last_date, progress=False)
+            vix_data = get_batch_download_with_cache('^VIX', start=first_date, end=last_date, progress=False)
             
             # VIX data has multi-level columns, need to access it properly
             # The structure is ('Close', '^VIX') instead of just 'Close'
@@ -15946,7 +15946,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         pe_data = {}
                         for ticker in all_tickers:
                             try:
-                                stock = yf.Ticker(ticker)
+                                stock = get_ticker_with_cache(ticker)
                                 info = stock.info
                                 pe_ratio = info.get('trailingPE', None)
                                 if pe_ratio is not None and pe_ratio > 0:
@@ -20517,7 +20517,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 for ticker in all_tickers:
                                     try:
                                         # Get stock info for current PE ratio
-                                        stock = yf.Ticker(ticker)
+                                        stock = get_ticker_with_cache(ticker)
                                         info = stock.info
                                         pe_ratio = info.get('trailingPE', None)
                                         if pe_ratio is not None and pe_ratio > 0:
