@@ -10108,6 +10108,12 @@ if st.session_state.get('alloc_backtest_run', False):
                     if not show_cash:
                         df_display = df_display.drop('CASH')
                 
+                # Hide positions with zero allocation
+                try:
+                    df_display = df_display[df_display['Allocation %'] > 0.0001]
+                except Exception:
+                    pass
+
                 # Add total row
                 total_alloc_pct = df_display['Allocation %'].sum()
                 total_value = df_display['Total Value ($)'].sum()
