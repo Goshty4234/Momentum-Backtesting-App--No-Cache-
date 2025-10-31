@@ -2678,6 +2678,10 @@ default_configs = [
             'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
             'max_allocation_percent': 20.0,
+            'use_equal_weight': False,
+            'equal_weight_n_tickers': 10,
+            'use_limit_to_top_n': False,
+            'limit_to_top_n_tickers': 10,
         },
 ]
 
@@ -5262,6 +5266,15 @@ def single_backtest(config, sim_index, reindexed_data):
 
         # Helper: detect relative mode from momentum_strategy string
         relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
+        
+        # Calculate effective strategy for negative momentum (needed for equal weight logic)
+        effective_strategy_for_equal_weight = None
+        if all_negative:
+            # Check if special dynamic ticker is present (SP500TOP20)
+            is_special = any(t in ['SP500TOP20', 'ZROX'] for t in rets_keys)
+            effective_strategy_for_equal_weight = negative_momentum_strategy
+            if is_special and negative_momentum_strategy == 'Cash':
+                effective_strategy_for_equal_weight = 'Relative momentum'
 
         def calculate_near_zero_symmetric_momentum(returns, neutral_zone=0.05):
             """
@@ -5556,6 +5569,93 @@ def single_backtest(config, sim_index, reindexed_data):
             total_weight = sum(weights.values())
             if total_weight > 0:
                 weights = {ticker: weight / total_weight for ticker, weight in weights.items()}
+
+        # STEP 1: Apply Limit to Top N filter FIRST (if enabled)
+        # This selects the top N tickers, keeping their proportional weights
+        use_limit_to_top_n = config.get('use_limit_to_top_n', False)
+        limit_to_top_n_tickers = config.get('limit_to_top_n_tickers', 10)
+
+        should_apply_limit_to_top_n = False
+        if use_limit_to_top_n and limit_to_top_n_tickers > 0 and weights:
+            if all_negative:
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_limit_to_top_n = True
+            else:
+                should_apply_limit_to_top_n = True
+
+        if should_apply_limit_to_top_n:
+            # Work with tickers that survived min/max filters
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() if ticker != 'CASH' and weight > 0]
+            ticker_weights.sort(key=lambda x: x[1], reverse=True)
+            if ticker_weights:
+                n_to_select = min(limit_to_top_n_tickers, len(ticker_weights))
+                top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+
+                new_weights = {}
+                total_top_n_weight = 0.0
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                        total_top_n_weight += weights.get(ticker, 0.0)
+                    else:
+                        new_weights[ticker] = 0.0
+
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0 and total_top_n_weight > 0:
+                    for ticker in top_n_tickers:
+                        ticker_weight = new_weights[ticker]
+                        proportion = ticker_weight / total_top_n_weight if total_top_n_weight > 0 else 0.0
+                        new_weights[ticker] += cash_weight * proportion
+                    new_weights['CASH'] = 0.0
+
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    weights = new_weights
+
+        # STEP 2: Apply Equal Weight filter AFTER Limit to Top N (if enabled)
+        use_equal_weight = config.get('use_equal_weight', False)
+        equal_weight_n_tickers = config.get('equal_weight_n_tickers', 10)
+        should_apply_equal_weight = False
+        if use_equal_weight and equal_weight_n_tickers > 0 and weights:
+            if all_negative:
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_equal_weight = True
+            else:
+                should_apply_equal_weight = True
+        if should_apply_equal_weight:
+            # If Limit to Top N was applied, equalize remaining positive-weight tickers
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() if ticker != 'CASH' and weight > 0]
+            if ticker_weights:
+                if should_apply_limit_to_top_n:
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights]
+                else:
+                    ticker_weights.sort(key=lambda x: x[1], reverse=True)
+                    n_to_select = min(equal_weight_n_tickers, len(ticker_weights))
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+
+                equal_weight_per_ticker = 1.0 / len(top_n_tickers)
+                new_weights = {}
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        new_weights[ticker] = equal_weight_per_ticker
+                    else:
+                        new_weights[ticker] = 0.0
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0:
+                    for ticker in top_n_tickers:
+                        new_weights[ticker] += cash_weight / len(top_n_tickers)
+                    new_weights['CASH'] = 0.0
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    weights = new_weights
 
         for t in weights:
             metrics[t]['Calculated_Weight'] = weights.get(t, 0)
@@ -6669,6 +6769,14 @@ def paste_json_callback():
             json_data['use_max_allocation'] = False
         if 'max_allocation_percent' not in json_data:
             json_data['max_allocation_percent'] = 20.0
+        if 'use_equal_weight' not in json_data:
+            json_data['use_equal_weight'] = False
+        if 'equal_weight_n_tickers' not in json_data:
+            json_data['equal_weight_n_tickers'] = 10
+        if 'use_limit_to_top_n' not in json_data:
+            json_data['use_limit_to_top_n'] = False
+        if 'limit_to_top_n_tickers' not in json_data:
+            json_data['limit_to_top_n_tickers'] = 10
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -6805,6 +6913,10 @@ def paste_json_callback():
             'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 4.0),
             'use_max_allocation': json_data.get('use_max_allocation', False),
             'max_allocation_percent': json_data.get('max_allocation_percent', 20.0),
+            'use_equal_weight': json_data.get('use_equal_weight', False),
+            'equal_weight_n_tickers': json_data.get('equal_weight_n_tickers', 10),
+            'use_limit_to_top_n': json_data.get('use_limit_to_top_n', False),
+            'limit_to_top_n_tickers': json_data.get('limit_to_top_n_tickers', 10),
             'calc_beta': json_data.get('calc_beta', True),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -6829,6 +6941,10 @@ def paste_json_callback():
         st.session_state['alloc_active_threshold_percent'] = allocations_config.get('minimal_threshold_percent', 4.0)
         st.session_state['alloc_active_use_max_allocation'] = allocations_config.get('use_max_allocation', False)
         st.session_state['alloc_active_max_allocation_percent'] = allocations_config.get('max_allocation_percent', 20.0)
+        st.session_state['alloc_active_use_equal_weight'] = allocations_config.get('use_equal_weight', False)
+        st.session_state['alloc_active_equal_weight_n_tickers'] = allocations_config.get('equal_weight_n_tickers', 10)
+        st.session_state['alloc_active_use_limit_to_top_n'] = allocations_config.get('use_limit_to_top_n', False)
+        st.session_state['alloc_active_limit_to_top_n_tickers'] = allocations_config.get('limit_to_top_n_tickers', 10)
         
         # Update session state for MA filter settings
         st.session_state['alloc_active_use_sma_filter'] = allocations_config.get('use_sma_filter', False)
@@ -6987,6 +7103,18 @@ def update_use_max_allocation():
 
 def update_max_allocation_percent():
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['max_allocation_percent'] = st.session_state.alloc_active_max_allocation_percent
+
+def update_use_equal_weight():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['use_equal_weight'] = st.session_state.alloc_active_use_equal_weight
+
+def update_equal_weight_n_tickers():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['equal_weight_n_tickers'] = st.session_state.alloc_active_equal_weight_n_tickers
+
+def update_use_limit_to_top_n():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['use_limit_to_top_n'] = st.session_state.alloc_active_use_limit_to_top_n
+
+def update_limit_to_top_n_tickers():
+    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['limit_to_top_n_tickers'] = st.session_state.alloc_active_limit_to_top_n_tickers
 
 # Sidebar simplified for single-portfolio allocation tracker
 st.sidebar.title("Allocation Tracker")
@@ -8029,6 +8157,54 @@ if active_portfolio['use_momentum']:
         )
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
+        
+        st.markdown("---")
+        
+        # Equal Weight option - SAME PATTERN AS MAX ALLOCATION
+        # ALWAYS sync equal weight settings from portfolio (not just if not present)
+        st.session_state["alloc_active_use_equal_weight"] = active_portfolio.get('use_equal_weight', False)
+        st.session_state["alloc_active_equal_weight_n_tickers"] = active_portfolio.get('equal_weight_n_tickers', 10)
+        
+        st.checkbox(
+            "Equal Weight Top N Tickers",
+            key="alloc_active_use_equal_weight",
+            on_change=update_use_equal_weight,
+            help="When enabled, takes the top N tickers by momentum weight and assigns them equal weights (1/N each). The momentum strategy is still used to select and rank the tickers."
+        )
+        
+        if st.session_state.get("alloc_active_use_equal_weight", False):
+            st.number_input(
+                "Number of Top Tickers to Equal Weight",
+                min_value=1,
+                max_value=100,
+                key="alloc_active_equal_weight_n_tickers",
+                on_change=update_equal_weight_n_tickers,
+                help="Select the top N tickers by momentum weight to receive equal allocation."
+            )
+        
+        st.markdown("---")
+        
+        # Limit to Top N option - mirrored from Equal Weight
+        st.session_state["alloc_active_use_limit_to_top_n"] = active_portfolio.get('use_limit_to_top_n', False)
+        st.session_state["alloc_active_limit_to_top_n_tickers"] = active_portfolio.get('limit_to_top_n_tickers', 10)
+        
+        st.checkbox(
+            "Limit to Top N Tickers",
+            key="alloc_active_use_limit_to_top_n",
+            on_change=update_use_limit_to_top_n,
+            help="When enabled, takes the top N tickers by momentum weight and keeps their proportional weights (unlike equal weight). The momentum strategy is still used to select and rank the tickers."
+        )
+        
+        if st.session_state.get("alloc_active_use_limit_to_top_n", False):
+            st.number_input(
+                "Number of Top Tickers to Keep",
+                min_value=1,
+                max_value=100,
+                key="alloc_active_limit_to_top_n_tickers",
+                on_change=update_limit_to_top_n_tickers,
+                help="Select the top N tickers by momentum weight to keep (with proportional weights)."
+            )
+        
         st.markdown("💡 **Note:** These options control how weights are assigned based on momentum scores.")
 
     with col_beta_vol:
@@ -8446,6 +8622,12 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['sma_window'] = st.session_state.get('alloc_active_sma_window', 200)
     cleaned_config['ma_type'] = st.session_state.get('alloc_active_ma_type', 'SMA')
     cleaned_config['ma_multiplier'] = st.session_state.get('alloc_active_ma_multiplier', 1.48)
+
+    # Ensure equal weight and limit-to-top-N settings are included
+    cleaned_config['use_equal_weight'] = active_portfolio.get('use_equal_weight', False)
+    cleaned_config['equal_weight_n_tickers'] = active_portfolio.get('equal_weight_n_tickers', 10)
+    cleaned_config['use_limit_to_top_n'] = active_portfolio.get('use_limit_to_top_n', False)
+    cleaned_config['limit_to_top_n_tickers'] = active_portfolio.get('limit_to_top_n_tickers', 10)
     
     # Also update the active portfolio to keep it in sync
     active_portfolio['use_sma_filter'] = st.session_state.get('alloc_active_use_sma_filter', False)
@@ -9526,6 +9708,18 @@ def paste_all_json_callback():
                     portfolio['exclude_from_cashflow_sync'] = False
                 if 'exclude_from_rebalancing_sync' not in portfolio:
                     portfolio['exclude_from_rebalancing_sync'] = False
+                if 'use_minimal_threshold' not in portfolio:
+                    portfolio['use_minimal_threshold'] = False
+                if 'minimal_threshold_percent' not in portfolio:
+                    portfolio['minimal_threshold_percent'] = 4.0
+                if 'use_max_allocation' not in portfolio:
+                    portfolio['use_max_allocation'] = False
+                if 'max_allocation_percent' not in portfolio:
+                    portfolio['max_allocation_percent'] = 20.0
+                if 'use_equal_weight' not in portfolio:
+                    portfolio['use_equal_weight'] = False
+                if 'equal_weight_n_tickers' not in portfolio:
+                    portfolio['equal_weight_n_tickers'] = 10
         if isinstance(obj, list):
             # Process each portfolio configuration for Allocations page
             processed_configs = []
@@ -9687,6 +9881,12 @@ def paste_all_json_callback():
                     'exclude_days_vol': cfg.get('exclude_days_vol', 30),
                     'use_targeted_rebalancing': cfg.get('use_targeted_rebalancing', False),
                     'targeted_rebalancing_settings': cfg.get('targeted_rebalancing_settings', {}),
+                    'use_minimal_threshold': cfg.get('use_minimal_threshold', False),
+                    'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 4.0),
+                    'use_max_allocation': cfg.get('use_max_allocation', False),
+                    'max_allocation_percent': cfg.get('max_allocation_percent', 20.0),
+                    'use_equal_weight': cfg.get('use_equal_weight', False),
+                    'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers', 10),
                 }
                 processed_configs.append(allocations_config)
             
@@ -11944,8 +12144,26 @@ if st.session_state.get('alloc_backtest_run', False):
                     
                     if returns_data:
                         df_returns = pd.DataFrame(returns_data)
-                        # Sort by ticker name
-                        df_returns = df_returns.sort_values('Ticker').reset_index(drop=True)
+                        
+                        # Separate stocks with allocation > 0% from those with 0% allocation
+                        stocks_with_allocation = []
+                        stocks_without_allocation = []
+                        
+                        for _, row in df_returns.iterrows():
+                            ticker = row['Ticker']
+                            allocation = final_alloc.get(ticker, 0)
+                            if allocation > 0.0001:  # More than 0% allocation
+                                stocks_with_allocation.append(row)
+                            else:
+                                stocks_without_allocation.append(row)
+                        
+                        # Sort each group by ticker name
+                        stocks_with_allocation = sorted(stocks_with_allocation, key=lambda x: x['Ticker'])
+                        stocks_without_allocation = sorted(stocks_without_allocation, key=lambda x: x['Ticker'])
+                        
+                        # Combine: stocks with allocation first, then stocks without allocation
+                        combined_data = stocks_with_allocation + stocks_without_allocation
+                        df_returns = pd.DataFrame(combined_data).reset_index(drop=True)
                         
                         # Add weighted portfolio return row - use same backtest data as Benchmark Comparison
                         weighted_row = {'Ticker': 'PORTFOLIO HISTORICAL'}
@@ -12054,6 +12272,7 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         # Add weighted row at the end
                         df_returns = pd.concat([df_returns, pd.DataFrame([weighted_row])], ignore_index=True)
+                        
                         return df_returns
                     
                 except Exception as e:
@@ -12080,9 +12299,9 @@ if st.session_state.get('alloc_backtest_run', False):
                 # Apply styling
                 styled_returns = returns_df.style.applymap(style_returns)
                 
-                # Highlight the PORTFOLIO row
+                # Highlight the PORTFOLIO row only
                 def highlight_portfolio_row(row):
-                    if row['Ticker'] == 'PORTFOLIO':
+                    if 'PORTFOLIO' in row['Ticker']:
                         return ['background-color: #333333; font-weight: bold; border: 2px solid #ffff00' for _ in row]
                     return ['' for _ in row]
                 
