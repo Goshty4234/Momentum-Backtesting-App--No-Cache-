@@ -3606,6 +3606,10 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
             'max_allocation_percent': 20.0,
+            'use_equal_weight': False,
+            'equal_weight_n_tickers': 10,
+            'use_limit_to_top_n': False,
+            'limit_to_top_n_tickers': 10,
         },
         # 2) Momentum-based portfolio using SPY, QQQ, GLD, TLT
         {
@@ -3644,6 +3648,10 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
             'max_allocation_percent': 20.0,
+            'use_equal_weight': False,
+            'equal_weight_n_tickers': 10,
+            'use_limit_to_top_n': False,
+            'limit_to_top_n_tickers': 10,
         },
         # 3) Equal weight (No Momentum) using the same tickers
         {
@@ -3942,7 +3950,7 @@ with col1:
     st.markdown("### Performance Settings")
 with col2:
     use_parallel = st.checkbox("Parallel Processing", value=False,
-                              help="✅ Process multiple portfolios simultaneously using threading. Automatically enabled for 3+ portfolios for better performance.")
+                              help="Process multiple portfolios simultaneously using threading. When selected, automatically activates for 3+ portfolios.")
     st.session_state.use_parallel_processing = use_parallel
 
 # Portfolio name is handled in the main UI below
@@ -5914,6 +5922,14 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             if ssum > 0:
                 weights = {t: filtered[t] / ssum for t in filtered}
 
+        # Calculate effective strategy for negative momentum (needed for equal weight logic)
+        effective_strategy_for_equal_weight = None
+        if all_negative:
+            is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
+            effective_strategy_for_equal_weight = negative_momentum_strategy
+            if is_sp500top20 and negative_momentum_strategy == 'Cash':
+                effective_strategy_for_equal_weight = 'Relative momentum'
+
         # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
         use_max_allocation = config.get('use_max_allocation', False)
         max_allocation_percent = config.get('max_allocation_percent', 20.0)
@@ -6073,6 +6089,144 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             total_weight = sum(weights.values())
             if total_weight > 0:
                 weights = {ticker: weight / total_weight for ticker, weight in weights.items()}
+
+        # STEP 1: Apply Limit to Top N filter FIRST (if enabled)
+        # This selects the top N tickers, keeping their proportional weights
+        # IMPORTANT: This runs BEFORE Equal Weight, so Equal Weight can then equalize the selected tickers
+        use_limit_to_top_n = config.get('use_limit_to_top_n', False)
+        limit_to_top_n_tickers = config.get('limit_to_top_n_tickers', 10)
+        
+        should_apply_limit_to_top_n = False
+        if use_limit_to_top_n and limit_to_top_n_tickers > 0 and weights:
+            if all_negative:
+                # When all negative, only apply if using Relative momentum or Near-Zero Symmetry
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_limit_to_top_n = True
+            else:
+                # When there are positive momentums, always apply if enabled
+                should_apply_limit_to_top_n = True
+        
+        if should_apply_limit_to_top_n:
+            # IMPORTANT: Limit to top N is applied AFTER min/max allocation filters
+            # This means we work with the tickers that survived the filters
+            # Get all tickers except CASH with weight > 0 (these are the tickers that passed min/max filters)
+            # Sort by their final weight (after all filters) in descending order
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() 
+                            if ticker != 'CASH' and weight > 0]
+            ticker_weights.sort(key=lambda x: x[1], reverse=True)
+            
+            if ticker_weights:
+                # Get top N tickers from the filtered set
+                # If filters left fewer tickers than N requested, take all available tickers
+                n_to_select = min(limit_to_top_n_tickers, len(ticker_weights))
+                top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+                
+                # Keep their original proportional weights (unlike equal weight which sets all to 1/N)
+                # Create new weights dictionary with original weights for top N, 0 for others
+                new_weights = {}
+                total_top_n_weight = 0.0
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        # Keep CASH weight as is (should be 0 in most cases)
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        # Keep original weight for top N tickers
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                        total_top_n_weight += weights.get(ticker, 0.0)
+                    else:
+                        # Set to 0 for tickers not in top N
+                        new_weights[ticker] = 0.0
+                
+                # If there's any CASH weight, distribute it proportionally to top N tickers based on their relative weights
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0 and total_top_n_weight > 0:
+                    # Distribute cash proportionally based on each ticker's weight relative to total top N weight
+                    for ticker in top_n_tickers:
+                        ticker_weight = new_weights[ticker]
+                        proportion = ticker_weight / total_top_n_weight if total_top_n_weight > 0 else 0.0
+                        new_weights[ticker] += cash_weight * proportion
+                    new_weights['CASH'] = 0.0
+                
+                # Final normalization to ensure weights sum to exactly 1.0 (100%)
+                # This preserves the relative proportions among top N tickers
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    # Fallback: if somehow total is 0, keep the new_weights as is
+                    weights = new_weights
+
+        # STEP 2: Apply Equal Weight filter AFTER Limit to Top N (if enabled)
+        # This equalizes the weights of the tickers selected by Limit to Top N (or all tickers if Limit to Top N was not used)
+        # Equal weight should:
+        # - Apply to all positive momentum cases
+        # - Apply to Relative momentum and Near-Zero Symmetry when all negative
+        # - NOT apply when all negative and strategy is Cash (should go to 100% cash)
+        # - NOT apply when all negative and strategy is Equal weight (already equal weight for all)
+        use_equal_weight = config.get('use_equal_weight', False)
+        equal_weight_n_tickers = config.get('equal_weight_n_tickers', 10)
+        
+        # Determine if equal weight should be applied
+        should_apply_equal_weight = False
+        if use_equal_weight and equal_weight_n_tickers > 0 and weights:
+            if all_negative:
+                # When all negative, only apply if using Relative momentum or Near-Zero Symmetry
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_equal_weight = True
+            else:
+                # When there are positive momentums, always apply if enabled
+                should_apply_equal_weight = True
+        
+        if should_apply_equal_weight:
+            # IMPORTANT: Equal weight is applied AFTER Limit to Top N (if Limit to Top N was applied)
+            # If Limit to Top N was enabled, we equalize the tickers it selected
+            # If Limit to Top N was not enabled, we select our own top N tickers and equalize them
+            # Get all tickers except CASH with weight > 0
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() 
+                            if ticker != 'CASH' and weight > 0]
+            
+            if ticker_weights:
+                # If Limit to Top N was applied, use the tickers it selected (all tickers with weight > 0)
+                # Otherwise, select top N based on Equal Weight's N value
+                if should_apply_limit_to_top_n:
+                    # Limit to Top N already selected the tickers - just equalize all that remain
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights]
+                else:
+                    # No Limit to Top N - select top N based on Equal Weight's N value
+                    ticker_weights.sort(key=lambda x: x[1], reverse=True)
+                    n_to_select = min(equal_weight_n_tickers, len(ticker_weights))
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+                
+                # Calculate equal weight per ticker (1/n where n is the actual number selected)
+                equal_weight_per_ticker = 1.0 / len(top_n_tickers)
+                
+                # Create new weights dictionary with equal weights for top N, 0 for others
+                new_weights = {}
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        # Keep CASH weight as is (should be 0 in most cases)
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        new_weights[ticker] = equal_weight_per_ticker
+                    else:
+                        # Set to 0 for tickers not in top N
+                        new_weights[ticker] = 0.0
+                
+                # If there's any CASH weight, distribute it proportionally to top N tickers
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0:
+                    # Add cash weight proportionally to top N tickers
+                    for ticker in top_n_tickers:
+                        new_weights[ticker] += cash_weight / len(top_n_tickers)
+                    new_weights['CASH'] = 0.0
+                
+                # Final normalization to ensure weights sum to exactly 1.0 (100%)
+                # This is important especially when fewer tickers remain than requested N
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    weights = new_weights
 
         # Attach calculated weights to metrics and return
         for t in weights:
@@ -7812,6 +7966,14 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
         portfolio['use_max_allocation'] = False
     if 'max_allocation_percent' not in portfolio:
         portfolio['max_allocation_percent'] = 20.0
+    if 'use_equal_weight' not in portfolio:
+        portfolio['use_equal_weight'] = False
+    if 'equal_weight_n_tickers' not in portfolio:
+        portfolio['equal_weight_n_tickers'] = 10
+    if 'use_limit_to_top_n' not in portfolio:
+        portfolio['use_limit_to_top_n'] = False
+    if 'limit_to_top_n_tickers' not in portfolio:
+        portfolio['limit_to_top_n_tickers'] = 10
     if 'use_sma_filter' not in portfolio:
         portfolio['use_sma_filter'] = False
     if 'sma_window' not in portfolio:
@@ -8504,6 +8666,10 @@ def add_portfolio_callback():
         'minimal_threshold_percent': 4.0,
         'use_max_allocation': False,
         'max_allocation_percent': 20.0,
+        'use_equal_weight': False,
+        'equal_weight_n_tickers': 10,
+        'use_limit_to_top_n': False,
+        'limit_to_top_n_tickers': 10,
         'collect_dividends_as_cash': False,
         'start_date_user': inherit_start_date,
         'end_date_user': inherit_end_date,
@@ -8858,6 +9024,10 @@ def paste_json_callback():
             json_data['minimal_threshold_percent'] = 4.0
         # Don't override max_allocation values from JSON - preserve imported values
         # REMOVED: Don't force max_allocation values to preserve JSON values
+        if 'use_equal_weight' not in json_data:
+            json_data['use_equal_weight'] = False
+        if 'equal_weight_n_tickers' not in json_data:
+            json_data['equal_weight_n_tickers'] = 10
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -8994,6 +9164,10 @@ def paste_json_callback():
             'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 4.0),
             'use_max_allocation': json_data.get('use_max_allocation', False),
             'max_allocation_percent': json_data.get('max_allocation_percent', 20.0),
+            'use_equal_weight': json_data.get('use_equal_weight', False),
+            'equal_weight_n_tickers': json_data.get('equal_weight_n_tickers', 10),
+            'use_limit_to_top_n': json_data.get('use_limit_to_top_n', False),
+            'limit_to_top_n_tickers': json_data.get('limit_to_top_n_tickers', 10),
             'calc_beta': json_data.get('calc_beta', False),
             'calc_volatility': json_data.get('calc_volatility', True),
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -9130,6 +9304,10 @@ def update_active_portfolio_index():
         st.session_state['multi_backtest_active_threshold_percent'] = active_portfolio.get('minimal_threshold_percent', 4.0)
         st.session_state['multi_backtest_active_use_max_allocation'] = active_portfolio.get('use_max_allocation', False)
         st.session_state['multi_backtest_active_max_allocation_percent'] = active_portfolio.get('max_allocation_percent', 20.0)
+        st.session_state['multi_backtest_active_use_equal_weight'] = active_portfolio.get('use_equal_weight', False)
+        st.session_state['multi_backtest_active_equal_weight_n_tickers'] = active_portfolio.get('equal_weight_n_tickers', 10)
+        st.session_state['multi_backtest_active_use_limit_to_top_n'] = active_portfolio.get('use_limit_to_top_n', False)
+        st.session_state['multi_backtest_active_limit_to_top_n_tickers'] = active_portfolio.get('limit_to_top_n_tickers', 10)
         st.session_state['multi_backtest_active_use_sma_filter'] = active_portfolio.get('use_sma_filter', False)
         st.session_state['multi_backtest_active_sma_window'] = active_portfolio.get('sma_window', 200)
         # MA Multiplier - RECONSTRUCTED (no complex sync)
@@ -9387,6 +9565,18 @@ def update_use_max_allocation():
 
 def update_max_allocation_percent():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['max_allocation_percent'] = st.session_state.multi_backtest_active_max_allocation_percent
+
+def update_use_equal_weight():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['use_equal_weight'] = st.session_state.multi_backtest_active_use_equal_weight
+
+def update_equal_weight_n_tickers():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['equal_weight_n_tickers'] = st.session_state.multi_backtest_active_equal_weight_n_tickers
+
+def update_use_limit_to_top_n():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['use_limit_to_top_n'] = st.session_state.multi_backtest_active_use_limit_to_top_n
+
+def update_limit_to_top_n_tickers():
+    st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['limit_to_top_n_tickers'] = st.session_state.multi_backtest_active_limit_to_top_n_tickers
 
 def update_start_with():
     st.session_state.multi_backtest_start_with = st.session_state.multi_backtest_start_with_radio
@@ -10510,6 +10700,12 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             del st.session_state[f"disable_max_allocation_{portfolio_index}"]
         if f"enable_max_allocation_{portfolio_index}" in st.session_state:
             del st.session_state[f"enable_max_allocation_{portfolio_index}"]
+        if f"equal_weight_values_{portfolio_index}" in st.session_state:
+            del st.session_state[f"equal_weight_values_{portfolio_index}"]
+        if f"disable_equal_weight_{portfolio_index}" in st.session_state:
+            del st.session_state[f"disable_equal_weight_{portfolio_index}"]
+        if f"enable_equal_weight_{portfolio_index}" in st.session_state:
+            del st.session_state[f"enable_equal_weight_{portfolio_index}"]
         
         # Clean momentum strategy session state
         momentum_keys = [
@@ -10680,6 +10876,158 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
             del st.session_state[f"disable_max_allocation_{portfolio_index}"]
         if f"enable_max_allocation_{portfolio_index}" in st.session_state:
             del st.session_state[f"enable_max_allocation_{portfolio_index}"]
+    
+    # Equal Weight Filter Section - SAME PATTERN AS MAX ALLOCATION
+    if use_momentum_vary:
+        st.markdown("---")
+        st.markdown("**Equal Weight Filter:**")
+        
+        # Initialize equal weight values list if not exists
+        if f"equal_weight_values_{portfolio_index}" not in st.session_state:
+            st.session_state[f"equal_weight_values_{portfolio_index}"] = [10]
+        
+        # Checkboxes for both options (can be both selected)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            disabled = st.checkbox(
+                "Disable Equal Weight",
+                value=True,
+                key=f"equal_disabled_{portfolio_index}"
+            )
+        
+        with col2:
+            enabled = st.checkbox(
+                "Enable Equal Weight",
+                key=f"equal_enabled_{portfolio_index}"
+            )
+        
+        # Build equal weight options
+        equal_weight_options = []
+        
+        if disabled:
+            equal_weight_options.append(None)
+        
+        if enabled:
+            st.markdown("**Equal Weight Values (Number of Top Tickers):**")
+            
+            # Add button
+            if st.button("➕ Add", key=f"add_equal_{portfolio_index}"):
+                st.session_state[f"equal_weight_values_{portfolio_index}"].append(10)
+                st.rerun()
+            
+            # Display values with truly unique keys for each value
+            values = st.session_state[f"equal_weight_values_{portfolio_index}"]
+            for i in range(len(values)):
+                col1, col2 = st.columns([4, 1])
+                
+                # Create truly unique key using timestamp and index
+                unique_id = f"{portfolio_index}_{i}_{id(values)}"
+                
+                with col1:
+                    val = st.number_input(
+                        f"Value {i+1}",
+                        min_value=1,
+                        max_value=100,
+                        value=int(values[i]),
+                        step=1,
+                        key=f"equal_input_{unique_id}"
+                    )
+                    # Update the value in the list
+                    values[i] = val
+                    equal_weight_options.append(val)
+                
+                with col2:
+                    if len(values) > 1 and st.button("🗑️", key=f"del_equal_{unique_id}"):
+                        # Remove the specific index
+                        st.session_state[f"equal_weight_values_{portfolio_index}"] = values[:i] + values[i+1:]
+                        st.rerun()
+        
+        # Add to variant params
+        if equal_weight_options:
+            variant_params["equal_weight"] = equal_weight_options
+    else:
+        variant_params["equal_weight"] = [None]
+        
+        # CLEAN SESSION STATE: When momentum is disabled, clean up equal weight session state
+        if f"equal_weight_values_{portfolio_index}" in st.session_state:
+            del st.session_state[f"equal_weight_values_{portfolio_index}"]
+        if f"disable_equal_weight_{portfolio_index}" in st.session_state:
+            del st.session_state[f"disable_equal_weight_{portfolio_index}"]
+        if f"enable_equal_weight_{portfolio_index}" in st.session_state:
+            del st.session_state[f"enable_equal_weight_{portfolio_index}"]
+
+    # Limit to Top N Section - mirrored from Equal Weight
+    if use_momentum_vary:
+        st.markdown("---")
+        st.markdown("**Limit to Top N:**")
+        
+        # Initialize values list if not exists
+        if f"limit_top_values_{portfolio_index}" not in st.session_state:
+            st.session_state[f"limit_top_values_{portfolio_index}"] = [10]
+        
+        # Checkboxes for both options (can be both selected)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            disabled = st.checkbox(
+                "Disable Limit to Top N",
+                value=True,
+                key=f"limit_disabled_{portfolio_index}"
+            )
+        
+        with col2:
+            enabled = st.checkbox(
+                "Enable Limit to Top N",
+                key=f"limit_enabled_{portfolio_index}"
+            )
+        
+        # Build options
+        limit_top_options = []
+        
+        if disabled:
+            limit_top_options.append(None)
+        
+        if enabled:
+            st.markdown("**Top N Values (Number of Tickers to Keep):**")
+            # Add button
+            if st.button("➕ Add", key=f"add_limit_top_{portfolio_index}"):
+                st.session_state[f"limit_top_values_{portfolio_index}"].append(10)
+                st.rerun()
+            
+            # Display values
+            values = st.session_state[f"limit_top_values_{portfolio_index}"]
+            for i in range(len(values)):
+                col1, col2 = st.columns([4, 1])
+                unique_id = f"{portfolio_index}_{i}_{id(values)}"
+                with col1:
+                    val = st.number_input(
+                        f"Value {i+1}",
+                        min_value=1,
+                        max_value=100,
+                        value=int(values[i]),
+                        step=1,
+                        key=f"limit_top_input_{unique_id}"
+                    )
+                    values[i] = val
+                    limit_top_options.append(val)
+                with col2:
+                    if len(values) > 1 and st.button("🗑️", key=f"del_limit_top_{unique_id}"):
+                        st.session_state[f"limit_top_values_{portfolio_index}"] = values[:i] + values[i+1:]
+                        st.rerun()
+        
+        # Add to variant params
+        if limit_top_options:
+            variant_params["limit_to_top_n"] = limit_top_options
+    else:
+        variant_params["limit_to_top_n"] = [None]
+        # CLEAN SESSION STATE: When momentum is disabled, clean up limit-to-top-N session state
+        if f"limit_top_values_{portfolio_index}" in st.session_state:
+            del st.session_state[f"limit_top_values_{portfolio_index}"]
+        if f"limit_disabled_{portfolio_index}" in st.session_state:
+            del st.session_state[f"limit_disabled_{portfolio_index}"]
+        if f"limit_enabled_{portfolio_index}" in st.session_state:
+            del st.session_state[f"limit_enabled_{portfolio_index}"]
     
     # Momentum Windows Section - Using the exact same code that works
     if use_momentum_vary:
@@ -11446,6 +11794,20 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                                 else:
                                     variant["use_max_allocation"] = False
                                     variant["max_allocation_percent"] = 20.0
+                            elif param == "equal_weight":
+                                if value is not None:
+                                    variant["use_equal_weight"] = True
+                                    variant["equal_weight_n_tickers"] = value
+                                else:
+                                    variant["use_equal_weight"] = False
+                                    variant["equal_weight_n_tickers"] = 10
+                            elif param == "limit_to_top_n":
+                                if value is not None:
+                                    variant["use_limit_to_top_n"] = True
+                                    variant["limit_to_top_n_tickers"] = value
+                                else:
+                                    variant["use_limit_to_top_n"] = False
+                                    variant["limit_to_top_n_tickers"] = 10
                             elif param == "ma_type":
                                 variant["ma_type"] = value
                             elif param == "ma_windows":
@@ -11579,6 +11941,15 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     if variant.get('use_minimal_threshold', False):
                         threshold_percent = variant.get('minimal_threshold_percent', 4.0)
                         clear_name_parts.append(f"- Min {threshold_percent:.2f}%")
+                    
+                    # Add equal weight information (only show when enabled)
+                    if variant.get('use_equal_weight', False):
+                        equal_weight_n = variant.get('equal_weight_n_tickers', 10)
+                        clear_name_parts.append(f"- Equal {equal_weight_n}")
+                    # Add limit to top N information (only show when enabled)
+                    if variant.get('use_limit_to_top_n', False):
+                        top_n = variant.get('limit_to_top_n_tickers', 10)
+                        clear_name_parts.append(f"- Tickers {top_n}")
                     
                     # Add max allocation information (only show when enabled)
                     if variant.get('use_max_allocation', False):
@@ -12719,6 +13090,55 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.warning("⚠️ **SP500TOP20 detected!** Cash strategy does not work yet and needs fixing. Please select 'Relative momentum' or 'Equal weight' instead.")
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
+        
+        st.markdown("---")
+        
+        # Equal Weight option - SAME PATTERN AS MAX ALLOCATION
+        # ALWAYS sync equal weight settings from portfolio (not just if not present)
+        st.session_state["multi_backtest_active_use_equal_weight"] = active_portfolio.get('use_equal_weight', False)
+        st.session_state["multi_backtest_active_equal_weight_n_tickers"] = active_portfolio.get('equal_weight_n_tickers', 10)
+        
+        st.checkbox(
+            "Equal Weight Top N Tickers",
+            key="multi_backtest_active_use_equal_weight",
+            on_change=update_use_equal_weight,
+            help="When enabled, takes the top N tickers by momentum weight and assigns them equal weights (1/N each). The momentum strategy is still used to select and rank the tickers."
+        )
+        
+        if st.session_state.get("multi_backtest_active_use_equal_weight", False):
+            st.number_input(
+                "Number of Top Tickers to Equal Weight",
+                min_value=1,
+                max_value=100,
+                key="multi_backtest_active_equal_weight_n_tickers",
+                on_change=update_equal_weight_n_tickers,
+                help="Select the top N tickers by momentum weight to receive equal allocation."
+            )
+        
+        st.markdown("---")
+        
+        # Limit to Top N option - SAME PATTERN AS EQUAL WEIGHT
+        # ALWAYS sync limit to top N settings from portfolio (not just if not present)
+        st.session_state["multi_backtest_active_use_limit_to_top_n"] = active_portfolio.get('use_limit_to_top_n', False)
+        st.session_state["multi_backtest_active_limit_to_top_n_tickers"] = active_portfolio.get('limit_to_top_n_tickers', 10)
+        
+        st.checkbox(
+            "Limit to Top N Tickers",
+            key="multi_backtest_active_use_limit_to_top_n",
+            on_change=update_use_limit_to_top_n,
+            help="When enabled, takes the top N tickers by momentum weight and keeps their proportional weights (unlike equal weight). The momentum strategy is still used to select and rank the tickers."
+        )
+        
+        if st.session_state.get("multi_backtest_active_use_limit_to_top_n", False):
+            st.number_input(
+                "Number of Top Tickers to Keep",
+                min_value=1,
+                max_value=100,
+                key="multi_backtest_active_limit_to_top_n_tickers",
+                on_change=update_limit_to_top_n_tickers,
+                help="Select the top N tickers by momentum weight to keep (with proportional weights)."
+            )
+        
         st.markdown("💡 **Note:** These options control how weights are assigned based on momentum scores.")
 
     with col_beta_vol:
@@ -14913,6 +15333,15 @@ def paste_all_json_callback():
                     portfolio['minimal_threshold_percent'] = 4.0
                 # Don't override max_allocation values from JSON - preserve imported values like minimal_threshold
                 # REMOVED: Don't force max_allocation values to preserve JSON values
+                if 'use_equal_weight' not in portfolio:
+                    portfolio['use_equal_weight'] = False
+                if 'equal_weight_n_tickers' not in portfolio:
+                    portfolio['equal_weight_n_tickers'] = 10
+                # Add missing limit to top N fields with default values
+                if 'use_limit_to_top_n' not in portfolio:
+                    portfolio['use_limit_to_top_n'] = False
+                if 'limit_to_top_n_tickers' not in portfolio:
+                    portfolio['limit_to_top_n_tickers'] = 10
                 
                 # Add missing anti-whipsaw fields with default values
                 if 'ma_cross_rebalance' not in portfolio:
@@ -15100,6 +15529,10 @@ def paste_all_json_callback():
                     'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 4.0),
                     'use_max_allocation': cfg.get('use_max_allocation', False),
                     'max_allocation_percent': cfg.get('max_allocation_percent', 20.0),
+                    'use_equal_weight': cfg.get('use_equal_weight', False),
+                    'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers', 10),
+                    'use_limit_to_top_n': cfg.get('use_limit_to_top_n', False),
+                    'limit_to_top_n_tickers': cfg.get('limit_to_top_n_tickers', 10),
                     'calc_beta': cfg.get('calc_beta', False),
                     'calc_volatility': cfg.get('calc_volatility', True),
                     'beta_window_days': cfg.get('beta_window_days', 365),
@@ -15242,6 +15675,11 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['minimal_threshold_percent'] = config.get('minimal_threshold_percent', 4.0)
             cleaned_config['use_max_allocation'] = config.get('use_max_allocation', False)
             cleaned_config['max_allocation_percent'] = config.get('max_allocation_percent', 20.0)
+            cleaned_config['use_equal_weight'] = config.get('use_equal_weight', False)
+            cleaned_config['equal_weight_n_tickers'] = config.get('equal_weight_n_tickers', 10)
+            # Ensure limit to top N settings are included (read from current config) - same pattern as equal weight
+            cleaned_config['use_limit_to_top_n'] = config.get('use_limit_to_top_n', False)
+            cleaned_config['limit_to_top_n_tickers'] = config.get('limit_to_top_n_tickers', 10)
             cleaned_config['use_sma_filter'] = config.get('use_sma_filter', False)
             cleaned_config['sma_window'] = config.get('sma_window', 200)
             cleaned_config['ma_type'] = config.get('ma_type', 'SMA')
@@ -17950,6 +18388,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             st.error(f"Error displaying metrics table: {str(e)}")
                             st.write("Raw data (first 1000 rows):")
                             st.dataframe(metrics_df_display.head(1000))
+                    
+                    # Check if this portfolio uses momentum strategy and show note
+                    portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
+                    portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                    is_momentum_portfolio = portfolio_cfg and portfolio_cfg.get('use_momentum', False)
+                    
+                    if not is_momentum_portfolio:
+                        st.info("ℹ️ **Note:** This portfolio does not use momentum strategy. The momentum metrics table above is not used for allocation decisions and can be ignored.")
                     
 
             # PIE CHARTS SECTION - Show for ALL portfolios (moved outside allocation data condition)
