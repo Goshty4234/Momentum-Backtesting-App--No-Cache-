@@ -11703,6 +11703,12 @@ if st.session_state.get('alloc_backtest_run', False):
                 except Exception:
                     pass
 
+                # Suggestion: Google AI Studio API keys (free daily quota, refreshed daily)
+                st.info(
+                    "For quick testing, you can use Google AI Studio API keys — free with a daily quota and refreshed each day. "
+                    "Create/manage at [Google AI Studio — API Keys](https://aistudio.google.com/api-keys)."
+                )
+
                 # Model presets per provider
                 if provider == "Google Gemini":
                     preset_models = [
