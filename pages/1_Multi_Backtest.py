@@ -17887,6 +17887,8 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     vol_year_median = np.nan
                     vol_year_ann_mean = np.nan
                     vol_year_ann_median = np.nan
+                    beta_year_mean = np.nan
+                    beta_year_median = np.nan
                     try:
                         series_obj = st.session_state.multi_all_results.get(nm)
                         if isinstance(series_obj, dict) and 'no_additions' in series_obj:
@@ -17903,6 +17905,33 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     vols_ann = vols * np.sqrt(12.0)
                                     vol_year_ann_mean = float(vols_ann.mean())
                                     vol_year_ann_median = float(vols_ann.median())
+                                # Yearly beta from daily returns (fetch benchmark like monthly block)
+                                raw_data = st.session_state.get('multi_backtest_raw_data', {})
+                                benchmark_ticker = None
+                                if st.session_state.get('multi_backtest_portfolio_configs'):
+                                    benchmark_ticker = st.session_state['multi_backtest_portfolio_configs'][0].get('benchmark_ticker', '^GSPC')
+                                df_bench_local = raw_data.get(benchmark_ticker)
+                                if isinstance(df_bench_local, pd.DataFrame):
+                                    if 'Price_change' in df_bench_local.columns:
+                                        bench_daily_full = df_bench_local['Price_change'].dropna()
+                                    elif 'Price' in df_bench_local.columns:
+                                        bench_daily_full = df_bench_local['Price'].pct_change().dropna()
+                                    else:
+                                        bench_daily_full = None
+                                else:
+                                    bench_daily_full = None
+                                port_daily_full = ser_noadd_full.pct_change().dropna()
+                                if bench_daily_full is not None and not port_daily_full.empty and not bench_daily_full.empty:
+                                    df_join_y = pd.concat([port_daily_full.rename('p'), bench_daily_full.rename('b')], axis=1).dropna()
+                                    if not df_join_y.empty:
+                                        df_join_y['yr'] = df_join_y.index.year
+                                        betas_y = []
+                                        for yr, grp in df_join_y.groupby('yr'):
+                                            if len(grp) >= 2 and grp['b'].var() > 0:
+                                                betas_y.append(np.cov(grp['p'], grp['b'])[0, 1] / grp['b'].var())
+                                        if betas_y:
+                                            beta_year_mean = float(np.mean(betas_y))
+                                            beta_year_median = float(np.median(betas_y))
                     except Exception:
                         pass
                     yearly_stats_rows.append([
@@ -17919,7 +17948,9 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         vol_year_mean,
                         vol_year_median,
                         vol_year_ann_mean,
-                        vol_year_ann_median
+                        vol_year_ann_median,
+                        beta_year_mean,
+                        beta_year_median
                     ])
             if yearly_stats_rows:
                 stats_df_yearly = pd.DataFrame(
@@ -17938,7 +17969,9 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         'Vol Mean (per-year from monthly %)',
                         'Vol Median (per-year from monthly %)',
                         'Vol Mean (Annualized)',
-                        'Vol Median (Annualized)'
+                        'Vol Median (Annualized)',
+                        'Beta Mean (Yearly)',
+                        'Beta Median (Yearly)'
                     ]
                 )
                 # Format numeric columns
@@ -17949,8 +17982,25 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 for c in ['Vol Mean (per-year from monthly %)', 'Vol Median (per-year from monthly %)', 'Vol Mean (Annualized)', 'Vol Median (Annualized)']:
                     if c in stats_df_yearly.columns:
                         stats_df_yearly[c] = stats_df_yearly[c].apply(lambda x: f"{(x*100):.2f}%" if pd.notna(x) else 'N/A')
+                for c in ['Beta Mean (Yearly)', 'Beta Median (Yearly)']:
+                    if c in stats_df_yearly.columns:
+                        stats_df_yearly[c] = stats_df_yearly[c].apply(lambda x: f"{x:.3f}" if pd.notna(x) else 'N/A')
                 st.markdown("**Yearly Robust Statistics**")
                 st.dataframe(stats_df_yearly, use_container_width=True)
+                with st.expander("Column Definitions", expanded=False):
+                    st.markdown(
+                        "- **Portfolio**: The portfolio identifier as configured in the app.\n"
+                        "- **Positive Years**: Count of calendar years where the portfolio's end-of-year value is greater than the start-of-year value.\n"
+                        "- **% Positive Years**: Positive Years divided by total evaluated years (×100).\n"
+                        "- **Mean % Change**: Arithmetic average of yearly percentage returns across all years. Yearly % return for year y is (Value_end_y − Value_start_y) / Value_start_y × 100, computed using the no-additions series for the denominator logic.\n"
+                        "- **Median % Change**: Median of the yearly percentage returns across all years.\n"
+                        "- **Std % Change**: Standard deviation (population, ddof=0) of yearly percentage returns across all years.\n"
+                        "- **Mean % (Years > 0)** / **Median % (Years > 0)**: Mean/median of yearly percentage returns restricted to years with positive return.\n"
+                        "- **Mean % (Years < 0)** / **Median % (Years < 0)**: Mean/median of yearly percentage returns restricted to years with negative return.\n"
+                        "- **Vol Mean (per-year from monthly %)** / **Vol Median (per-year from monthly %)**: For each year, compute the standard deviation of that year's monthly percentage returns; then report the mean/median of those per-year volatilities across all years (not annualized).\n"
+                        "- **Vol Mean (Annualized)** / **Vol Median (Annualized)**: Same per-year monthly volatilities as above, but multiplied by √12 before aggregating (to annualize).\n"
+                        "- **Beta Mean (Yearly)** / **Beta Median (Yearly)**: Using daily returns, compute beta for each calendar year as Cov(port, bench)/Var(bench) on that year's daily data; then report the mean/median across years."
+                    )
         except Exception:
             pass
 
@@ -18237,6 +18287,20 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         stats_df_monthly[c] = stats_df_monthly[c].apply(lambda x: f"{x:.3f}" if pd.notna(x) else 'N/A')
                 st.markdown("**Monthly Robust Statistics**")
                 st.dataframe(stats_df_monthly, use_container_width=True)
+                with st.expander("Column Definitions", expanded=False):
+                    st.markdown(
+                        "- **Portfolio**: The portfolio identifier as configured in the app.\n"
+                        "- **Positive Months**: Count of months where the end-of-month value exceeds the start-of-month value.\n"
+                        "- **% Positive Months**: Positive Months divided by total evaluated months (×100).\n"
+                        "- **Mean % Change**: Arithmetic average of monthly percentage returns across all months. Monthly % return for month m is (Value_end_m − Value_start_m) / Value_start_m × 100, computed using the no-additions series for the denominator logic.\n"
+                        "- **Median % Change**: Median of the monthly percentage returns across all months.\n"
+                        "- **Std % Change**: Standard deviation (population, ddof=0) of monthly percentage returns across all months.\n"
+                        "- **Mean % (Months > 0)** / **Median % (Months > 0)**: Mean/median of monthly percentage returns restricted to months with positive return.\n"
+                        "- **Mean % (Months < 0)** / **Median % (Months < 0)**: Mean/median of monthly percentage returns restricted to months with negative return.\n"
+                        "- **Vol Mean (per-month from daily %)** / **Vol Median (per-month from daily %)**: For each month, compute the standard deviation of that month's daily returns; then report the mean/median across all months (not annualized).\n"
+                        "- **Vol Mean (Annualized)** / **Vol Median (Annualized)**: Same per-month daily volatilities as above, but multiplied by √252 before aggregating (to annualize).\n"
+                        "- **Beta Mean (Monthly)** / **Beta Median (Monthly)**: Using daily returns, compute beta each month as Cov(port, bench)/Var(bench) on that month's daily data; then report the mean/median across months."
+                    )
         except Exception:
             pass
 
