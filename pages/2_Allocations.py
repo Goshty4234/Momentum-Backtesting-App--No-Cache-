@@ -11686,8 +11686,22 @@ if st.session_state.get('alloc_backtest_run', False):
                         ["Google Gemini", "OpenAI", "DeepSeek"],
                         index=0
                     )
+                # Persist ultra secure checkbox state per provider (session + disk)
+                import diskcache as _dc
+                _state_cache = _dc.Cache('.streamlit/ai_cache')
+                _ultra_key = f"ultra_secure:{provider}"
+                _ultra_default = _state_cache.get(_ultra_key)
+                if _ultra_default is None:
+                    _ultra_default = True
+                _ultra_ss_key = f"alloc_ultra_secure_{provider}"
+                if _ultra_ss_key not in st.session_state:
+                    st.session_state[_ultra_ss_key] = bool(_ultra_default)
                 with sec_col:
-                    ultra_secure = st.checkbox("Ultra secure (no cache)", value=True)
+                    ultra_secure = st.checkbox("Ultra secure (no cache)", key=_ultra_ss_key)
+                try:
+                    _state_cache.set(_ultra_key, bool(ultra_secure))
+                except Exception:
+                    pass
 
                 # Model presets per provider
                 if provider == "Google Gemini":
@@ -11731,6 +11745,58 @@ if st.session_state.get('alloc_backtest_run', False):
                     preset_models = ["deepseek-chat", "deepseek-reasoner"]
                     api_label = "DEEPSEEK_API_KEY"
 
+                # API key handling with optional 2h cache when not ultra secure (never hide UI)
+                _key_cache = _dc.Cache('.streamlit/ai_cache')
+                _key_cache_key = f"api_key:{provider}"
+                _cached_key = _key_cache.get(_key_cache_key)
+                # If user just toggled to ultra secure, clear any cached key immediately
+                _ultra_prev_key = f"{_ultra_ss_key}_prev"
+                _prev_val = st.session_state.get(_ultra_prev_key, None)
+                if _prev_val is not None and (not _prev_val) and ultra_secure:
+                    try:
+                        _key_cache.delete(_key_cache_key)
+                        _cached_key = None
+                        st.info("Ultra secure enabled — cached API key cleared.")
+                    except Exception:
+                        pass
+                st.session_state[_ultra_prev_key] = bool(ultra_secure)
+                key_col1, key_col2, key_col3 = st.columns([2,1,1])
+                with key_col1:
+                    if ultra_secure:
+                        api_key_input = st.text_input(api_label, value="", type="password", help="Key not stored. No cache.")
+                    else:
+                        api_key_input = st.text_input(api_label, value=_cached_key or "", type="password", help="Key cached locally for 2 hours.")
+                with key_col2:
+                    if ultra_secure:
+                        st.info("Ultra secure mode: key is not cached")
+                    else:
+                        st.warning("Key will be cached for 2 hours. Don't forget to clear.")
+                with key_col3:
+                    if not ultra_secure:
+                        if st.button("Clear API key cache"):
+                            try:
+                                _key_cache.delete(_key_cache_key)
+                            except Exception:
+                                pass
+                            st.session_state['alloc_ai_key_cache_cleared'] = True
+                            _cached_key = None
+                # Immediately cache entered key when not ultra secure
+                if (not ultra_secure) and api_key_input:
+                    if api_key_input != _cached_key:
+                        try:
+                            _key_cache.set(_key_cache_key, api_key_input, expire=7200)
+                            _cached_key = api_key_input
+                        except Exception:
+                            pass
+                # Live cache presence message after actions
+                if ultra_secure:
+                    st.info("Ultra secure mode active — no key is cached.")
+                else:
+                    if _cached_key:
+                        st.success("Cached API key is active for this provider (2 hours).")
+                    else:
+                        st.info("No cached API key for this provider.")
+
                 colA, colB = st.columns([1,1])
                 with colA:
                     if provider == "Google Gemini":
@@ -11763,7 +11829,6 @@ if st.session_state.get('alloc_backtest_run', False):
                         )
 
                 model_name = custom_model.strip() if custom_model.strip() else model_choice
-                api_key_input = st.text_input(api_label, value="", type="password") if ultra_secure else ""
                 run_ai = st.button("Analyze", type="primary")
 
                 if (not run_ai) and st.session_state.get('alloc_ai_last_text'):
@@ -11831,12 +11896,21 @@ if st.session_state.get('alloc_backtest_run', False):
                         if ultra_secure:
                             api_key = api_key_input
                         else:
-                            if provider == "Google Gemini":
-                                api_key = _os.getenv('GEMINI_API_KEY') or (st.secrets['GEMINI_API_KEY'] if 'GEMINI_API_KEY' in st.secrets else None)
-                            elif provider == "OpenAI":
-                                api_key = _os.getenv('OPENAI_API_KEY') or (st.secrets['OPENAI_API_KEY'] if 'OPENAI_API_KEY' in st.secrets else None)
-                            else:
-                                api_key = _os.getenv('DEEPSEEK_API_KEY') or (st.secrets['DEEPSEEK_API_KEY'] if 'DEEPSEEK_API_KEY' in st.secrets else None)
+                            # Prefer provided input, else cached, else env/secrets
+                            api_key = api_key_input or _cached_key
+                            if not api_key:
+                                if provider == "Google Gemini":
+                                    api_key = _os.getenv('GEMINI_API_KEY') or (st.secrets['GEMINI_API_KEY'] if 'GEMINI_API_KEY' in st.secrets else None)
+                                elif provider == "OpenAI":
+                                    api_key = _os.getenv('OPENAI_API_KEY') or (st.secrets['OPENAI_API_KEY'] if 'OPENAI_API_KEY' in st.secrets else None)
+                                else:
+                                    api_key = _os.getenv('DEEPSEEK_API_KEY') or (st.secrets['DEEPSEEK_API_KEY'] if 'DEEPSEEK_API_KEY' in st.secrets else None)
+                            # If user entered a different key, cache it for 2 hours
+                            try:
+                                if api_key_input and api_key_input != _cached_key:
+                                    _key_cache.set(_key_cache_key, api_key_input, expire=7200)
+                            except Exception:
+                                pass
                         if not api_key:
                             st.warning("Please configure the API key for the selected provider (env or st.secrets) or use Ultra secure mode.")
                         else:
