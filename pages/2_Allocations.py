@@ -9661,6 +9661,8 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             except Exception as e:
                 pass
 
+ 
+
 # Sidebar JSON export/import for ALL portfolios
 def paste_all_json_callback():
     txt = st.session_state.get('alloc_paste_all_json_text', '')
@@ -11590,6 +11592,421 @@ if st.session_state.get('alloc_backtest_run', False):
         st.markdown("### Shares if Rebalanced Today (Snapshot)")
         st.caption("Current allocation weights converted to actual share quantities at today's prices")
         build_table_from_alloc({**today_weights, 'CASH': today_weights.get('CASH', 0)}, None, "")
+
+        # ======================
+        # AI Analysis (LLM) — moved here after Shares Snapshot
+        # ======================
+        try:
+            st.markdown("---")
+            st.subheader("🤖 AI Analysis (LLM) — Target Allocation Today")
+            st.caption("Qualitative/sector assessment over the current target selection and weights.")
+            st.markdown(
+                """
+                <style>
+                div[data-testid='stDataFrame'] div[role='gridcell'] {
+                    white-space: normal !important;
+                    overflow: visible !important;
+                    text-overflow: clip !important;
+                }
+                div[data-testid='stDataFrame'] { width: 100% !important; }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            snapshot = st.session_state.get('alloc_snapshot_data', {}) or {}
+            today_weights_map = snapshot.get('today_weights_map', {}) or {}
+            portfolio_list = snapshot.get('portfolio_configs', []) or []
+            all_metrics = snapshot.get('all_metrics', {}) or {}
+
+            if today_weights_map:
+                names = list(today_weights_map.keys())
+                active_name = st.session_state.get('alloc_portfolio_configs', [{}])[st.session_state.get('alloc_active_portfolio_index', 0)].get('name') if st.session_state.get('alloc_portfolio_configs') else None
+                default_idx = names.index(active_name) if active_name in names else 0
+                sel_name = st.selectbox("Portfolio to analyze", names, index=default_idx)
+
+                def build_payload(port_name):
+                    cfg = next((c for c in portfolio_list if c.get('name') == port_name), {})
+                    weights = today_weights_map.get(port_name, {})
+                    metrics_map = all_metrics.get(port_name, {})
+                    final_date = max(metrics_map.keys()) if metrics_map else None
+                    metrics_on_final = metrics_map.get(final_date, {}) if final_date else {}
+                    items = []
+                    for t, w in weights.items():
+                        if t and t != 'CASH' and w > 0:
+                            item = {'ticker': t, 'weight': float(w)}
+                            m = metrics_on_final.get(t, {}) if isinstance(metrics_on_final, dict) else {}
+                            for k in ['Momentum', 'Beta', 'Volatility']:
+                                if k in m and m[k] is not None:
+                                    try:
+                                        item[k.lower()] = float(m[k])
+                                    except Exception:
+                                        pass
+                            items.append(item)
+                    return {
+                        'portfolio_name': port_name,
+                        'as_of': str(final_date) if final_date else None,
+                        'rebalancing_frequency': cfg.get('rebalancing_frequency'),
+                        'benchmark': cfg.get('benchmark_ticker'),
+                        'use_momentum': bool(cfg.get('use_momentum', True)),
+                        'momentum_strategy': cfg.get('momentum_strategy'),
+                        'constraints': {
+                            'use_equal_weight': cfg.get('use_equal_weight'),
+                            'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers'),
+                            'use_limit_to_top_n': cfg.get('use_limit_to_top_n'),
+                            'limit_to_top_n_tickers': cfg.get('limit_to_top_n_tickers'),
+                            'use_max_allocation': cfg.get('use_max_allocation'),
+                            'max_allocation_percent': cfg.get('max_allocation_percent'),
+                            'use_minimal_threshold': cfg.get('use_minimal_threshold'),
+                            'minimal_threshold_percent': cfg.get('minimal_threshold_percent'),
+                        },
+                        'selection': items,
+                    }
+
+                # Optional additional instructions/context for the AI
+                extra_notes = st.text_area(
+                    "Additional instructions to AI (optional)",
+                    value=st.session_state.get('alloc_ai_extra_notes', ""),
+                    help="Any extra guidance, caveats, or ticker clarifications you want the AI to consider.")
+                st.session_state['alloc_ai_extra_notes'] = extra_notes
+
+                payload = build_payload(sel_name)
+                if extra_notes.strip():
+                    payload['user_notes'] = extra_notes.strip()
+
+                with st.expander("See payload sent to AI", expanded=False):
+                    import json as _json
+                    st.code(_json.dumps(payload, indent=2), language='json')
+
+                # Provider + Model selection (with custom override)
+                prov_col, sec_col = st.columns([1,1])
+                with prov_col:
+                    provider = st.selectbox(
+                        "Provider",
+                        ["Google Gemini", "OpenAI", "DeepSeek"],
+                        index=0
+                    )
+                with sec_col:
+                    ultra_secure = st.checkbox("Ultra secure (no cache)", value=True)
+
+                # Model presets per provider
+                if provider == "Google Gemini":
+                    preset_models = [
+                        "gemini-2.5-pro",
+                        "gemini-2.5-flash",
+                        "gemini-2.5-flash-lite",
+                        "gemini-2.5-flash-tts",
+                        "gemini-2.0-flash",
+                        "gemini-2.0-flash-lite",
+                        "gemini-2.0-flash-exp",
+                        "gemini-2.0-flash-preview-image-generation",
+                        "gemini-2.0-flash-live",
+                        "gemini-2.5-flash-live",
+                        "gemini-2.5-flash-native-audio-dialog",
+                        "learnlm-2.0-flash-experimental",
+                        "imagen-3.0-generate",
+                        "veo-2.0-generate-001",
+                    ]
+                    gemini_limits = {
+                        "gemini-2.5-pro": {"RPM":"~2", "TPM":"~125K", "RPD":"~50", "note":"Highest reasoning quality; higher cost."},
+                        "gemini-2.5-flash": {"RPM":"~10", "TPM":"~250K", "RPD":"~250", "note":"Great balance of performance and cost."},
+                        "gemini-2.5-flash-lite": {"RPM":"~15", "TPM":"~250K", "RPD":"~1K", "note":"Fast and economical for volume."},
+                        "gemini-2.5-flash-tts": {"RPM":"~3", "TPM":"~10K", "RPD":"~15", "note":"Text-to-speech."},
+                        "gemini-2.0-flash": {"RPM":"~15", "TPM":"~1M", "RPD":"~200", "note":"Very high TPM; fast and low-cost."},
+                        "gemini-2.0-flash-lite": {"RPM":"~30", "TPM":"~1M", "RPD":"~200", "note":"Maximum throughput; low cost."},
+                        "gemini-2.0-flash-exp": {"RPM":"~10", "TPM":"~250K", "RPD":"~50", "note":"Experimental."},
+                        "gemini-2.0-flash-preview-image-generation": {"RPM":"~10", "TPM":"~200K", "RPD":"~100", "note":"Image generation."},
+                        "gemini-2.0-flash-live": {"RPM":"Live", "TPM":"~1M", "RPD":"∞", "note":"Streaming live."},
+                        "gemini-2.5-flash-live": {"RPM":"Live", "TPM":"~1M", "RPD":"∞", "note":"Streaming live (2.5)."},
+                        "gemini-2.5-flash-native-audio-dialog": {"RPM":"~?", "TPM":"~1M", "RPD":"∞", "note":"Native audio dialog."},
+                        "learnlm-2.0-flash-experimental": {"RPM":"~15", "TPM":"N/A", "RPD":"~1.5K", "note":"Learning-oriented; experimental."},
+                        "imagen-3.0-generate": {"RPM":"N/A", "TPM":"N/A", "RPD":"~25", "note":"High-quality image generation."},
+                        "veo-2.0-generate-001": {"RPM":"N/A", "TPM":"N/A", "RPD":"~20", "note":"Video generation (Veo)."},
+                    }
+                    api_label = "GEMINI_API_KEY"
+                elif provider == "OpenAI":
+                    preset_models = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-3.5-turbo"]
+                    api_label = "OPENAI_API_KEY"
+                else:
+                    preset_models = ["deepseek-chat", "deepseek-reasoner"]
+                    api_label = "DEEPSEEK_API_KEY"
+
+                colA, colB = st.columns([1,1])
+                with colA:
+                    if provider == "Google Gemini":
+                        _default_model = st.session_state.get('alloc_ai_last_gemini_model', 'gemini-2.0-flash')
+                    elif provider == "OpenAI":
+                        _default_model = st.session_state.get('alloc_ai_last_openai_model', 'gpt-4o-mini')
+                    else:
+                        _default_model = st.session_state.get('alloc_ai_last_deepseek_model', 'deepseek-chat')
+                    _default_idx = preset_models.index(_default_model) if _default_model in preset_models else 0
+                    model_choice = st.selectbox("Model", preset_models, index=_default_idx)
+                with colB:
+                    custom_model = st.text_input("Custom model (optional)", value="")
+
+                if provider == "Google Gemini":
+                    chosen_key = (custom_model.strip() if custom_model.strip() else model_choice)
+                    info = gemini_limits.get(chosen_key, None)
+                    if info:
+                        st.markdown(
+                            f"**Limits** — RPM: {info['RPM']} • TPM: {info['TPM']} • RPD: {info['RPD']}  ")
+                        st.caption(f"Note: {info['note']}")
+                    with st.expander("Which model should I choose?", expanded=False):
+                        st.markdown(
+                            "- **Highest quality/reasoning**: gemini-2.5-pro\n"
+                            "- **Balanced perf/cost**: gemini-2.5-flash\n"
+                            "- **Low cost / high throughput**: gemini-2.0-flash-lite (or 2.0-flash)\n"
+                            "- **Image generation**: gemini-2.0-flash-preview-image-generation / imagen-3.0-generate\n"
+                            "- **TTS**: gemini-2.5-flash-tts\n"
+                            "- **Streaming live**: gemini-2.0-flash-live / gemini-2.5-flash-live\n"
+                            "- **Experimental**: gemini-2.0-flash-exp / learnlm-2.0-flash-experimental"
+                        )
+
+                model_name = custom_model.strip() if custom_model.strip() else model_choice
+                api_key_input = st.text_input(api_label, value="", type="password") if ultra_secure else ""
+                run_ai = st.button("Analyze", type="primary")
+
+                if (not run_ai) and st.session_state.get('alloc_ai_last_text'):
+                    st.markdown("### Last AI analysis")
+                    _meta = st.session_state.get('alloc_ai_last_meta', {})
+                    if _meta:
+                        st.caption(f"Provider: {_meta.get('provider','?')} • Model: {_meta.get('model','?')}")
+                    _ai_text = st.session_state['alloc_ai_last_text']
+                    import json as _json
+                    _parsed = None
+                    try:
+                        _s = _ai_text.find('{'); _e = _ai_text.rfind('}')
+                        if _s != -1 and _e != -1 and _e > _s:
+                            _parsed = _json.loads(_ai_text[_s:_e+1])
+                    except Exception:
+                        _parsed = None
+                    if _parsed:
+                        st.success(f"Overall Score: {_parsed.get('overall_score','N/A')}")
+                        if _parsed.get('overall_comment'):
+                            st.write(_parsed.get('overall_comment'))
+                        _tlist = _parsed.get('tickers', []) or []
+                        if _tlist:
+                            import pandas as _pd
+                            _df = _pd.DataFrame(_tlist)
+                            try:
+                                st.data_editor(
+                                    _df,
+                                    hide_index=True,
+                                    use_container_width=True,
+                                    disabled=True,
+                                    column_config={
+                                        "comment": st.column_config.TextColumn("comment", width=4000),
+                                        "ticker": st.column_config.TextColumn("ticker", width=120),
+                                        "score": st.column_config.NumberColumn("score", width=100),
+                                    },
+                                )
+                            except Exception:
+                                st.dataframe(_df, use_container_width=True)
+                            with st.expander("Show full rows (all fields)", expanded=False):
+                                for __row in _df.to_dict(orient="records"):
+                                    st.markdown(f"**{__row.get('ticker','?')}** — score: {__row.get('score','?')}")
+                                    _other = {k: v for k, v in __row.items() if k not in ['ticker','score']}
+                                    for k, v in _other.items():
+                                        st.markdown(f"- {k}: {v}")
+                                    st.markdown("---")
+                        _sugg = _parsed.get('suggestions', []) or []
+                        if _sugg:
+                            st.markdown("**Suggestions:**")
+                            for s in _sugg:
+                                st.markdown(f"- {s}")
+                        _extra = _parsed.get('extra_insight') or _parsed.get('additional_insight') or _parsed.get('extra')
+                        if _extra:
+                            st.markdown("**Additional insight:**")
+                            st.write(_extra)
+                    else:
+                        st.info("AI response (persisted, raw):")
+                        st.write(_ai_text)
+
+                if run_ai:
+                    try:
+                        import hashlib, os as _os
+                        st.session_state['alloc_ai_last_text'] = None
+                        st.session_state['alloc_ai_last_meta'] = None
+                        api_key = None
+                        if ultra_secure:
+                            api_key = api_key_input
+                        else:
+                            if provider == "Google Gemini":
+                                api_key = _os.getenv('GEMINI_API_KEY') or (st.secrets['GEMINI_API_KEY'] if 'GEMINI_API_KEY' in st.secrets else None)
+                            elif provider == "OpenAI":
+                                api_key = _os.getenv('OPENAI_API_KEY') or (st.secrets['OPENAI_API_KEY'] if 'OPENAI_API_KEY' in st.secrets else None)
+                            else:
+                                api_key = _os.getenv('DEEPSEEK_API_KEY') or (st.secrets['DEEPSEEK_API_KEY'] if 'DEEPSEEK_API_KEY' in st.secrets else None)
+                        if not api_key:
+                            st.warning("Please configure the API key for the selected provider (env or st.secrets) or use Ultra secure mode.")
+                        else:
+                            prompt = (
+                                "You are a portfolio analyst. Given a portfolio (target weights if rebalanced today), "
+                                "provide: 1) a short qualitative assessment, 2) a per-ticker note, 3) an overall score (0-100), "
+                                "4) per-ticker score (0-100) considering momentum fit, valuation, growth, sector context, risk, 5) suggested tweaks. "
+                                "Focus on the given selection and constraints. If the user provides extra instructions or ticker clarifications, follow them. Return concise JSON with fields: "
+                                "{overall_score:number, overall_comment:string, tickers:[{ticker, score, comment}], suggestions:[string], extra_insight:string}"
+                            )
+                            if extra_notes.strip():
+                                prompt += f"\n\nAdditional user instructions to respect:\n{extra_notes.strip()}\n"
+                            ai_text = None
+                            if provider == "Google Gemini":
+                                import google.generativeai as genai
+                                genai.configure(api_key=api_key)
+                                model = genai.GenerativeModel(model_name)
+                                if ultra_secure:
+                                    resp = model.generate_content([
+                                        {"role":"user","parts":[{"text":prompt}]},
+                                        {"role":"user","parts":[{"text":str(payload)}]}
+                                    ])
+                                    ai_text = resp.text if hasattr(resp, 'text') else str(resp)
+                                else:
+                                    import diskcache as _dc
+                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                    key_str = f"gemini:{model_name}:{payload}"
+                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                    cached = ai_cache.get(cache_key)
+                                    if cached:
+                                        ai_text = cached
+                                    else:
+                                        resp = model.generate_content([
+                                            {"role":"user","parts":[{"text":prompt}]},
+                                            {"role":"user","parts":[{"text":str(payload)}]}
+                                        ])
+                                        ai_text = resp.text if hasattr(resp, 'text') else str(resp)
+                                        ai_cache.set(cache_key, ai_text, expire=14400)
+                            elif provider == "OpenAI":
+                                import requests
+                                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                                data = {
+                                    "model": model_name,
+                                    "response_format": {"type": "json_object"},
+                                    "messages": [
+                                        {"role": "system", "content": "You are a portfolio analyst."},
+                                        {"role": "user", "content": prompt},
+                                        {"role": "user", "content": str(payload)}
+                                    ]
+                                }
+                                if ultra_secure:
+                                    r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
+                                    r.raise_for_status()
+                                    j = r.json()
+                                    ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                else:
+                                    import diskcache as _dc
+                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                    key_str = f"openai:{model_name}:{payload}"
+                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                    cached = ai_cache.get(cache_key)
+                                    if cached:
+                                        ai_text = cached
+                                    else:
+                                        r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
+                                        r.raise_for_status()
+                                        j = r.json()
+                                        ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                        ai_cache.set(cache_key, ai_text, expire=14400)
+                            else:  # DeepSeek
+                                import requests
+                                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                                data = {
+                                    "model": model_name,
+                                    "messages": [
+                                        {"role": "system", "content": "You are a portfolio analyst. Return concise JSON only."},
+                                        {"role": "user", "content": prompt},
+                                        {"role": "user", "content": str(payload)}
+                                    ]
+                                }
+                                if ultra_secure:
+                                    r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=60)
+                                    r.raise_for_status()
+                                    j = r.json()
+                                    ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                else:
+                                    import diskcache as _dc
+                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                    key_str = f"deepseek:{model_name}:{payload}"
+                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                    cached = ai_cache.get(cache_key)
+                                    if cached:
+                                        ai_text = cached
+                                    else:
+                                        r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=60)
+                                        r.raise_for_status()
+                                        j = r.json()
+                                        ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                        ai_cache.set(cache_key, ai_text, expire=14400)
+
+                            import json as _json
+                            parsed = None
+                            try:
+                                start = ai_text.find('{')
+                                end = ai_text.rfind('}')
+                                if start != -1 and end != -1 and end > start:
+                                    parsed = _json.loads(ai_text[start:end+1])
+                            except Exception:
+                                parsed = None
+
+                            if parsed:
+                                if provider == "Google Gemini":
+                                    st.session_state['alloc_ai_last_gemini_model'] = model_name
+                                elif provider == "OpenAI":
+                                    st.session_state['alloc_ai_last_openai_model'] = model_name
+                                else:
+                                    st.session_state['alloc_ai_last_deepseek_model'] = model_name
+                                st.session_state['alloc_ai_last_text'] = ai_text
+                                st.session_state['alloc_ai_last_meta'] = {"provider": provider, "model": model_name}
+                                st.success(f"Overall Score: {parsed.get('overall_score','N/A')}")
+                                if parsed.get('overall_comment'):
+                                    st.write(parsed.get('overall_comment'))
+                                tlist = parsed.get('tickers', []) or []
+                                if tlist:
+                                    import pandas as _pd
+                                    df_ai = _pd.DataFrame(tlist)
+                                    try:
+                                        st.data_editor(
+                                            df_ai,
+                                            hide_index=True,
+                                            use_container_width=True,
+                                            disabled=True,
+                                            column_config={
+                                                "comment": st.column_config.TextColumn("comment", width=4000),
+                                                "ticker": st.column_config.TextColumn("ticker", width=120),
+                                                "score": st.column_config.NumberColumn("score", width=100),
+                                            },
+                                        )
+                                    except Exception:
+                                        st.dataframe(df_ai, use_container_width=True)
+                                    with st.expander("Show full comments", expanded=False):
+                                        for _row in df_ai.to_dict(orient="records"):
+                                            st.markdown(f"**{_row.get('ticker','?')}** — score: {_row.get('score','?')}")
+                                            st.markdown(f"{_row.get('comment','')}\n\n---")
+                                sugg = parsed.get('suggestions', []) or []
+                                if sugg:
+                                    st.markdown("**Suggestions:**")
+                                    for s in sugg:
+                                        st.markdown(f"- {s}")
+                                extra = parsed.get('extra_insight') or parsed.get('additional_insight') or parsed.get('extra')
+                                if extra:
+                                    st.markdown("**Additional insight:**")
+                                    st.write(extra)
+                            else:
+                                if provider == "Google Gemini":
+                                    st.session_state['alloc_ai_last_gemini_model'] = model_name
+                                elif provider == "OpenAI":
+                                    st.session_state['alloc_ai_last_openai_model'] = model_name
+                                else:
+                                    st.session_state['alloc_ai_last_deepseek_model'] = model_name
+                                st.session_state['alloc_ai_last_text'] = ai_text
+                                st.session_state['alloc_ai_last_meta'] = {"provider": provider, "model": model_name}
+                                st.info("AI response (raw):")
+                                st.write(ai_text)
+                    except Exception as e:
+                        st.warning(f"AI error: {e}")
+            else:
+                st.info("No current allocation available. Please run an allocations backtest first.")
+        except Exception:
+            pass
 
     if allocs_for_portfolio:
         st.markdown("**Historical Allocations**")
