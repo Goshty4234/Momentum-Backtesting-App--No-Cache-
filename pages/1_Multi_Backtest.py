@@ -17843,6 +17843,117 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
 
         st.dataframe(styler, use_container_width=True, hide_index=False)
 
+        # Yearly Robust Statistics (under the yearly table)
+        try:
+            yearly_stats_rows = []
+            for nm in names:
+                pct_col = f'{nm} % Change'
+                if pct_col in combined_df.columns:
+                    series = pd.to_numeric(combined_df[pct_col], errors='coerce')
+                    series_clean = series.dropna()
+                    total = len(series_clean)
+                    positives = int((series_clean > 0).sum()) if total > 0 else 0
+                    pos_pct = (positives / total) * 100 if total > 0 else np.nan
+                    mean_ret = series_clean.mean() if total > 0 else np.nan
+                    median_ret = series_clean.median() if total > 0 else np.nan
+                    std_ret = series_clean.std(ddof=0) if total > 1 else np.nan
+
+                    # Positive-only and negative-only yearly return stats
+                    pos_series_y = series_clean[series_clean > 0]
+                    neg_series_y = series_clean[series_clean < 0]
+                    pos_mean_y = pos_series_y.mean() if len(pos_series_y) > 0 else np.nan
+                    pos_median_y = pos_series_y.median() if len(pos_series_y) > 0 else np.nan
+                    neg_mean_y = neg_series_y.mean() if len(neg_series_y) > 0 else np.nan
+                    neg_median_y = neg_series_y.median() if len(neg_series_y) > 0 else np.nan
+
+                    # Positive-only and negative-only monthly return stats
+                    pos_series = series_clean[series_clean > 0]
+                    neg_series = series_clean[series_clean < 0]
+                    pos_mean = pos_series.mean() if len(pos_series) > 0 else np.nan
+                    pos_median = pos_series.median() if len(pos_series) > 0 else np.nan
+                    neg_mean = neg_series.mean() if len(neg_series) > 0 else np.nan
+                    neg_median = neg_series.median() if len(neg_series) > 0 else np.nan
+
+                    # Positive-only and negative-only yearly return stats
+                    pos_series = series_clean[series_clean > 0]
+                    neg_series = series_clean[series_clean < 0]
+                    pos_mean = pos_series.mean() if len(pos_series) > 0 else np.nan
+                    pos_median = pos_series.median() if len(pos_series) > 0 else np.nan
+                    neg_mean = neg_series.mean() if len(neg_series) > 0 else np.nan
+                    neg_median = neg_series.median() if len(neg_series) > 0 else np.nan
+
+                    # Yearly volatility from monthly returns within each year (mean/median across years)
+                    vol_year_mean = np.nan
+                    vol_year_median = np.nan
+                    vol_year_ann_mean = np.nan
+                    vol_year_ann_median = np.nan
+                    try:
+                        series_obj = st.session_state.multi_all_results.get(nm)
+                        if isinstance(series_obj, dict) and 'no_additions' in series_obj:
+                            ser_noadd_full = series_obj['no_additions']
+                        else:
+                            ser_noadd_full = series_obj if isinstance(series_obj, pd.Series) else None
+                        if ser_noadd_full is not None and not ser_noadd_full.empty:
+                            monthly_ser = ser_noadd_full.resample('M').last().pct_change().dropna()
+                            if not monthly_ser.empty:
+                                vols = monthly_ser.groupby([monthly_ser.index.year]).std(ddof=0)
+                                if vols is not None and len(vols) > 0:
+                                    vol_year_mean = float(vols.mean())
+                                    vol_year_median = float(vols.median())
+                                    vols_ann = vols * np.sqrt(12.0)
+                                    vol_year_ann_mean = float(vols_ann.mean())
+                                    vol_year_ann_median = float(vols_ann.median())
+                    except Exception:
+                        pass
+                    yearly_stats_rows.append([
+                        nm,
+                        positives,
+                        f"{pos_pct:.2f}%" if not np.isnan(pos_pct) else 'N/A',
+                        mean_ret,
+                        median_ret,
+                        std_ret,
+                        pos_mean_y,
+                        pos_median_y,
+                        neg_mean_y,
+                        neg_median_y,
+                        vol_year_mean,
+                        vol_year_median,
+                        vol_year_ann_mean,
+                        vol_year_ann_median
+                    ])
+            if yearly_stats_rows:
+                stats_df_yearly = pd.DataFrame(
+                    yearly_stats_rows,
+                    columns=[
+                        'Portfolio',
+                        'Positive Years',
+                        '% Positive Years',
+                        'Mean % Change',
+                        'Median % Change',
+                        'Std % Change',
+                        'Mean % (Years > 0)',
+                        'Median % (Years > 0)',
+                        'Mean % (Years < 0)',
+                        'Median % (Years < 0)',
+                        'Vol Mean (per-year from monthly %)',
+                        'Vol Median (per-year from monthly %)',
+                        'Vol Mean (Annualized)',
+                        'Vol Median (Annualized)'
+                    ]
+                )
+                # Format numeric columns
+                fmt_cols = ['Mean % Change', 'Median % Change', 'Std % Change', 'Mean % (Years > 0)', 'Median % (Years > 0)', 'Mean % (Years < 0)', 'Median % (Years < 0)']
+                for c in fmt_cols:
+                    if c in stats_df_yearly.columns:
+                        stats_df_yearly[c] = stats_df_yearly[c].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else 'N/A')
+                for c in ['Vol Mean (per-year from monthly %)', 'Vol Median (per-year from monthly %)', 'Vol Mean (Annualized)', 'Vol Median (Annualized)']:
+                    if c in stats_df_yearly.columns:
+                        stats_df_yearly[c] = stats_df_yearly[c].apply(lambda x: f"{(x*100):.2f}%" if pd.notna(x) else 'N/A')
+                st.markdown("**Yearly Robust Statistics**")
+                st.dataframe(stats_df_yearly, use_container_width=True)
+        except Exception:
+            pass
+
         # Monthly Performance Table
         st.subheader("Monthly Performance (Interactive Table)")
         # Use the original results data for monthly calculation, not the yearly resampled data
@@ -18007,6 +18118,127 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             styler_monthly = styler_monthly.format(fmt_map_monthly, na_rep='N/A')
 
         st.dataframe(styler_monthly, use_container_width=True, hide_index=False)
+
+        # Monthly Robust Statistics (under the monthly table)
+        try:
+            monthly_stats_rows = []
+            for nm in names:
+                pct_col = f'{nm} % Change'
+                if pct_col in combined_df_monthly.columns:
+                    series = pd.to_numeric(combined_df_monthly[pct_col], errors='coerce')
+                    series_clean = series.dropna()
+                    total = len(series_clean)
+                    positives = int((series_clean > 0).sum()) if total > 0 else 0
+                    pos_pct = (positives / total) * 100 if total > 0 else np.nan
+                    mean_ret = series_clean.mean() if total > 0 else np.nan
+                    median_ret = series_clean.median() if total > 0 else np.nan
+                    std_ret = series_clean.std(ddof=0) if total > 1 else np.nan
+
+                    # Optional beta stats per month (mean/median) if benchmark data available
+                    beta_mean = np.nan
+                    beta_median = np.nan
+                    vol_month_mean = np.nan
+                    vol_month_median = np.nan
+                    vol_month_ann_mean = np.nan
+                    vol_month_ann_median = np.nan
+                    try:
+                        raw_data = st.session_state.get('multi_backtest_raw_data', {})
+                        benchmark_ticker = None
+                        if st.session_state.get('multi_backtest_portfolio_configs'):
+                            benchmark_ticker = st.session_state['multi_backtest_portfolio_configs'][0].get('benchmark_ticker', '^GSPC')
+                        df_bench = raw_data.get(benchmark_ticker)
+                        series_obj = st.session_state.multi_all_results.get(nm)
+                        if df_bench is not None and isinstance(series_obj, (dict, pd.Series)):
+                            if isinstance(series_obj, dict) and 'no_additions' in series_obj:
+                                port_series = series_obj['no_additions']
+                            else:
+                                port_series = series_obj
+                            port_daily = port_series.pct_change().dropna()
+                            # Monthly realized vol from daily returns: std per month of daily returns
+                            if not port_daily.empty:
+                                vol_by_month = port_daily.groupby([port_daily.index.to_period('M')]).std(ddof=0)
+                                if vol_by_month is not None and len(vol_by_month) > 0:
+                                    vol_month_mean = float(vol_by_month.mean())
+                                    vol_month_median = float(vol_by_month.median())
+                                    vol_by_month_ann = vol_by_month * np.sqrt(252.0)
+                                    vol_month_ann_mean = float(vol_by_month_ann.mean())
+                                    vol_month_ann_median = float(vol_by_month_ann.median())
+                            if isinstance(df_bench, pd.DataFrame) and 'Price_change' in df_bench.columns:
+                                bench_daily = df_bench['Price_change'].dropna()
+                            else:
+                                if isinstance(df_bench, pd.DataFrame) and 'Price' in df_bench.columns:
+                                    bench_daily = df_bench['Price'].pct_change().dropna()
+                                else:
+                                    bench_daily = None
+                            if bench_daily is not None and not port_daily.empty and not bench_daily.empty:
+                                df_join = pd.concat([port_daily.rename('p'), bench_daily.rename('b')], axis=1).dropna()
+                                if not df_join.empty:
+                                    df_join['ym'] = df_join.index.to_period('M')
+                                    betas = []
+                                    for ym, grp in df_join.groupby('ym'):
+                                        if len(grp) >= 2 and grp['b'].var() > 0:
+                                            betas.append(np.cov(grp['p'], grp['b'])[0, 1] / grp['b'].var())
+                                    if betas:
+                                        beta_mean = float(np.mean(betas))
+                                        beta_median = float(np.median(betas))
+                    except Exception:
+                        pass
+
+                    monthly_stats_rows.append([
+                        nm,
+                        positives,
+                        f"{pos_pct:.2f}%" if not np.isnan(pos_pct) else 'N/A',
+                        mean_ret,
+                        median_ret,
+                        std_ret,
+                        pos_mean,
+                        pos_median,
+                        neg_mean,
+                        neg_median,
+                        vol_month_mean,
+                        vol_month_median,
+                        vol_month_ann_mean,
+                        vol_month_ann_median,
+                        beta_mean,
+                        beta_median
+                    ])
+
+            if monthly_stats_rows:
+                stats_df_monthly = pd.DataFrame(
+                    monthly_stats_rows,
+                    columns=[
+                        'Portfolio',
+                        'Positive Months',
+                        '% Positive Months',
+                        'Mean % Change',
+                        'Median % Change',
+                        'Std % Change',
+                        'Mean % (Months > 0)',
+                        'Median % (Months > 0)',
+                        'Mean % (Months < 0)',
+                        'Median % (Months < 0)',
+                        'Vol Mean (per-month from daily %)',
+                        'Vol Median (per-month from daily %)',
+                        'Vol Mean (Annualized)',
+                        'Vol Median (Annualized)',
+                        'Beta Mean (Monthly)',
+                        'Beta Median (Monthly)'
+                    ]
+                )
+                fmt_cols_pct = ['Mean % Change', 'Median % Change', 'Std % Change', 'Mean % (Months > 0)', 'Median % (Months > 0)', 'Mean % (Months < 0)', 'Median % (Months < 0)']
+                for c in fmt_cols_pct:
+                    if c in stats_df_monthly.columns:
+                        stats_df_monthly[c] = stats_df_monthly[c].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else 'N/A')
+                for c in ['Vol Mean (per-month from daily %)', 'Vol Median (per-month from daily %)', 'Vol Mean (Annualized)', 'Vol Median (Annualized)']:
+                    if c in stats_df_monthly.columns:
+                        stats_df_monthly[c] = stats_df_monthly[c].apply(lambda x: f"{(x*100):.2f}%" if pd.notna(x) else 'N/A')
+                for c in ['Beta Mean (Monthly)', 'Beta Median (Monthly)']:
+                    if c in stats_df_monthly.columns:
+                        stats_df_monthly[c] = stats_df_monthly[c].apply(lambda x: f"{x:.3f}" if pd.notna(x) else 'N/A')
+                st.markdown("**Monthly Robust Statistics**")
+                st.dataframe(stats_df_monthly, use_container_width=True)
+        except Exception:
+            pass
 
         st.markdown("**Detailed Portfolio Information**")
         # Make the selector visually prominent
