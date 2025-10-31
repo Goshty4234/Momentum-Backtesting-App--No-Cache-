@@ -18001,6 +18001,32 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         "- **Vol Mean (Annualized)** / **Vol Median (Annualized)**: Same per-year monthly volatilities as above, but multiplied by √12 before aggregating (to annualize).\n"
                         "- **Beta Mean (Yearly)** / **Beta Median (Yearly)**: Using daily returns, compute beta for each calendar year as Cov(port, bench)/Var(bench) on that year's daily data; then report the mean/median across years."
                     )
+
+                # Yearly Returns Bar Chart (grouped by portfolio)
+                try:
+                    import plotly.express as px
+                    chart_rows = []
+                    for i, y in enumerate(years):
+                        for nm in names:
+                            col = f'{nm} % Change'
+                            if col in df_yearly_pct.columns:
+                                val = df_yearly_pct.iloc[i][col]
+                                if pd.notna(val):
+                                    chart_rows.append({'Year': int(y), 'Portfolio': nm, 'Return %': float(val)})
+                    if chart_rows:
+                        chart_df = pd.DataFrame(chart_rows)
+                        fig_yearly = px.bar(
+                            chart_df,
+                            x='Year', y='Return %', color='Portfolio', barmode='group',
+                            title='Yearly Returns (%)'
+                        )
+                        fig_yearly.update_layout(
+                            legend_title_text='Portfolio',
+                            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0)
+                        )
+                        st.plotly_chart(fig_yearly, use_container_width=True)
+                except Exception:
+                    pass
         except Exception:
             pass
 
