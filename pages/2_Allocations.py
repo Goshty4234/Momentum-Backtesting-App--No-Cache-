@@ -8449,6 +8449,9 @@ if active_portfolio['use_momentum']:
         )
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
+        # Keep session override keys in sync so the UI doesn't revert after JSON import
+        st.session_state['alloc_active_momentum_strategy'] = momentum_strategy
+        st.session_state['alloc_active_negative_momentum_strategy'] = negative_momentum_strategy
         
         st.markdown("---")
         
