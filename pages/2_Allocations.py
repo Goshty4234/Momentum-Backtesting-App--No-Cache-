@@ -4124,6 +4124,104 @@ def generate_allocations_pdf(custom_name=""):
             ]))
             story.append(risk_table)
         
+        # Insert Returns Summary table directly after Portfolio Risk Metrics Summary
+        try:
+            rs_df = st.session_state.get('returns_summary_df')
+            if rs_df is not None and not rs_df.empty:
+                story.append(Spacer(1, 12))
+                story.append(Paragraph("Returns Summary (Current Positions)", subheading_style))
+                story.append(Spacer(1, 6))
+                # Choose a compact set of columns if available
+                cols_pref = ['Ticker', 'Momentum', 'Beta', 'Volatility', '1W', '1M', '3M', '6M', '1Y']
+                cols_present = [c for c in cols_pref if c in rs_df.columns]
+                pdf_data = [cols_present]
+                for _, r in rs_df.iterrows():
+                    row_vals = []
+                    for c in cols_present:
+                        v = r.get(c, '')
+                        row_vals.append(str(v) if not pd.isna(v) else 'N/A')
+                    pdf_data.append(row_vals)
+                # Compute column widths to NEVER exceed page width
+                available_w = doc.width  # page width minus margins
+                ticker_ratio = 0.22  # 22% of width for Ticker
+                other_ratio = max(0.01, (1.0 - ticker_ratio) / max(1, len(cols_present) - 1))
+                col_widths = []
+                for c in cols_present:
+                    if c == 'Ticker':
+                        col_widths.append(available_w * ticker_ratio)
+                    else:
+                        col_widths.append(available_w * other_ratio)
+                table = Table(pdf_data, colWidths=col_widths)
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.2, 0.2, 0.2)),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                    ('FONTSIZE', (0, 1), (-1, -1), 7),
+                    ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),
+                    ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ]))
+                story.append(table)
+
+                # Benchmark Comparison table placed right below Returns Summary
+                bmk_df = st.session_state.get('benchmark_comparison_df')
+                # Fallback: recompute if not available in session
+                if bmk_df is None or (hasattr(bmk_df, 'empty') and bmk_df.empty):
+                    try:
+                        snapshot = st.session_state.get('alloc_snapshot_data', {})
+                        raw_data = snapshot.get('raw_data') if snapshot and snapshot.get('raw_data') is not None else st.session_state.get('alloc_raw_data', {})
+                        available_data = {}
+                        _bench = ['SPY', 'QQQ', 'SPMO', 'VTI', 'VT', 'SSO', 'QLD', 'BITCOIN']
+                        for _t in _bench:
+                            if raw_data and _t in raw_data and not raw_data[_t].empty:
+                                available_data[_t] = raw_data[_t].copy()
+                        preloaded = get_multiple_tickers_info_batch(_bench)
+                        _tmp = calculate_benchmark_returns(available_data, preloaded)
+                        if _tmp is not None and not _tmp.empty:
+                            bmk_df = _tmp
+                    except Exception:
+                        bmk_df = None
+                if bmk_df is not None and not bmk_df.empty:
+                    story.append(Spacer(1, 12))
+                    story.append(Paragraph("Benchmark Comparison", subheading_style))
+                    story.append(Spacer(1, 6))
+                    # Keep compact format similar to returns summary
+                    bcols_pref = ['Ticker', 'PE', '1W', '1M', '3M', '6M', '1Y', 'Volatility', 'Beta']
+                    bcols_present = [c for c in bcols_pref if c in bmk_df.columns]
+                    bpdf_data = [bcols_present]
+                    for _, r in bmk_df.iterrows():
+                        row_vals = []
+                        for c in bcols_present:
+                            v = r.get(c, '')
+                            row_vals.append(str(v) if not pd.isna(v) else 'N/A')
+                        bpdf_data.append(row_vals)
+                    # Widths bounded by page
+                    b_available_w = doc.width
+                    # Allocate 18% to Ticker, 10% to PE, 10% to Volatility, 8% to Beta, rest to period cols equally
+                    base_map = {'Ticker': 0.18, 'PE': 0.10, 'Volatility': 0.10, 'Beta': 0.08}
+                    remaining_ratio = 1.0 - sum(base_map.get(c, 0.0) for c in bcols_present)
+                    period_count = len([c for c in bcols_present if c not in base_map])
+                    per_period_ratio = remaining_ratio / max(1, period_count)
+                    b_col_widths = []
+                    for c in bcols_present:
+                        ratio = base_map.get(c, per_period_ratio)
+                        b_col_widths.append(b_available_w * ratio)
+                    btable = Table(bpdf_data, colWidths=b_col_widths)
+                    btable.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.2, 0.2, 0.2)),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 8),
+                        ('FONTSIZE', (0, 1), (-1, -1), 7),
+                        ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),
+                        ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+                        ('ALIGN', (0, 0), (1, -1), 'LEFT'),
+                    ]))
+                    story.append(btable)
+        except Exception as _e:
+            story.append(Paragraph(f"Returns Summary unavailable: {str(_e)}", styles['Normal']))
+        
         # Add page break before detailed financial indicators
         story.append(PageBreak())
         
@@ -11709,6 +11807,10 @@ if st.session_state.get('alloc_backtest_run', False):
         
         benchmark_df = calculate_benchmark_returns(available_data, preloaded_benchmark_info)
         if benchmark_df is not None and not benchmark_df.empty:
+            try:
+                st.session_state['benchmark_comparison_df'] = benchmark_df.copy()
+            except Exception:
+                pass
             # Style the dataframe
             styled_benchmark = benchmark_df.style
             
@@ -12899,6 +13001,85 @@ if st.session_state.get('alloc_backtest_run', False):
                     
                     if returns_data:
                         df_returns = pd.DataFrame(returns_data)
+                        # Add current Momentum from Rebalancing Metrics & Calculated Weights (last metrics date)
+                        try:
+                            momentum_map = {}
+                            beta_map = {}
+                            vol_map = {}
+                            # Access enclosing-scope metrics map directly; fallback to session if needed
+                            try:
+                                metrics_map_source = metrics_for_portfolio  # from enclosing scope
+                            except Exception:
+                                metrics_map_source = st.session_state.get('alloc_metrics_for_portfolio') or st.session_state.get('metrics_for_portfolio')
+                            if metrics_map_source:
+                                last_metrics_date = max(metrics_map_source.keys())
+                                last_metrics = metrics_map_source.get(last_metrics_date, {}) or {}
+                                for _t, _data in (last_metrics.items() if isinstance(last_metrics, dict) else []):
+                                    try:
+                                        if isinstance(_data, dict) and 'Momentum' in _data and _data['Momentum'] is not None:
+                                            m_val = float(_data['Momentum']) * 100.0
+                                            momentum_map[_t] = f"{m_val:+.2f}%"
+                                        if isinstance(_data, dict) and 'Beta' in _data and _data['Beta'] is not None:
+                                            b_val = float(_data['Beta'])
+                                            beta_map[_t] = f"{b_val:.2f}"
+                                        if isinstance(_data, dict) and 'Volatility' in _data and _data['Volatility'] is not None:
+                                            v_val = float(_data['Volatility'])
+                                            # If volatility seems like a fraction (<=3), render as percent
+                                            v_pct = v_val * 100.0 if v_val <= 3 else v_val
+                                            vol_map[_t] = f"{v_pct:.2f}%"
+                                    except Exception:
+                                        continue
+                            # Map metrics from last metrics snapshot
+                            if momentum_map:
+                                df_returns['Momentum'] = df_returns['Ticker'].map(lambda t: momentum_map.get(t, 'N/A'))
+                            if beta_map:
+                                df_returns['Beta'] = df_returns['Ticker'].map(lambda t: beta_map.get(t, 'N/A'))
+                            if vol_map:
+                                df_returns['Volatility'] = df_returns['Ticker'].map(lambda t: vol_map.get(t, 'N/A'))
+
+                            # Fallback: compute 1Y beta/volatility from raw_data if not available
+                            missing_beta = ('Beta' not in df_returns.columns) or df_returns['Beta'].isna().all() or (df_returns['Beta'] == 'N/A').all()
+                            missing_vol = ('Volatility' not in df_returns.columns) or df_returns['Volatility'].isna().all() or (df_returns['Volatility'] == 'N/A').all()
+                            if missing_beta or missing_vol:
+                                # Prepare benchmark daily returns over last ~365 calendar days
+                                bench_ticker = (active_portfolio.get('benchmark_ticker') if active_portfolio else None) or '^GSPC'
+                                bench_series = None
+                                if bench_ticker in raw_data:
+                                    bdf = raw_data[bench_ticker].copy()
+                                    if 'Close' in bdf.columns and not bdf.empty:
+                                        bser = bdf['Close']
+                                        bser.index = pd.to_datetime(bser.index)
+                                        date_range = pd.date_range(start=bser.index.max() - pd.Timedelta(days=365), end=bser.index.max(), freq='D')
+                                        bfilled = bser.reindex(date_range).fillna(method='ffill')
+                                        bench_series = bfilled.pct_change().dropna()
+                                for _ticker in df_returns['Ticker'].tolist():
+                                    if _ticker == 'PORTFOLIO HISTORICAL':
+                                        continue
+                                    tdf = raw_data.get(_ticker)
+                                    if tdf is None or tdf.empty or 'Close' not in tdf.columns:
+                                        continue
+                                    tser = tdf['Close'].copy()
+                                    tser.index = pd.to_datetime(tser.index)
+                                    date_range = pd.date_range(start=tser.index.max() - pd.Timedelta(days=365), end=tser.index.max(), freq='D')
+                                    tfilled = tser.reindex(date_range).fillna(method='ffill')
+                                    tret = tfilled.pct_change().dropna()
+                                    if not missing_vol and not missing_beta:
+                                        break
+                                    if missing_vol and not tret.empty:
+                                        vol_ann = tret.std() * (252 ** 0.5) * 100.0
+                                        df_returns.loc[df_returns['Ticker'] == _ticker, 'Volatility'] = f"{vol_ann:.2f}%"
+                                    if missing_beta and bench_series is not None and not tret.empty:
+                                        try:
+                                            # align indexes
+                                            aligned = pd.concat([tret, bench_series], axis=1, join='inner')
+                                            aligned.columns = ['t', 'b']
+                                            if aligned['b'].var() != 0 and len(aligned) > 2:
+                                                beta_val = aligned['t'].cov(aligned['b']) / aligned['b'].var()
+                                                df_returns.loc[df_returns['Ticker'] == _ticker, 'Beta'] = f"{beta_val:.2f}"
+                                        except Exception:
+                                            pass
+                        except Exception:
+                            pass
                         
                         # Separate stocks with allocation > 0% from those with 0% allocation
                         stocks_with_allocation = []
@@ -12922,6 +13103,10 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         # Add weighted portfolio return row - use same backtest data as Benchmark Comparison
                         weighted_row = {'Ticker': 'PORTFOLIO HISTORICAL'}
+                        # No single-ticker metrics for portfolio row
+                        for _c in ['Momentum','Beta','Volatility']:
+                            if _c in df_returns.columns:
+                                weighted_row[_c] = 'N/A'
                         
                         # Use backtest results directly for portfolio returns (same as Benchmark Comparison)
                         try:
@@ -13027,6 +13212,16 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         # Add weighted row at the end
                         df_returns = pd.concat([df_returns, pd.DataFrame([weighted_row])], ignore_index=True)
+                        # Reorder columns to surface Momentum next to Ticker when available
+                        desired_order = ['Ticker', 'Momentum', 'Beta', 'Volatility', '1W', '1M', '3M', '6M', '1Y']
+                        existing = [c for c in desired_order if c in df_returns.columns]
+                        remaining = [c for c in df_returns.columns if c not in existing]
+                        df_returns = df_returns[existing + remaining]
+                        # Persist for PDF generation
+                        try:
+                            st.session_state['returns_summary_df'] = df_returns.copy()
+                        except Exception:
+                            pass
                         
                         return df_returns
                     
@@ -13051,8 +13246,9 @@ if st.session_state.get('alloc_backtest_run', False):
                             pass
                     return ''
                 
-                # Apply styling
-                styled_returns = returns_df.style.applymap(style_returns)
+                # Apply styling only to returns/Momentum columns (exclude Volatility/Beta)
+                percent_cols = [c for c in ['Momentum', '1W', '1M', '3M', '6M', '1Y'] if c in returns_df.columns]
+                styled_returns = returns_df.style.applymap(style_returns, subset=percent_cols)
                 
                 # Highlight the PORTFOLIO row only
                 def highlight_portfolio_row(row):
