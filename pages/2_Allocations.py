@@ -4446,23 +4446,48 @@ def generate_allocations_pdf(custom_name=""):
                 except Exception:
                     parsed = None
                 if parsed:
+                    wrap_style = ParagraphStyle('AIWrap', parent=styles['Normal'], wordWrap='CJK')
                     if parsed.get('overall_score') is not None:
-                        story.append(Paragraph(f"Overall Score: {parsed.get('overall_score')}", styles['Normal']))
+                        story.append(Paragraph(f"Overall Score: {parsed.get('overall_score')}", wrap_style))
                         story.append(Spacer(1, 6))
                     if parsed.get('overall_comment'):
-                        story.append(Paragraph(parsed.get('overall_comment'), styles['Normal']))
+                        story.append(Paragraph(parsed.get('overall_comment'), wrap_style))
                         story.append(Spacer(1, 8))
                     _tickers = parsed.get('tickers') or []
                     if _tickers:
-                        tbl = [["Ticker","Score","Comment"]] + [[t.get('ticker',''), t.get('score',''), t.get('comment','')] for t in _tickers]
-                        t = Table(tbl, repeatRows=1, colWidths=[1.0*inch, 0.8*inch, 4.0*inch])
+                        # Match "Overview & Basic Information" table look-and-feel
+                        total_w = getattr(doc, 'width', 7.1*inch)
+                        left_w = 1.0*inch
+                        mid_w = 0.8*inch
+                        right_w = max(2.0*inch, total_w - (left_w + mid_w))
+                        header_style = ParagraphStyle('AIJsonHeader', parent=styles['Normal'], fontSize=7, leading=8, textColor=reportlab_colors.whitesmoke, fontName='Helvetica-Bold', wordWrap='CJK')
+                        cell_style = ParagraphStyle('AIJsonCell', parent=styles['Normal'], fontSize=7, leading=8, wordWrap='CJK')
+                        tbl = [[
+                            Paragraph("Ticker", header_style),
+                            Paragraph("Score", header_style),
+                            Paragraph("Comment", header_style)
+                        ]]
+                        for trow in _tickers:
+                            tbl.append([
+                                Paragraph(str(trow.get('ticker','')), cell_style),
+                                Paragraph(str(trow.get('score','')), cell_style),
+                                Paragraph(str(trow.get('comment','')), cell_style)
+                            ])
+                        t = Table(tbl, repeatRows=1, colWidths=[left_w, mid_w, right_w])
                         t.setStyle(TableStyle([
-                            ('BACKGROUND',(0,0),(-1,0), reportlab_colors.HexColor('#2b2b2b')),
-                            ('TEXTCOLOR',(0,0),(-1,0), reportlab_colors.whitesmoke),
-                            ('GRID',(0,0),(-1,-1), 0.25, reportlab_colors.grey),
-                            ('VALIGN',(0,0),(-1,-1),'TOP'),
-                            ('WORDWRAP',(0,0),(-1,-1), True),
-                            ('FONTSIZE',(0,0),(-1,-1), 8)
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 6),
+                            ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [reportlab_colors.Color(0.98, 0.98, 0.98), reportlab_colors.Color(0.95, 0.95, 0.95)]),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('WORDWRAP', (0, 0), (-1, -1), True),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                            ('MINIMUMHEIGHT', (0, 0), (-1, -1), 15)
                         ]))
                         story.append(t)
                         story.append(Spacer(1, 8))
@@ -4470,61 +4495,40 @@ def generate_allocations_pdf(custom_name=""):
                     if _sugg:
                         story.append(Paragraph("Suggestions:", styles['Heading3']))
                         for s in _sugg:
-                            story.append(Paragraph(f"• {s}", styles['Normal']))
+                            story.append(Paragraph(f"• {s}", wrap_style))
                         story.append(Spacer(1, 6))
                     _extra = parsed.get('extra_insight') or parsed.get('additional_insight') or parsed.get('extra')
                     if _extra:
                         story.append(Paragraph("Additional insight:", styles['Heading3']))
-                        story.append(Paragraph(str(_extra), styles['Normal']))
+                        story.append(Paragraph(str(_extra), wrap_style))
                 else:
-                    # Try to parse Markdown pipe table into a PDF table
-                    _all_lines = ai_text_last.split('\n')
-                    lines = [ln.strip() for ln in _all_lines if ln.strip().startswith('|') and '|' in ln]
-                    # Remove separator rows (e.g., |---|---| )
-                    md_rows = []
-                    for ln in lines:
-                        if set(ln.replace('|','').replace('-','').replace(':','').strip()) == set():
-                            continue
-                        cells = [c.strip() for c in ln.strip('|').split('|')]
-                        md_rows.append(cells)
-                    if len(md_rows) >= 2:
-                        # Include narrative text before the table
-                        try:
-                            _first = next(i for i, ln in enumerate(_all_lines) if ln.strip().startswith('|') and '|' in ln)
-                        except StopIteration:
-                            _first = None
-                        if _first is not None and _first > 0:
-                            _pre = '\n'.join(_all_lines[:_first]).strip()
-                            if _pre:
-                                story.append(Paragraph(_pre.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>'), styles['Normal']))
-                                story.append(Spacer(1,6))
-                        # Build a wrapping table across the full content width (respect current document margins)
-                        total_w = getattr(doc, 'width', 7.1*inch)
+                    # Multi-table parsing: render each Markdown pipe table; keep narrative text blocks
+                    _lines = ai_text_last.split('\n')
+                    idx = 0
+                    total_w = getattr(doc, 'width', 7.1*inch)
+                    cell_style = ParagraphStyle('AICell', parent=styles['Normal'], fontSize=7, leading=8, wordWrap='CJK')
+                    header_style = ParagraphStyle('AIHeader', parent=styles['Normal'], fontSize=7, leading=8, textColor=reportlab_colors.whitesmoke, fontName='Helvetica-Bold', wordWrap='CJK')
+                    wrap_style = ParagraphStyle('AIWrap', parent=styles['Normal'], wordWrap='CJK')
+                    import re, unicodedata
+                    def disp_width(s: str) -> int:
+                        w = 0
+                        for ch in s:
+                            ea = unicodedata.east_asian_width(ch)
+                            w += 2 if ea in ('W','F') else 1
+                        return w
+                    def render_table(md_rows):
                         ncols = max(len(r) for r in md_rows)
-                        cell_style = ParagraphStyle('AICell', parent=styles['Normal'], fontSize=7, leading=8)
-                        header_style = ParagraphStyle('AIHeader', parent=styles['Normal'], fontSize=7, leading=8, textColor=reportlab_colors.whitesmoke, fontName='Helvetica-Bold')
                         tbl_data = []
                         for ri, r in enumerate(md_rows):
                             row_cells = []
                             for c in r:
                                 txt = c.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
                                 row_cells.append(Paragraph(txt, header_style if ri == 0 else cell_style))
-                            # Pad shorter rows to ncols
                             while len(row_cells) < ncols:
                                 row_cells.append(Paragraph('', cell_style))
                             tbl_data.append(row_cells)
-
-                        # Compute smart column widths: multilingual & content-aware
-                        import re, unicodedata
-                        def disp_width(s: str) -> int:
-                            w = 0
-                            for ch in s:
-                                ea = unicodedata.east_asian_width(ch)
-                                w += 2 if ea in ('W','F') else 1
-                            return w
                         headers = [str(h) for h in md_rows[0]]
                         headers_l = [h.lower() for h in headers]
-                        # Heuristic base weights from header hints
                         base = []
                         for h in headers_l:
                             if 'description' in h:
@@ -4540,39 +4544,30 @@ def generate_allocations_pdf(custom_name=""):
                             elif 'score' in h or '10x' in h or 'quality' in h:
                                 base.append(1.4)
                             elif 'ticker' in h:
-                                base.append(1.4)
+                                base.append(2.0)
                             else:
                                 base.append(1.8)
-                        # Content-based widths
                         content_w = [0]*ncols
                         is_numeric = [True]*ncols
-                        sample_rows = md_rows[1:]
                         num_re = re.compile(r"^[-+]?\d+[\d,\.]*%?$")
-                        for r in sample_rows:
+                        for r in md_rows[1:]:
                             for j in range(ncols):
-                                val = r[j] if j < len(r) else ''
-                                s = str(val).strip()
+                                s = str(r[j] if j < len(r) else '').strip()
                                 content_w[j] = max(content_w[j], disp_width(s))
                                 if s and not num_re.match(s):
                                     is_numeric[j] = False
                         weights = []
                         for j in range(ncols):
-                            # Very short/numeric columns get small widths
                             if is_numeric[j]:
-                                weights.append(max(1.2, base[j]))
+                                weights.append(max(1.4, base[j] if j < len(base) else 1.4))
                                 continue
-                            # Ticker-like short codes
-                            if headers_l[j].find('ticker') != -1:
-                                weights.append(max(1.4, base[j]))
+                            if j < len(headers_l) and 'ticker' in headers_l[j]:
+                                weights.append(max(2.2, base[j]))
                                 continue
-                            # Scale by content width with soft cap
                             scaled = 1.0 + min(content_w[j]/20.0, 6.0)
                             weights.append(max(base[j], scaled))
                         ws = sum(weights) or (ncols*1.0)
                         col_widths = [total_w * (w/ws) for w in weights]
-
-                        # Center horizontally to mirror Overview table placement
-                        # Match Overview table parameters (width, styles, paddings)
                         t = Table(tbl_data, colWidths=col_widths, repeatRows=1)
                         t.setStyle(TableStyle([
                             ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
@@ -4590,19 +4585,33 @@ def generate_allocations_pdf(custom_name=""):
                             ('MINIMUMHEIGHT', (0, 0), (-1, -1), 15),
                         ]))
                         story.append(t)
-                        # Include narrative text after the table
-                        try:
-                            _last = len(_all_lines) - 1 - next(i for i, ln in enumerate(reversed(_all_lines)) if ln.strip().startswith('|') and '|' in ln)
-                        except StopIteration:
-                            _last = None
-                        if _last is not None and _last < len(_all_lines) - 1:
-                            _post = '\n'.join(_all_lines[_last+1:]).strip()
-                            if _post:
+                    def _is_table_row(s: str) -> bool:
+                        t = s.strip()
+                        # treat as table row if it contains at least two pipes and is not a bullet/heading
+                        return (t.count('|') >= 2)
+
+                    while idx < len(_lines):
+                        if _is_table_row(_lines[idx]):
+                            block = []
+                            while idx < len(_lines) and _is_table_row(_lines[idx]):
+                                block.append(_lines[idx].strip())
+                                idx += 1
+                            rows = []
+                            for ln in block:
+                                if set(ln.replace('|','').replace('-','').replace(':','').strip()) == set():
+                                    continue
+                                rows.append([c.strip() for c in ln.strip('|').split('|')])
+                            if len(rows) >= 2:
+                                render_table(rows)
                                 story.append(Spacer(1,6))
-                                story.append(Paragraph(_post.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>'), styles['Normal']))
-                    else:
-                        # Fallback to raw text
-                        story.append(Paragraph(ai_text_last.replace('\n','<br/>'), styles['Normal']))
+                        else:
+                            start = idx
+                            while idx < len(_lines) and not (_lines[idx].strip().startswith('|') and '|' in _lines[idx]):
+                                idx += 1
+                            text = '\n'.join(_lines[start:idx]).strip()
+                            if text:
+                                story.append(Paragraph(text.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>'), wrap_style))
+                                story.append(Spacer(1,6))
         except Exception:
             pass
 
@@ -12290,35 +12299,36 @@ if st.session_state.get('alloc_backtest_run', False):
                             if extra_notes.strip():
                                 prompt += f"\n\nAdditional user instructions to respect:\n{extra_notes.strip()}\n"
                             ai_text = None
-                            if provider == "Google Gemini":
-                                import google.generativeai as genai
-                                genai.configure(api_key=api_key)
-                                model = genai.GenerativeModel(model_name)
-                                if ultra_secure:
-                                    resp = model.generate_content([
-                                        {"role":"user","parts":[{"text":prompt}]},
-                                        {"role":"user","parts":[{"text":str(payload)}]}
-                                    ])
-                                    ai_text = resp.text if hasattr(resp, 'text') else str(resp)
-                                else:
-                                    import diskcache as _dc
-                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
-                                    key_str = f"gemini:{model_name}:{payload}"
-                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
-                                    cached = ai_cache.get(cache_key)
-                                    if cached:
-                                        ai_text = cached
-                                    else:
+                            with st.status("Analyzing with AI…", expanded=False) as __ai_status:
+                                if provider == "Google Gemini":
+                                    import google.generativeai as genai
+                                    genai.configure(api_key=api_key)
+                                    model = genai.GenerativeModel(model_name)
+                                    if ultra_secure:
                                         resp = model.generate_content([
                                             {"role":"user","parts":[{"text":prompt}]},
                                             {"role":"user","parts":[{"text":str(payload)}]}
                                         ])
                                         ai_text = resp.text if hasattr(resp, 'text') else str(resp)
-                                        ai_cache.set(cache_key, ai_text, expire=14400)
-                            elif provider == "OpenAI":
-                                import requests
-                                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                                data = {
+                                    else:
+                                        import diskcache as _dc
+                                        ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                        key_str = f"gemini:{model_name}:{payload}"
+                                        cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                        cached = ai_cache.get(cache_key)
+                                        if cached:
+                                            ai_text = cached
+                                        else:
+                                            resp = model.generate_content([
+                                                {"role":"user","parts":[{"text":prompt}]},
+                                                {"role":"user","parts":[{"text":str(payload)}]}
+                                            ])
+                                            ai_text = resp.text if hasattr(resp, 'text') else str(resp)
+                                            ai_cache.set(cache_key, ai_text, expire=14400)
+                                elif provider == "OpenAI":
+                                    import requests
+                                    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                                    data = {
                                     "model": model_name,
                                     "response_format": {"type": "json_object"},
                                     "messages": [
@@ -12327,29 +12337,29 @@ if st.session_state.get('alloc_backtest_run', False):
                                         {"role": "user", "content": str(payload)}
                                     ]
                                 }
-                                if ultra_secure:
-                                    r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
-                                    r.raise_for_status()
-                                    j = r.json()
-                                    ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
-                                else:
-                                    import diskcache as _dc
-                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
-                                    key_str = f"openai:{model_name}:{payload}"
-                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
-                                    cached = ai_cache.get(cache_key)
-                                    if cached:
-                                        ai_text = cached
-                                    else:
+                                    if ultra_secure:
                                         r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
                                         r.raise_for_status()
                                         j = r.json()
                                         ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
-                                        ai_cache.set(cache_key, ai_text, expire=14400)
-                            else:  # DeepSeek
-                                import requests
-                                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                                data = {
+                                    else:
+                                        import diskcache as _dc
+                                        ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                        key_str = f"openai:{model_name}:{payload}"
+                                        cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                        cached = ai_cache.get(cache_key)
+                                        if cached:
+                                            ai_text = cached
+                                        else:
+                                            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data, timeout=60)
+                                            r.raise_for_status()
+                                            j = r.json()
+                                            ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                            ai_cache.set(cache_key, ai_text, expire=14400)
+                                else:  # DeepSeek
+                                    import requests
+                                    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                                    data = {
                                     "model": model_name,
                                     "messages": [
                                         {"role": "system", "content": "You are a portfolio analyst. Return concise JSON only."},
@@ -12357,25 +12367,26 @@ if st.session_state.get('alloc_backtest_run', False):
                                         {"role": "user", "content": str(payload)}
                                     ]
                                 }
-                                if ultra_secure:
-                                    r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=60)
-                                    r.raise_for_status()
-                                    j = r.json()
-                                    ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
-                                else:
-                                    import diskcache as _dc
-                                    ai_cache = _dc.Cache('.streamlit/ai_cache')
-                                    key_str = f"deepseek:{model_name}:{payload}"
-                                    cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
-                                    cached = ai_cache.get(cache_key)
-                                    if cached:
-                                        ai_text = cached
-                                    else:
+                                    if ultra_secure:
                                         r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=60)
                                         r.raise_for_status()
                                         j = r.json()
                                         ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
-                                        ai_cache.set(cache_key, ai_text, expire=14400)
+                                    else:
+                                        import diskcache as _dc
+                                        ai_cache = _dc.Cache('.streamlit/ai_cache')
+                                        key_str = f"deepseek:{model_name}:{payload}"
+                                        cache_key = hashlib.sha256(key_str.encode('utf-8')).hexdigest()
+                                        cached = ai_cache.get(cache_key)
+                                        if cached:
+                                            ai_text = cached
+                                        else:
+                                            r = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data, timeout=60)
+                                            r.raise_for_status()
+                                            j = r.json()
+                                            ai_text = (j.get("choices", [{}])[0].get("message", {}).get("content") or "")
+                                            ai_cache.set(cache_key, ai_text, expire=14400)
+                                __ai_status.update(label="AI analysis complete", state="complete")
 
                             import json as _json
                             parsed = None
