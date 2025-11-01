@@ -3259,6 +3259,26 @@ def generate_simple_pdf_report(custom_name=""):
                                 if portfolio_cfg:
                                     rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                                     initial_value = portfolio_cfg.get('initial_value', 10000)
+                                    # Compute a display value from final backtest results (fallback to initial)
+                                    display_portfolio_value = initial_value
+                                    try:
+                                        if 'multi_all_results' in st.session_state and portfolio_name in st.session_state.multi_all_results:
+                                            portfolio_results = st.session_state.multi_all_results[portfolio_name]
+                                            if isinstance(portfolio_results, dict):
+                                                if 'with_additions' in portfolio_results and len(portfolio_results['with_additions']):
+                                                    val = portfolio_results['with_additions'].iloc[-1]
+                                                    if not pd.isna(val) and float(val) > 0:
+                                                        display_portfolio_value = float(val)
+                                                elif 'no_additions' in portfolio_results and len(portfolio_results['no_additions']):
+                                                    val = portfolio_results['no_additions'].iloc[-1]
+                                                    if not pd.isna(val) and float(val) > 0:
+                                                        display_portfolio_value = float(val)
+                                            elif isinstance(portfolio_results, pd.Series) and len(portfolio_results):
+                                                val = portfolio_results.iloc[-1]
+                                                if not pd.isna(val) and float(val) > 0:
+                                                    display_portfolio_value = float(val)
+                                    except Exception:
+                                        pass
                                     
                                     # Get last rebalance date from allocation data
                                     all_allocations = st.session_state.get('multi_all_allocations', {})
@@ -3317,7 +3337,7 @@ def generate_simple_pdf_report(custom_name=""):
                                                 story.append(Paragraph(f"Time Until Next Rebalance: {format_time_until(time_until)}", styles['Normal']))
                                                 story.append(Paragraph(f"Target Rebalance Date: {next_date.strftime('%B %d, %Y')}", styles['Normal']))
                                                 story.append(Paragraph(f"Rebalancing Frequency: {rebalancing_frequency}", styles['Normal']))
-                                                story.append(Paragraph(f"Portfolio Value: ${initial_value:,.2f}", styles['Normal']))
+                                                story.append(Paragraph(f"Portfolio Value: ${display_portfolio_value:,.2f}", styles['Normal']))
                                             else:
                                                 story.append(Paragraph("Next rebalance date calculation not available", styles['Normal']))
                                         else:
