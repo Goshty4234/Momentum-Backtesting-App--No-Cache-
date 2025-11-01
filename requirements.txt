@@ -37,3 +37,8 @@ xlrd>=2.0.2
 
 # Arrow compatibility for Streamlit Cloud
 pyarrow>=10.0.0
+
+# AI Providers & Clients
+google-generativeai>=0.7.2
+openai>=1.51.2
+requests>=2.32.4
