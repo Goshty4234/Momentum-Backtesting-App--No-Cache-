@@ -8425,14 +8425,16 @@ if active_portfolio['use_momentum']:
         momentum_key = f"momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
         negative_momentum_key = f"negative_momentum_strategy_{st.session_state.alloc_active_portfolio_index}"
         
-        # FORCE sync with session state if it was updated by JSON import
+        # FORCE sync with session state if it was updated by JSON import (one-time), then clear
         if 'alloc_active_momentum_strategy' in st.session_state:
             st.session_state[momentum_key] = st.session_state['alloc_active_momentum_strategy']
             active_portfolio['momentum_strategy'] = st.session_state['alloc_active_momentum_strategy']
+            del st.session_state['alloc_active_momentum_strategy']
         
         if 'alloc_active_negative_momentum_strategy' in st.session_state:
             st.session_state[negative_momentum_key] = st.session_state['alloc_active_negative_momentum_strategy']
             active_portfolio['negative_momentum_strategy'] = st.session_state['alloc_active_negative_momentum_strategy']
+            del st.session_state['alloc_active_negative_momentum_strategy']
         
         momentum_strategy = st.selectbox(
             "Momentum strategy when NOT all negative:",
@@ -8449,9 +8451,6 @@ if active_portfolio['use_momentum']:
         )
         active_portfolio['momentum_strategy'] = momentum_strategy
         active_portfolio['negative_momentum_strategy'] = negative_momentum_strategy
-        # Keep session override keys in sync so the UI doesn't revert after JSON import
-        st.session_state['alloc_active_momentum_strategy'] = momentum_strategy
-        st.session_state['alloc_active_negative_momentum_strategy'] = negative_momentum_strategy
         
         st.markdown("---")
         
