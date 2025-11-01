@@ -3115,10 +3115,10 @@ def generate_allocations_pdf(custom_name=""):
         doc = SimpleDocTemplate(
             buffer, 
             pagesize=A4, 
-            rightMargin=72, 
-            leftMargin=72, 
-            topMargin=72, 
-            bottomMargin=72,
+            rightMargin=18, 
+            leftMargin=18, 
+            topMargin=18, 
+            bottomMargin=18,
             title=title,
             author="Portfolio Backtest System",
             subject=subject,
@@ -3199,6 +3199,11 @@ def generate_allocations_pdf(custom_name=""):
             "Portfolio-Weighted Summary Statistics",
             "Portfolio Composition Analysis"
         ]
+
+        # Conditionally include AI Analysis in TOC (from last AI run)
+        ai_last_text = st.session_state.get('alloc_ai_last_text')
+        if ai_last_text:
+            toc_points.append("AI Analysis")
         
         for i, point in enumerate(toc_points, 1):
             story.append(Paragraph(f"{i}. {point}", styles['Normal']))
@@ -4218,6 +4223,10 @@ def generate_allocations_pdf(custom_name=""):
                             return
                         
                         df_subset = data_subset[available_columns].copy()
+                        # Small paragraph style for table cells to enable line wrapping
+                        cell_style = ParagraphStyle(
+                            'CellSmall', parent=styles['Normal'], fontSize=6, leading=7
+                        )
                         
                         # Convert to list format for PDF table with text wrapping
                         pdf_data = [available_columns]  # Headers
@@ -4228,15 +4237,15 @@ def generate_allocations_pdf(custom_name=""):
                                 if pd.isna(value) or value is None:
                                     pdf_row.append('N/A')
                                 else:
-                                    # Apply text wrapping based on column type
-                                    if 'Name' in col:
-                                        pdf_row.append(wrap_text_for_pdf(value, 22))  # Increased for better company name display
-                                    elif 'Sector' in col or 'Industry' in col:
-                                        pdf_row.append(wrap_text_for_pdf(value, 25))  # Increased for better sector/industry display
-                                    elif 'Ticker' in col:
-                                        pdf_row.append(wrap_text_for_pdf(value, 8))
+                                    # Apply wrapping via Paragraphs for long text
+                                    txt = str(value)
+                                    # Basic HTML escaping for Paragraph
+                                    txt = txt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                                    if ('Sector' in col) or ('Industry' in col) or ('Name' in col):
+                                        pdf_row.append(Paragraph(txt, cell_style))
                                     else:
-                                        pdf_row.append(wrap_text_for_pdf(value, 15))
+                                        # Keep short fields as Paragraph too for consistency
+                                        pdf_row.append(Paragraph(txt, cell_style))
                             pdf_data.append(pdf_row)
                         
                         # Create table with specified column widths and enhanced styling for text wrapping
@@ -4323,6 +4332,182 @@ def generate_allocations_pdf(custom_name=""):
             except Exception as e:
                 story.append(Paragraph(f"Note: Detailed financial indicators table could not be generated: {str(e)}", styles['Normal']))
         
+        # Append AI Analysis at the end if available
+        try:
+            ai_text_last = st.session_state.get('alloc_ai_last_text')
+            if ai_text_last:
+                story.append(PageBreak())
+                ai_title_style = ParagraphStyle('AIAnalysis', parent=styles['Heading2'], fontSize=14, spaceAfter=12, textColor=reportlab_colors.Color(0.35, 0.6, 0.85))
+                story.append(Paragraph("AI Analysis", ai_title_style))
+                import json as _json
+                parsed = None
+                try:
+                    _s = ai_text_last.find('{'); _e = ai_text_last.rfind('}')
+                    if _s != -1 and _e != -1 and _e > _s:
+                        parsed = _json.loads(ai_text_last[_s:_e+1])
+                except Exception:
+                    parsed = None
+                if parsed:
+                    if parsed.get('overall_score') is not None:
+                        story.append(Paragraph(f"Overall Score: {parsed.get('overall_score')}", styles['Normal']))
+                        story.append(Spacer(1, 6))
+                    if parsed.get('overall_comment'):
+                        story.append(Paragraph(parsed.get('overall_comment'), styles['Normal']))
+                        story.append(Spacer(1, 8))
+                    _tickers = parsed.get('tickers') or []
+                    if _tickers:
+                        tbl = [["Ticker","Score","Comment"]] + [[t.get('ticker',''), t.get('score',''), t.get('comment','')] for t in _tickers]
+                        t = Table(tbl, repeatRows=1, colWidths=[1.0*inch, 0.8*inch, 4.0*inch])
+                        t.setStyle(TableStyle([
+                            ('BACKGROUND',(0,0),(-1,0), reportlab_colors.HexColor('#2b2b2b')),
+                            ('TEXTCOLOR',(0,0),(-1,0), reportlab_colors.whitesmoke),
+                            ('GRID',(0,0),(-1,-1), 0.25, reportlab_colors.grey),
+                            ('VALIGN',(0,0),(-1,-1),'TOP'),
+                            ('WORDWRAP',(0,0),(-1,-1), True),
+                            ('FONTSIZE',(0,0),(-1,-1), 8)
+                        ]))
+                        story.append(t)
+                        story.append(Spacer(1, 8))
+                    _sugg = parsed.get('suggestions') or []
+                    if _sugg:
+                        story.append(Paragraph("Suggestions:", styles['Heading3']))
+                        for s in _sugg:
+                            story.append(Paragraph(f"• {s}", styles['Normal']))
+                        story.append(Spacer(1, 6))
+                    _extra = parsed.get('extra_insight') or parsed.get('additional_insight') or parsed.get('extra')
+                    if _extra:
+                        story.append(Paragraph("Additional insight:", styles['Heading3']))
+                        story.append(Paragraph(str(_extra), styles['Normal']))
+                else:
+                    # Try to parse Markdown pipe table into a PDF table
+                    _all_lines = ai_text_last.split('\n')
+                    lines = [ln.strip() for ln in _all_lines if ln.strip().startswith('|') and '|' in ln]
+                    # Remove separator rows (e.g., |---|---| )
+                    md_rows = []
+                    for ln in lines:
+                        if set(ln.replace('|','').replace('-','').replace(':','').strip()) == set():
+                            continue
+                        cells = [c.strip() for c in ln.strip('|').split('|')]
+                        md_rows.append(cells)
+                    if len(md_rows) >= 2:
+                        # Include narrative text before the table
+                        try:
+                            _first = next(i for i, ln in enumerate(_all_lines) if ln.strip().startswith('|') and '|' in ln)
+                        except StopIteration:
+                            _first = None
+                        if _first is not None and _first > 0:
+                            _pre = '\n'.join(_all_lines[:_first]).strip()
+                            if _pre:
+                                story.append(Paragraph(_pre.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>'), styles['Normal']))
+                                story.append(Spacer(1,6))
+                        # Build a wrapping table across the full content width (respect current document margins)
+                        total_w = getattr(doc, 'width', 7.1*inch)
+                        ncols = max(len(r) for r in md_rows)
+                        cell_style = ParagraphStyle('AICell', parent=styles['Normal'], fontSize=7, leading=8)
+                        header_style = ParagraphStyle('AIHeader', parent=styles['Normal'], fontSize=7, leading=8, textColor=reportlab_colors.whitesmoke, fontName='Helvetica-Bold')
+                        tbl_data = []
+                        for ri, r in enumerate(md_rows):
+                            row_cells = []
+                            for c in r:
+                                txt = c.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+                                row_cells.append(Paragraph(txt, header_style if ri == 0 else cell_style))
+                            # Pad shorter rows to ncols
+                            while len(row_cells) < ncols:
+                                row_cells.append(Paragraph('', cell_style))
+                            tbl_data.append(row_cells)
+
+                        # Compute smart column widths: multilingual & content-aware
+                        import re, unicodedata
+                        def disp_width(s: str) -> int:
+                            w = 0
+                            for ch in s:
+                                ea = unicodedata.east_asian_width(ch)
+                                w += 2 if ea in ('W','F') else 1
+                            return w
+                        headers = [str(h) for h in md_rows[0]]
+                        headers_l = [h.lower() for h in headers]
+                        # Heuristic base weights from header hints
+                        base = []
+                        for h in headers_l:
+                            if 'description' in h:
+                                base.append(7.0)
+                            elif 'company' in h:
+                                base.append(3.0)
+                            elif 'scenario' in h:
+                                base.append(2.5)
+                            elif 'sector' in h:
+                                base.append(2.0)
+                            elif 'probab' in h or 'expected' in h:
+                                base.append(1.6)
+                            elif 'score' in h or '10x' in h or 'quality' in h:
+                                base.append(1.4)
+                            elif 'ticker' in h:
+                                base.append(1.4)
+                            else:
+                                base.append(1.8)
+                        # Content-based widths
+                        content_w = [0]*ncols
+                        is_numeric = [True]*ncols
+                        sample_rows = md_rows[1:]
+                        num_re = re.compile(r"^[-+]?\d+[\d,\.]*%?$")
+                        for r in sample_rows:
+                            for j in range(ncols):
+                                val = r[j] if j < len(r) else ''
+                                s = str(val).strip()
+                                content_w[j] = max(content_w[j], disp_width(s))
+                                if s and not num_re.match(s):
+                                    is_numeric[j] = False
+                        weights = []
+                        for j in range(ncols):
+                            # Very short/numeric columns get small widths
+                            if is_numeric[j]:
+                                weights.append(max(1.2, base[j]))
+                                continue
+                            # Ticker-like short codes
+                            if headers_l[j].find('ticker') != -1:
+                                weights.append(max(1.4, base[j]))
+                                continue
+                            # Scale by content width with soft cap
+                            scaled = 1.0 + min(content_w[j]/20.0, 6.0)
+                            weights.append(max(base[j], scaled))
+                        ws = sum(weights) or (ncols*1.0)
+                        col_widths = [total_w * (w/ws) for w in weights]
+
+                        # Center horizontally to mirror Overview table placement
+                        # Match Overview table parameters (width, styles, paddings)
+                        t = Table(tbl_data, colWidths=col_widths, repeatRows=1)
+                        t.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), reportlab_colors.Color(0.3, 0.5, 0.7)),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), reportlab_colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 6),
+                            ('GRID', (0, 0), (-1, -1), 0.5, reportlab_colors.grey),
+                            ('BACKGROUND', (0, 1), (-1, -1), reportlab_colors.Color(0.98, 0.98, 0.98)),
+                            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [reportlab_colors.Color(0.98, 0.98, 0.98), reportlab_colors.Color(0.95, 0.95, 0.95)]),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('WORDWRAP', (0, 0), (-1, -1), True),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                            ('MINIMUMHEIGHT', (0, 0), (-1, -1), 15),
+                        ]))
+                        story.append(t)
+                        # Include narrative text after the table
+                        try:
+                            _last = len(_all_lines) - 1 - next(i for i, ln in enumerate(reversed(_all_lines)) if ln.strip().startswith('|') and '|' in ln)
+                        except StopIteration:
+                            _last = None
+                        if _last is not None and _last < len(_all_lines) - 1:
+                            _post = '\n'.join(_all_lines[_last+1:]).strip()
+                            if _post:
+                                story.append(Spacer(1,6))
+                                story.append(Paragraph(_post.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>'), styles['Normal']))
+                    else:
+                        # Fallback to raw text
+                        story.append(Paragraph(ai_text_last.replace('\n','<br/>'), styles['Normal']))
+        except Exception:
+            pass
+
         # Update progress
         progress_bar.progress(90)
         status_text.text("💾 Finalizing PDF...")
@@ -10755,6 +10940,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                        'Allocation %', 'Shares', 'Total Value ($)', '% of Portfolio', 
                                        'Market Cap ($B)', 'P/E Ratio', 'PEG Ratio', 'PEG Source', 'Beta', 'Analyst Rating']
                         df_overview = df_comprehensive[overview_cols].copy()
+                        st.session_state.df_overview = df_overview
                         st.dataframe(df_overview, )
                     
                     with tab2:
@@ -10764,6 +10950,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                         'Price/Cash Flow', 'EV/EBITDA', 'Book Value ($)', 'Cash per Share ($)',
                                         'Revenue per Share ($)', 'Target Price ($)', 'Target High ($)', 'Target Low ($)']
                         df_valuation = df_comprehensive[valuation_cols].copy()
+                        st.session_state.df_valuation = df_valuation
                         st.dataframe(df_valuation, )
                     
                     with tab3:
@@ -10772,6 +10959,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                      'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)', 
                                      'Gross Margin (%)']
                         df_health = df_comprehensive[health_cols].copy()
+                        st.session_state.df_health = df_health
                         st.dataframe(df_health, )
                     
                     with tab4:
@@ -10780,6 +10968,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                      'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', 
                                      '5Y Dividend Growth (%)']
                         df_growth = df_comprehensive[growth_cols].copy()
+                        st.session_state.df_growth = df_growth
                         st.dataframe(df_growth, )
                     
                     with tab5:
@@ -10787,6 +10976,7 @@ if st.session_state.get('alloc_backtest_run', False):
                         technical_cols = ['Ticker', 'Current Price ($)', '52W High ($)', '52W Low ($)', 
                                         '50D MA ($)', '200D MA ($)', 'Beta', 'Volume', 'Avg Volume']
                         df_technical = df_comprehensive[technical_cols].copy()
+                        st.session_state.df_technical = df_technical
                         st.dataframe(df_technical, )
                     
                     # Add portfolio-weighted summary statistics in collapsible section
@@ -10851,6 +11041,8 @@ if st.session_state.get('alloc_backtest_run', False):
                         
                         if summary_data:
                             summary_df = pd.DataFrame(summary_data)
+                            # Save for AI export if requested later
+                            st.session_state.ai_summary_df = summary_df.copy()
                             st.dataframe(summary_df, hide_index=True)
                             
                             # Add interpretation
@@ -11674,6 +11866,60 @@ if st.session_state.get('alloc_backtest_run', False):
                 if extra_notes.strip():
                     payload['user_notes'] = extra_notes.strip()
 
+                # Attach optional AI data payloads
+                st.markdown("**Attach data for AI (optional):**")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    include_ai_tables = st.checkbox(
+                        "Comprehensive Data (5 tables)",
+                        value=st.session_state.get('alloc_include_ai_tables', False),
+                        key="alloc_include_ai_tables_ai"
+                    )
+                with c2:
+                    include_ai_summary = st.checkbox(
+                        "Weighted Summary Stats",
+                        value=st.session_state.get('alloc_include_ai_summary', False),
+                        key="alloc_include_ai_summary_ai"
+                    )
+                with c3:
+                    include_ai_compo = st.checkbox(
+                        "Composition (sectors/industries)",
+                        value=st.session_state.get('alloc_include_ai_composition', False),
+                        key="alloc_include_ai_composition_ai"
+                    )
+
+                # Build payloads from session data on demand
+                if include_ai_tables:
+                    try:
+                        tables_payload = {
+                            'overview': st.session_state.get('df_overview', pd.DataFrame()).to_dict(orient='records') if 'df_overview' in st.session_state else [],
+                            'valuation': st.session_state.get('df_valuation', pd.DataFrame()).to_dict(orient='records') if 'df_valuation' in st.session_state else [],
+                            'financial_health': st.session_state.get('df_health', pd.DataFrame()).to_dict(orient='records') if 'df_health' in st.session_state else [],
+                            'growth_dividends': st.session_state.get('df_growth', pd.DataFrame()).to_dict(orient='records') if 'df_growth' in st.session_state else [],
+                            'technical': st.session_state.get('df_technical', pd.DataFrame()).to_dict(orient='records') if 'df_technical' in st.session_state else [],
+                        }
+                        payload['comprehensive_data'] = tables_payload
+                    except Exception as _e:
+                        st.warning(f"AI tables unavailable: {_e}")
+
+                if include_ai_summary:
+                    try:
+                        df = st.session_state.get('ai_summary_df', pd.DataFrame())
+                        payload['portfolio_weighted_summary'] = df.to_dict(orient='records') if not df.empty else []
+                    except Exception as _e:
+                        st.warning(f"AI summary unavailable: {_e}")
+
+                if include_ai_compo:
+                    try:
+                        sectors = st.session_state.get('sector_data', pd.Series(dtype=float))
+                        industries = st.session_state.get('industry_data', pd.Series(dtype=float))
+                        payload['portfolio_composition'] = {
+                            'sectors': [{'sector': str(k), 'allocation_pct': float(v)} for k, v in (sectors.items() if hasattr(sectors, 'items') else [])],
+                            'industries': [{'industry': str(k), 'allocation_pct': float(v)} for k, v in (industries.items() if hasattr(industries, 'items') else [])],
+                        }
+                    except Exception as _e:
+                        st.warning(f"AI composition unavailable: {_e}")
+
                 with st.expander("See payload sent to AI", expanded=False):
                     import json as _json
                     st.code(_json.dumps(payload, indent=2), language='json')
@@ -11711,13 +11957,15 @@ if st.session_state.get('alloc_backtest_run', False):
 
                 # Model presets per provider
                 if provider == "Google Gemini":
+                    # Ranked text-out models first, then other modes
                     preset_models = [
                         "gemini-2.5-pro",
                         "gemini-2.5-flash",
                         "gemini-2.5-flash-lite",
-                        "gemini-2.5-flash-tts",
                         "gemini-2.0-flash",
                         "gemini-2.0-flash-lite",
+                        # additional modes
+                        "gemini-2.5-flash-tts",
                         "gemini-2.0-flash-exp",
                         "gemini-2.0-flash-preview-image-generation",
                         "gemini-2.0-flash-live",
@@ -11806,7 +12054,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 colA, colB = st.columns([1,1])
                 with colA:
                     if provider == "Google Gemini":
-                        _default_model = st.session_state.get('alloc_ai_last_gemini_model', 'gemini-2.0-flash')
+                        _default_model = st.session_state.get('alloc_ai_last_gemini_model', 'gemini-2.5-flash')
                     elif provider == "OpenAI":
                         _default_model = st.session_state.get('alloc_ai_last_openai_model', 'gpt-4o-mini')
                     else:
@@ -11824,15 +12072,25 @@ if st.session_state.get('alloc_backtest_run', False):
                             f"**Limits** — RPM: {info['RPM']} • TPM: {info['TPM']} • RPD: {info['RPD']}  ")
                         st.caption(f"Note: {info['note']}")
                     with st.expander("Which model should I choose?", expanded=False):
-                        st.markdown(
-                            "- **Highest quality/reasoning**: gemini-2.5-pro\n"
-                            "- **Balanced perf/cost**: gemini-2.5-flash\n"
-                            "- **Low cost / high throughput**: gemini-2.0-flash-lite (or 2.0-flash)\n"
-                            "- **Image generation**: gemini-2.0-flash-preview-image-generation / imagen-3.0-generate\n"
-                            "- **TTS**: gemini-2.5-flash-tts\n"
-                            "- **Streaming live**: gemini-2.0-flash-live / gemini-2.5-flash-live\n"
-                            "- **Experimental**: gemini-2.0-flash-exp / learnlm-2.0-flash-experimental"
-                        )
+                        st.markdown("**Ranking (Text-out models)**")
+                        st.table({
+                            "Rank": [1,2,3,4,5],
+                            "Model": [
+                                "gemini-2.5-pro",
+                                "gemini-2.5-flash",
+                                "gemini-2.5-flash-lite",
+                                "gemini-2.0-flash",
+                                "gemini-2.0-flash-lite",
+                            ],
+                            "Category": ["Text-out"]*5,
+                            "Why It's Ranked Here": [
+                                "Pro models are Google's most powerful and capable, designed for complex reasoning.",
+                                "Newest 2.5 generation Flash: fast, efficient, great balance of performance/cost.",
+                                "Lite version of 2.5-flash: even faster and more lightweight.",
+                                "Older 2.0 generation of Flash family.",
+                                "Lite version of 2.0-flash.",
+                            ]
+                        })
 
                 model_name = custom_model.strip() if custom_model.strip() else model_choice
                 run_ai = st.button("Analyze", type="primary")
@@ -12849,7 +13107,9 @@ if st.session_state.get('alloc_backtest_run', False):
     # Add PDF generation button at the very end
     st.markdown("---")
     st.markdown("### 📄 Generate PDF Report")
-    
+
+    # (moved AI checkboxes to AI section above)
+
     # Optional custom PDF report name
     custom_report_name = st.text_input(
         "📝 Custom Report Name (optional):", 
