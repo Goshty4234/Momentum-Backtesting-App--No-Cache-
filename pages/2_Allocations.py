@@ -292,6 +292,19 @@ def get_ticker_aliases_for_stats():
     # Add Canadian mappings for stats (better data quality)
     stats_aliases = base_aliases.copy()
     stats_aliases.update({
+        # OTC Mappings for Stats (OTC tickers often have poor data quality)
+        'MDALF': 'MDA.TO',          # MDA Ltd - USD OTC -> Canadian TSX (data quality)
+        'KRKNF': 'PNG.V',           # Kraken Robotics - USD OTC -> Canadian Venture (data quality)
+        'CNSWF': 'CSU.TO',          # Constellation Software - USD OTC -> Canadian TSX (data quality)
+        'TOITF': 'TOI.V',           # Topicus - USD OTC -> Canadian Venture (data quality)
+        'LMGIF': 'LMN.V',           # Lumine Group - USD OTC -> Canadian Venture (data quality)
+        'DLMAF': 'DOL.TO',          # Dollarama - USD OTC -> Canadian TSX (data quality)
+        'LBLCF': 'L.TO',            # Loblaw Companies - USD OTC -> Canadian TSX (data quality)
+        'ANCTF': 'ATD.TO',          # Alimentation Couche-Tard - USD OTC -> Canadian TSX (data quality)
+        'FRFHF': 'FFH.TO',          # Fairfax Financial - USD OTC -> Canadian TSX (data quality)
+        'PWCDF': 'POW.TO',          # Power Corporation - USD OTC -> Canadian TSX (data quality)
+        'CGI': 'GIB-A.TO',          # CGI Inc - NYSE -> Canadian TSX (CGI ticker is obsolete)
+        
         # Canadian Ticker Mappings for Stats (NYSE/NASDAQ -> Canadian Exchange for better data)
         'MRU': 'MRU.TO',            # Metro Inc - NYSE -> Canadian TSX
         'CLS': 'CLS.TO',            # Celestica Inc - NYSE -> Canadian TSX
