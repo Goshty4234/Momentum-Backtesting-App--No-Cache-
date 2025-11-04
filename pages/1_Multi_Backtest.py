@@ -9333,6 +9333,7 @@ def update_active_portfolio_index():
         # MA Multiplier - RECONSTRUCTED (no complex sync)
         
         # Force sync MA Multiplier widget with imported JSON value
+        portfolio_index = st.session_state.multi_backtest_active_portfolio_index
         ma_multiplier_key = f"ma_multiplier_working_{portfolio_index}"
         st.session_state[ma_multiplier_key] = active_portfolio.get('ma_multiplier', 1.48)
         
@@ -9573,6 +9574,11 @@ def update_vol_window():
 
 def update_vol_exclude():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['exclude_days_vol'] = st.session_state.multi_backtest_active_vol_exclude
+
+def update_ma_cross_rebalance():
+    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+    ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{portfolio_index}"
+    st.session_state.multi_backtest_portfolio_configs[portfolio_index]['ma_cross_rebalance'] = st.session_state.get(ma_cross_rebalance_key, False)
 
 def update_use_threshold():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['use_minimal_threshold'] = st.session_state.multi_backtest_active_use_threshold
@@ -13426,6 +13432,7 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
         
         st.checkbox("Immediate Rebalance on MA Cross", 
                    key=ma_cross_rebalance_key,
+                   on_change=update_ma_cross_rebalance,
                    help="Rebalance portfolio immediately when any ticker crosses its moving average, in addition to regular rebalancing schedule. This allows faster response to trend changes.")
         
         # Store the new option in active portfolio - ALWAYS sync
