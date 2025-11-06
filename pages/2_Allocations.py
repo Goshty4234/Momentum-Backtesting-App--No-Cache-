@@ -3786,6 +3786,20 @@ def generate_allocations_pdf(custom_name=""):
         if portfolio_ev_ebitda is not None and not pd.isna(portfolio_ev_ebitda):
             summary_data.append(["Valuation", "EV/EBITDA", f"{portfolio_ev_ebitda:.2f}", "EV/EBITDA ratio weighted by portfolio allocation"])
         
+        portfolio_price_fcf = getattr(st.session_state, 'portfolio_price_fcf', None)
+        portfolio_fcf_yield = getattr(st.session_state, 'portfolio_fcf_yield', None)
+        portfolio_interest_coverage = getattr(st.session_state, 'portfolio_interest_coverage', None)
+        
+        if portfolio_price_fcf is not None and not pd.isna(portfolio_price_fcf):
+            summary_data.append(["Valuation", "Price/FCF", f"{portfolio_price_fcf:.2f}", "Price-to-Free Cash Flow ratio weighted by portfolio allocation"])
+        if portfolio_fcf_yield is not None and not pd.isna(portfolio_fcf_yield):
+            summary_data.append(["Valuation", "FCF Yield (%)", f"{portfolio_fcf_yield:.2f}%", "Free Cash Flow Yield weighted by portfolio allocation"])
+        if portfolio_interest_coverage is not None and not pd.isna(portfolio_interest_coverage):
+            if portfolio_interest_coverage == float('inf'):
+                summary_data.append(["Financial Health", "Interest Coverage", "∞", "EBIT/Interest Expense (infinite = no interest expense)"])
+            else:
+                summary_data.append(["Financial Health", "Interest Coverage", f"{portfolio_interest_coverage:.2f}", "EBIT/Interest Expense weighted by portfolio allocation"])
+        
         # Risk metrics
         if portfolio_beta is not None and not pd.isna(portfolio_beta):
             summary_data.append(["Risk", "Beta", f"{portfolio_beta:.2f}", "Portfolio volatility relative to market (1.0 = market average)"])
@@ -4388,20 +4402,50 @@ def generate_allocations_pdf(custom_name=""):
                     overview_widths = [0.6*inch, 1.5*inch, 1.0*inch, 1.1*inch, 0.8*inch, 0.7*inch, 0.6*inch, 1.0*inch, 0.8*inch]
                     create_focused_table("📊 Overview & Basic Information", overview_cols, df_comprehensive, overview_widths)
                     
-                    # Section 2: Valuation Metrics
-                    valuation_cols = ['Ticker', 'Market Cap ($B)', 'Enterprise Value ($B)', 'P/E Ratio', 'Forward P/E', 'PEG Ratio', 'Price/Book', 'Price/Sales', 'EV/EBITDA']
-                    valuation_widths = [0.6*inch, 0.8*inch, 1.0*inch, 0.6*inch, 0.7*inch, 0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch]
-                    create_focused_table("💰 Valuation Metrics", valuation_cols, df_comprehensive, valuation_widths)
+                    # Section 2: Valuation Metrics - Part 1 (Core Ratios)
+                    valuation_cols_1 = ['Ticker', 'Market Cap ($B)', 'Enterprise Value ($B)', 'P/E Ratio', 'Forward P/E', 'PEG Ratio', 'Price/Book', 'Price/Sales', 'EV/EBITDA']
+                    valuation_widths_1 = [0.6*inch, 0.8*inch, 1.0*inch, 0.6*inch, 0.7*inch, 0.6*inch, 0.7*inch, 0.7*inch, 0.7*inch]
+                    # Filter to only include columns that exist
+                    valuation_cols_1 = [col for col in valuation_cols_1 if col in df_comprehensive.columns]
+                    create_focused_table("💰 Valuation Metrics - Part 1: Core Ratios", valuation_cols_1, df_comprehensive, valuation_widths_1)
                     
-                    # Section 3: Financial Health - Increased column widths to prevent title overlap
-                    health_cols = ['Ticker', 'Debt/Equity', 'Current Ratio', 'Quick Ratio', 'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)']
-                    health_widths = [0.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.0*inch, 1.0*inch]
-                    create_focused_table("🏥 Financial Health", health_cols, df_comprehensive, health_widths)
+                    # Section 2b: Valuation Metrics - Part 2 (Cash Flow & Shares)
+                    valuation_cols_2 = ['Ticker', 'Price/Cash Flow', 'Price/FCF', 'FCF Yield (%)', 'Free Cash Flow ($B)', 'Shares Outstanding (M)', 'Float Shares (M)']
+                    valuation_widths_2 = [0.6*inch, 0.8*inch, 0.7*inch, 0.7*inch, 0.9*inch, 1.1*inch, 1.1*inch]
+                    # Filter to only include columns that exist
+                    valuation_cols_2 = [col for col in valuation_cols_2 if col in df_comprehensive.columns]
+                    if len(valuation_cols_2) > 1:  # Only create if we have more than just Ticker
+                        create_focused_table("💰 Valuation Metrics - Part 2: Cash Flow & Shares", valuation_cols_2, df_comprehensive, valuation_widths_2)
                     
-                    # Section 4: Growth & Dividends - Increased column widths to prevent title overlap
-                    growth_cols = ['Ticker', 'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)', 'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', '5Y Dividend Growth (%)']
-                    growth_widths = [0.6*inch, 1.0*inch, 1.0*inch, 0.8*inch, 0.9*inch, 0.9*inch, 0.8*inch, 1.0*inch]
-                    create_focused_table("📈 Growth & Dividends", growth_cols, df_comprehensive, growth_widths)
+                    # Section 3: Financial Health - Part 1 (Debt & Liquidity)
+                    health_cols_1 = ['Ticker', 'Debt/Equity', 'Total Debt ($B)', 'Net Debt ($B)', 'Current Ratio', 'Quick Ratio', 'Working Capital ($B)', 'Interest Coverage']
+                    health_widths_1 = [0.6*inch, 0.9*inch, 0.8*inch, 0.8*inch, 0.9*inch, 0.8*inch, 1.0*inch, 0.9*inch]
+                    # Filter to only include columns that exist
+                    health_cols_1 = [col for col in health_cols_1 if col in df_comprehensive.columns]
+                    create_focused_table("🏥 Financial Health - Part 1: Debt & Liquidity", health_cols_1, df_comprehensive, health_widths_1)
+                    
+                    # Section 3b: Financial Health - Part 2 (Profitability & Returns)
+                    health_cols_2 = ['Ticker', 'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)', 'Gross Margin (%)']
+                    health_widths_2 = [0.6*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.0*inch, 1.0*inch, 1.0*inch]
+                    # Filter to only include columns that exist
+                    health_cols_2 = [col for col in health_cols_2 if col in df_comprehensive.columns]
+                    if len(health_cols_2) > 1:  # Only create if we have more than just Ticker
+                        create_focused_table("🏥 Financial Health - Part 2: Profitability & Returns", health_cols_2, df_comprehensive, health_widths_2)
+                    
+                    # Section 4: Growth & Dividends - Part 1 (Revenue & Earnings)
+                    growth_cols_1 = ['Ticker', 'Revenue TTM ($B)', 'Earnings TTM ($B)', 'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)']
+                    growth_widths_1 = [0.6*inch, 0.9*inch, 0.9*inch, 1.0*inch, 1.0*inch, 0.8*inch]
+                    # Filter to only include columns that exist
+                    growth_cols_1 = [col for col in growth_cols_1 if col in df_comprehensive.columns]
+                    create_focused_table("📈 Growth & Dividends - Part 1: Revenue & Earnings", growth_cols_1, df_comprehensive, growth_widths_1)
+                    
+                    # Section 4b: Growth & Dividends - Part 2 (Dividend Information)
+                    growth_cols_2 = ['Ticker', 'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', '5Y Dividend Growth (%)']
+                    growth_widths_2 = [0.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 1.0*inch]
+                    # Filter to only include columns that exist
+                    growth_cols_2 = [col for col in growth_cols_2 if col in df_comprehensive.columns]
+                    if len(growth_cols_2) > 1:  # Only create if we have more than just Ticker
+                        create_focused_table("📈 Growth & Dividends - Part 2: Dividend Information", growth_cols_2, df_comprehensive, growth_widths_2)
                     
                     # Section 5: Technical & Trading
                     technical_cols = ['Ticker', '52W High ($)', '52W Low ($)', '50D MA ($)', '200D MA ($)', 'Beta', 'Volume', 'Avg Volume', 'Analyst Rating']
@@ -10753,6 +10797,15 @@ if st.session_state.get('alloc_backtest_run', False):
                             'Price/Cash Flow': info.get('priceToCashflow', None) if not is_commodity else None,
                             'EV/EBITDA': info.get('enterpriseToEbitda', None) if not is_commodity else None,
                             
+                            # Additional Valuation Metrics
+                            'Free Cash Flow ($B)': info.get('freeCashflow', 0) / 1e9 if info.get('freeCashflow') and not is_commodity else None,
+                            'FCF Yield (%)': None,  # Will be calculated below
+                            'Price/FCF': None,  # Will be calculated below
+                            'Shares Outstanding (M)': info.get('sharesOutstanding', 0) / 1e6 if info.get('sharesOutstanding') and not is_commodity else None,
+                            'Float Shares (M)': info.get('floatShares', 0) / 1e6 if info.get('floatShares') and not is_commodity else None,
+                            'Revenue TTM ($B)': info.get('totalRevenue', 0) / 1e9 if info.get('totalRevenue') and not is_commodity else None,
+                            'Earnings TTM ($B)': (info.get('trailingEps', 0) * info.get('sharesOutstanding', 0)) / 1e9 if info.get('trailingEps') and info.get('sharesOutstanding') and not is_commodity else None,
+                            
                             # Financial Health (not applicable for commodities/ETFs)
                             'Debt/Equity': info.get('debtToEquity', None) if not is_commodity else None,
                             'Current Ratio': info.get('currentRatio', None) if not is_commodity else None,
@@ -10760,6 +10813,12 @@ if st.session_state.get('alloc_backtest_run', False):
                             'ROE (%)': info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') and not is_commodity else None,
                             'ROA (%)': info.get('returnOnAssets', 0) * 100 if info.get('returnOnAssets') and not is_commodity else None,
                             'ROIC (%)': info.get('returnOnInvestedCapital', 0) * 100 if info.get('returnOnInvestedCapital') and not is_commodity else None,
+                            
+                            # Additional Financial Health Metrics
+                            'Total Debt ($B)': info.get('totalDebt', 0) / 1e9 if info.get('totalDebt') and not is_commodity else None,
+                            'Net Debt ($B)': None,  # Will be calculated below
+                            'Working Capital ($B)': None,  # Will be calculated below
+                            'Interest Coverage': None,  # Will be calculated below
                             
                             # Growth Metrics (not applicable for commodities/ETFs)
                             'Revenue Growth (%)': info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') and not is_commodity else None,
@@ -10811,6 +10870,43 @@ if st.session_state.get('alloc_backtest_run', False):
                             
                             peg_ratio = pe_ratio / growth_percentage
                             peg_source = "P/E ÷ Earnings Growth"
+                        
+                        # Calculate FCF Yield and Price/FCF
+                        free_cashflow = info.get('freeCashflow')
+                        market_cap = info.get('marketCap')
+                        if not is_commodity and free_cashflow and market_cap and market_cap > 0:
+                            # FCF Yield = Free Cash Flow / Market Cap
+                            fcf_yield = (free_cashflow / market_cap) * 100
+                            row['FCF Yield (%)'] = fcf_yield
+                            
+                            # Price/FCF = Market Cap / Free Cash Flow
+                            if free_cashflow > 0:
+                                price_fcf = market_cap / free_cashflow
+                                row['Price/FCF'] = price_fcf
+                        
+                        # Calculate Net Debt (Total Debt - Cash and Cash Equivalents)
+                        total_debt = info.get('totalDebt')
+                        total_cash = info.get('totalCash', 0)
+                        if not is_commodity and total_debt is not None:
+                            net_debt = (total_debt - total_cash) / 1e9
+                            row['Net Debt ($B)'] = net_debt if net_debt >= 0 else 0
+                        
+                        # Calculate Working Capital (Current Assets - Current Liabilities)
+                        current_assets = info.get('totalCurrentAssets', 0)
+                        current_liabilities = info.get('totalCurrentLiabilities', 0)
+                        if not is_commodity and current_assets and current_liabilities:
+                            working_capital = (current_assets - current_liabilities) / 1e9
+                            row['Working Capital ($B)'] = working_capital
+                        
+                        # Calculate Interest Coverage (EBIT / Interest Expense)
+                        ebit = info.get('ebit', 0)
+                        interest_expense = info.get('interestExpense', 0)
+                        if not is_commodity and ebit and interest_expense and interest_expense > 0:
+                            interest_coverage = ebit / interest_expense
+                            row['Interest Coverage'] = interest_coverage
+                        elif not is_commodity and interest_expense == 0 and ebit:
+                            # No interest expense = excellent coverage
+                            row['Interest Coverage'] = float('inf') if ebit > 0 else None
                         
                         # Price/Book will be calculated AFTER dual-class adjustment
                         
@@ -10949,6 +11045,9 @@ if st.session_state.get('alloc_backtest_run', False):
                     portfolio_peg = weighted_average(df_comprehensive, 'PEG Ratio')
                     portfolio_ps = weighted_average(df_comprehensive, 'Price/Sales')
                     portfolio_ev_ebitda = weighted_average(df_comprehensive, 'EV/EBITDA')
+                    portfolio_price_fcf = weighted_average(df_comprehensive, 'Price/FCF')
+                    portfolio_fcf_yield = weighted_average(df_comprehensive, 'FCF Yield (%)')
+                    portfolio_interest_coverage = weighted_average(df_comprehensive, 'Interest Coverage')
                     portfolio_roe = weighted_average(df_comprehensive, 'ROE (%)')
                     portfolio_roa = weighted_average(df_comprehensive, 'ROA (%)')
                     portfolio_roic = weighted_average(df_comprehensive, 'ROIC (%)')
@@ -10976,6 +11075,9 @@ if st.session_state.get('alloc_backtest_run', False):
                     st.session_state.portfolio_peg = portfolio_peg
                     st.session_state.portfolio_ps = portfolio_ps
                     st.session_state.portfolio_ev_ebitda = portfolio_ev_ebitda
+                    st.session_state.portfolio_price_fcf = portfolio_price_fcf
+                    st.session_state.portfolio_fcf_yield = portfolio_fcf_yield
+                    st.session_state.portfolio_interest_coverage = portfolio_interest_coverage
                     st.session_state.portfolio_roe = portfolio_roe
                     st.session_state.portfolio_roa = portfolio_roa
                     st.session_state.portfolio_roic = portfolio_roic
@@ -11036,15 +11138,19 @@ if st.session_state.get('alloc_backtest_run', False):
                         elif col in ['Allocation %', 'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Revenue Growth (%)', 
                                    'Earnings Growth (%)', 'EPS Growth (%)', 'Dividend Yield (%)', 
                                    'Payout Ratio (%)', '5Y Dividend Growth (%)', 'Profit Margin (%)', 
-                                   'Operating Margin (%)', 'Gross Margin (%)', '% of Portfolio']:
+                                   'Operating Margin (%)', 'Gross Margin (%)', 'FCF Yield (%)', '% of Portfolio']:
                             df_comprehensive[col] = df_comprehensive[col].apply(lambda x: safe_format(x, '{:,.2f}%'))
                         elif col in ['Current Price ($)', 'Total Value ($)', '52W High ($)', '52W Low ($)', 
                                    '50D MA ($)', '200D MA ($)', 'Target Price ($)', 'Target High ($)', 
                                    'Target Low ($)', 'Book Value ($)', 'Cash per Share ($)', 
                                    'Revenue per Share ($)', 'Dividend Rate ($)']:
                             df_comprehensive[col] = df_comprehensive[col].apply(lambda x: safe_format(x, '${:,.2f}'))
-                        elif col in ['Market Cap ($B)', 'Enterprise Value ($B)']:
+                        elif col in ['Market Cap ($B)', 'Enterprise Value ($B)', 'Free Cash Flow ($B)', 
+                                   'Total Debt ($B)', 'Net Debt ($B)', 'Working Capital ($B)', 
+                                   'Revenue TTM ($B)', 'Earnings TTM ($B)']:
                             df_comprehensive[col] = df_comprehensive[col].apply(lambda x: safe_format(x, '${:,.2f}B'))
+                        elif col in ['Shares Outstanding (M)', 'Float Shares (M)']:
+                            df_comprehensive[col] = df_comprehensive[col].apply(lambda x: safe_format(x, '{:,.2f}M'))
                         elif col in ['Volume', 'Avg Volume']:
                             df_comprehensive[col] = df_comprehensive[col].apply(lambda x: safe_format(x, '{:,.0f}'))
                         else:
@@ -11069,26 +11175,37 @@ if st.session_state.get('alloc_backtest_run', False):
                         # Valuation tab - all valuation metrics
                         valuation_cols = ['Ticker', 'Current Price ($)', 'Market Cap ($B)', 'Enterprise Value ($B)',
                                         'P/E Ratio', 'Forward P/E', 'PEG Ratio', 'PEG Source', 'Price/Book', 'Price/Sales',
-                                        'Price/Cash Flow', 'EV/EBITDA', 'Book Value ($)', 'Cash per Share ($)',
-                                        'Revenue per Share ($)', 'Target Price ($)', 'Target High ($)', 'Target Low ($)']
+                                        'Price/Cash Flow', 'Price/FCF', 'EV/EBITDA', 'FCF Yield (%)', 
+                                        'Free Cash Flow ($B)', 'Shares Outstanding (M)', 'Float Shares (M)',
+                                        'Revenue TTM ($B)', 'Earnings TTM ($B)',
+                                        'Book Value ($)', 'Cash per Share ($)', 'Revenue per Share ($)', 
+                                        'Target Price ($)', 'Target High ($)', 'Target Low ($)']
+                        # Filter to only include columns that exist
+                        valuation_cols = [col for col in valuation_cols if col in df_comprehensive.columns]
                         df_valuation = df_comprehensive[valuation_cols].copy()
                         st.session_state.df_valuation = df_valuation
                         st.dataframe(df_valuation, )
                     
                     with tab3:
                         # Financial Health tab - ratios and margins
-                        health_cols = ['Ticker', 'Debt/Equity', 'Current Ratio', 'Quick Ratio', 'ROE (%)', 
-                                     'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)', 
+                        health_cols = ['Ticker', 'Debt/Equity', 'Total Debt ($B)', 'Net Debt ($B)', 
+                                     'Current Ratio', 'Quick Ratio', 'Working Capital ($B)', 'Interest Coverage',
+                                     'ROE (%)', 'ROA (%)', 'ROIC (%)', 'Profit Margin (%)', 'Operating Margin (%)', 
                                      'Gross Margin (%)']
+                        # Filter to only include columns that exist
+                        health_cols = [col for col in health_cols if col in df_comprehensive.columns]
                         df_health = df_comprehensive[health_cols].copy()
                         st.session_state.df_health = df_health
                         st.dataframe(df_health, )
                     
                     with tab4:
                         # Growth & Dividends tab
-                        growth_cols = ['Ticker', 'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)',
+                        growth_cols = ['Ticker', 'Revenue TTM ($B)', 'Earnings TTM ($B)', 
+                                     'Revenue Growth (%)', 'Earnings Growth (%)', 'EPS Growth (%)',
                                      'Dividend Yield (%)', 'Dividend Rate ($)', 'Payout Ratio (%)', 
                                      '5Y Dividend Growth (%)']
+                        # Filter to only include columns that exist
+                        growth_cols = [col for col in growth_cols if col in df_comprehensive.columns]
                         df_growth = df_comprehensive[growth_cols].copy()
                         st.session_state.df_growth = df_growth
                         st.dataframe(df_growth, )
