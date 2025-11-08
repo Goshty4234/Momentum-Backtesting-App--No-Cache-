@@ -8004,11 +8004,12 @@ with st.expander("🍁 Canadian Tickers & Custom Mappings", expanded=False):
                     st.rerun()
 
 # Special Tickers Section
-# Use session state to control expander state
-if 'alloc_special_tickers_expanded' not in st.session_state:
-    st.session_state.alloc_special_tickers_expanded = False
+if 'alloc_special_tickers_force_open_once' not in st.session_state:
+    st.session_state.alloc_special_tickers_force_open_once = False
 
-with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.alloc_special_tickers_expanded):
+force_open_special_tickers = st.session_state.alloc_special_tickers_force_open_once
+
+with st.expander("🎯 Special Long-Term Tickers", expanded=force_open_special_tickers):
     st.markdown("**Quick access to ticker aliases that the system accepts:**")
     
     # Get the actual ticker aliases from the function
@@ -8045,7 +8046,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.all
                     'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.alloc_special_tickers_expanded = True
+                st.session_state.alloc_special_tickers_force_open_once = True
                 st.rerun()
     
     with col2:
@@ -8080,6 +8081,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.all
                      'allocation': 0.0, 
                      'include_dividends': True
                  })
+                 st.session_state.alloc_special_tickers_force_open_once = True
                  st.rerun()
     
     with col3:
@@ -8154,7 +8156,7 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.all
                     'max_allocation_percent': None
                 })
                 # Keep expander open and rerun immediately
-                st.session_state.alloc_special_tickers_expanded = True
+                st.session_state.alloc_special_tickers_force_open_once = True
                 st.rerun()
     
     st.markdown("---")
@@ -8176,6 +8178,9 @@ with st.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.all
     st.markdown("- `BN` → `BN.TO` (Brookfield Corp), `BAM` → `BAM.TO` (Brookfield Asset Mgmt)")
     st.markdown("- `FRFHF` → `FFH.TO` (Fairfax Financial)")
     st.markdown("- **Big 5 Banks:** `RY` (Royal), `TD` (TD), `BNS` (Scotiabank), `BMO` (BMO), `CM` (CIBC), `NA` (National Bank)")
+
+if force_open_special_tickers:
+    st.session_state.alloc_special_tickers_force_open_once = False
 
 
 with st.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
