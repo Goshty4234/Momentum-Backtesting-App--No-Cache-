@@ -9165,6 +9165,20 @@ def paste_json_callback():
         
         # Multi-Backtest page specific: ensure all required fields are present
         # and ignore fields that are specific to other pages
+        use_momentum = parse_bool_from_json(json_data.get('use_momentum', True), True)
+        use_minimal_threshold = parse_bool_from_json(json_data.get('use_minimal_threshold', False), False)
+        use_max_allocation = parse_bool_from_json(json_data.get('use_max_allocation', False), False)
+        use_equal_weight = parse_bool_from_json(json_data.get('use_equal_weight', False), False)
+        use_limit_to_top_n = parse_bool_from_json(json_data.get('use_limit_to_top_n', False), False)
+        calc_beta = parse_bool_from_json(json_data.get('calc_beta', False), False)
+        calc_volatility = parse_bool_from_json(json_data.get('calc_volatility', True), True)
+        collect_dividends_as_cash = parse_bool_from_json(json_data.get('collect_dividends_as_cash', False), False)
+        exclude_from_cashflow_sync = parse_bool_from_json(json_data.get('exclude_from_cashflow_sync', False), False)
+        exclude_from_rebalancing_sync = parse_bool_from_json(json_data.get('exclude_from_rebalancing_sync', False), False)
+        use_targeted_rebalancing = parse_bool_from_json(json_data.get('use_targeted_rebalancing', False), False)
+        use_sma_filter = parse_bool_from_json(json_data.get('use_sma_filter', False), False)
+        ma_cross_rebalance = parse_bool_from_json(json_data.get('ma_cross_rebalance', False), False)
+
         multi_backtest_config = {
             'name': json_data.get('name', 'New Portfolio'),
             'stocks': stocks,
@@ -9176,35 +9190,35 @@ def paste_json_callback():
             'start_date_user': parse_date_from_json(json_data.get('start_date_user')),
             'end_date_user': parse_date_from_json(json_data.get('end_date_user')),
             'start_with': json_data.get('start_with', 'first'),
-            'use_momentum': json_data.get('use_momentum', True),
+            'use_momentum': use_momentum,
             'momentum_strategy': momentum_strategy,
             'negative_momentum_strategy': negative_momentum_strategy,
             'momentum_windows': momentum_windows,
-            'use_minimal_threshold': json_data.get('use_minimal_threshold', False),
+            'use_minimal_threshold': use_minimal_threshold,
             'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 4.0),
-            'use_max_allocation': json_data.get('use_max_allocation', False),
+            'use_max_allocation': use_max_allocation,
             'max_allocation_percent': json_data.get('max_allocation_percent', 20.0),
-            'use_equal_weight': json_data.get('use_equal_weight', False),
+            'use_equal_weight': use_equal_weight,
             'equal_weight_n_tickers': json_data.get('equal_weight_n_tickers', 10),
-            'use_limit_to_top_n': json_data.get('use_limit_to_top_n', False),
+            'use_limit_to_top_n': use_limit_to_top_n,
             'limit_to_top_n_tickers': json_data.get('limit_to_top_n_tickers', 10),
-            'calc_beta': json_data.get('calc_beta', False),
-            'calc_volatility': json_data.get('calc_volatility', True),
+            'calc_beta': calc_beta,
+            'calc_volatility': calc_volatility,
             'beta_window_days': json_data.get('beta_window_days', 365),
             'exclude_days_beta': json_data.get('exclude_days_beta', 30),
             'vol_window_days': json_data.get('vol_window_days', 365),
             'exclude_days_vol': json_data.get('exclude_days_vol', 30),
-            'collect_dividends_as_cash': json_data.get('collect_dividends_as_cash', False),
+            'collect_dividends_as_cash': collect_dividends_as_cash,
             # Preserve sync exclusion settings from imported JSON
-            'exclude_from_cashflow_sync': json_data.get('exclude_from_cashflow_sync', False),
-            'exclude_from_rebalancing_sync': json_data.get('exclude_from_rebalancing_sync', False),
-            'use_targeted_rebalancing': json_data.get('use_targeted_rebalancing', False),
+            'exclude_from_cashflow_sync': exclude_from_cashflow_sync,
+            'exclude_from_rebalancing_sync': exclude_from_rebalancing_sync,
+            'use_targeted_rebalancing': use_targeted_rebalancing,
             'targeted_rebalancing_settings': json_data.get('targeted_rebalancing_settings', {}),
-            'use_sma_filter': json_data.get('use_sma_filter', False),
+            'use_sma_filter': use_sma_filter,
             'sma_window': json_data.get('sma_window', 200),
             'ma_type': json_data.get('ma_type', 'SMA'),
             'ma_multiplier': json_data.get('ma_multiplier', 1.48),
-            'ma_cross_rebalance': json_data.get('ma_cross_rebalance', False),
+            'ma_cross_rebalance': ma_cross_rebalance,
             'ma_tolerance_percent': json_data.get('ma_tolerance_percent', 2.0),
             'ma_confirmation_days': json_data.get('ma_confirmation_days', 3),
         }
@@ -9250,7 +9264,7 @@ def paste_json_callback():
             st.session_state['multi_backtest_first_rebalance_strategy_radio'] = json_data['first_rebalance_strategy']
         
         # Update session state for targeted rebalancing settings
-        st.session_state['multi_backtest_active_use_targeted_rebalancing'] = multi_backtest_config.get('use_targeted_rebalancing', False)
+        st.session_state['multi_backtest_active_use_targeted_rebalancing'] = parse_bool_from_json(multi_backtest_config.get('use_targeted_rebalancing', False), False)
         
         # Use portfolio-specific MA Filter keys
         portfolio_index = st.session_state.multi_backtest_active_portfolio_index
@@ -9308,11 +9322,11 @@ def update_active_portfolio_index():
         active_portfolio = portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
         
         # NUCLEAR APPROACH: FORCE all momentum session state widgets to sync
-        st.session_state['multi_backtest_active_use_momentum'] = active_portfolio.get('use_momentum', False)
+        st.session_state['multi_backtest_active_use_momentum'] = parse_bool_from_json(active_portfolio.get('use_momentum', False), False)
         st.session_state['multi_backtest_active_momentum_strategy'] = active_portfolio.get('momentum_strategy', 'Classic')
         st.session_state['multi_backtest_active_negative_momentum_strategy'] = active_portfolio.get('negative_momentum_strategy', 'Cash')
-        st.session_state['multi_backtest_active_calc_beta'] = active_portfolio.get('calc_beta', False)
-        st.session_state['multi_backtest_active_calc_vol'] = active_portfolio.get('calc_volatility', False)
+        st.session_state['multi_backtest_active_calc_beta'] = parse_bool_from_json(active_portfolio.get('calc_beta', False), False)
+        st.session_state['multi_backtest_active_calc_vol'] = parse_bool_from_json(active_portfolio.get('calc_volatility', False), False)
         st.session_state['multi_backtest_active_beta_window'] = active_portfolio.get('beta_window_days', 365)
         st.session_state['multi_backtest_active_beta_exclude'] = active_portfolio.get('exclude_days_beta', 30)
         st.session_state['multi_backtest_active_vol_window'] = active_portfolio.get('vol_window_days', 365)
@@ -9432,8 +9446,8 @@ def update_use_momentum():
                 ])
                 portfolio['momentum_strategy'] = saved_settings.get('momentum_strategy', 'Classic')
                 portfolio['negative_momentum_strategy'] = saved_settings.get('negative_momentum_strategy', 'Cash')
-                portfolio['calc_beta'] = saved_settings.get('calc_beta', False)
-                portfolio['calc_volatility'] = saved_settings.get('calc_volatility', True)
+                portfolio['calc_beta'] = parse_bool_from_json(saved_settings.get('calc_beta', False), False)
+                portfolio['calc_volatility'] = parse_bool_from_json(saved_settings.get('calc_volatility', True), True)
                 portfolio['beta_window_days'] = saved_settings.get('beta_window_days', 365)
                 portfolio['exclude_days_beta'] = saved_settings.get('exclude_days_beta', 30)
                 portfolio['vol_window_days'] = saved_settings.get('vol_window_days', 365)
@@ -9442,8 +9456,8 @@ def update_use_momentum():
                 # Update UI widgets to reflect restored values
                 st.session_state['multi_backtest_active_momentum_strategy'] = portfolio['momentum_strategy']
                 st.session_state['multi_backtest_active_negative_momentum_strategy'] = portfolio['negative_momentum_strategy']
-                st.session_state['multi_backtest_active_calc_beta'] = portfolio['calc_beta']
-                st.session_state['multi_backtest_active_calc_vol'] = portfolio['calc_volatility']
+                st.session_state['multi_backtest_active_calc_beta'] = parse_bool_from_json(portfolio['calc_beta'], False)
+                st.session_state['multi_backtest_active_calc_vol'] = parse_bool_from_json(portfolio['calc_volatility'], False)
                 st.session_state['multi_backtest_active_beta_window'] = portfolio['beta_window_days']
                 st.session_state['multi_backtest_active_beta_exclude'] = portfolio['exclude_days_beta']
                 st.session_state['multi_backtest_active_vol_window'] = portfolio['vol_window_days']
@@ -9462,16 +9476,16 @@ def update_use_momentum():
                 # Set default momentum settings only if not already set
                 portfolio['momentum_strategy'] = portfolio.get('momentum_strategy', 'Classic')
                 portfolio['negative_momentum_strategy'] = portfolio.get('negative_momentum_strategy', 'Cash')
-                portfolio['calc_beta'] = portfolio.get('calc_beta', False)
-                portfolio['calc_volatility'] = portfolio.get('calc_volatility', False)
+                portfolio['calc_beta'] = parse_bool_from_json(portfolio.get('calc_beta', False), False)
+                portfolio['calc_volatility'] = parse_bool_from_json(portfolio.get('calc_volatility', False), False)
         else:
             # Disabling momentum - save current settings before clearing
             saved_settings = {
                 'momentum_windows': portfolio.get('momentum_windows', []),
                 'momentum_strategy': portfolio.get('momentum_strategy', 'Classic'),
                 'negative_momentum_strategy': portfolio.get('negative_momentum_strategy', 'Cash'),
-                'calc_beta': portfolio.get('calc_beta', False),
-                'calc_volatility': portfolio.get('calc_volatility', True),
+                'calc_beta': parse_bool_from_json(portfolio.get('calc_beta', False), False),
+                'calc_volatility': parse_bool_from_json(portfolio.get('calc_volatility', True), True),
                 'beta_window_days': portfolio.get('beta_window_days', 365),
                 'exclude_days_beta': portfolio.get('exclude_days_beta', 30),
                 'vol_window_days': portfolio.get('vol_window_days', 365),
@@ -9480,7 +9494,7 @@ def update_use_momentum():
             portfolio['saved_momentum_settings'] = saved_settings
             # Don't clear momentum_windows - preserve them for variant generation
         
-        portfolio['use_momentum'] = new_val
+        portfolio['use_momentum'] = parse_bool_from_json(new_val, False)
         st.session_state.multi_backtest_rerun_flag = True
 
 def update_use_sma_filter():
@@ -9538,7 +9552,7 @@ def update_ma_reference_ticker(stock_index):
 def update_use_targeted_rebalancing():
     """Callback function for targeted rebalancing checkbox"""
     current_val = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index].get('use_targeted_rebalancing', False)
-    new_val = st.session_state.multi_backtest_active_use_targeted_rebalancing
+    new_val = parse_bool_from_json(st.session_state.multi_backtest_active_use_targeted_rebalancing, False)
     
     if current_val != new_val:
         portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
@@ -9659,6 +9673,26 @@ def update_sync_exclusion(sync_type):
         st.session_state.multi_backtest_rerun_flag = True
     except Exception:
         pass
+
+
+def parse_bool_from_json(value, default=False):
+    """
+    Normalize incoming JSON boolean-like values into Python booleans.
+    Accepts actual bools, strings (\"true\"/\"false\" etc.), and numeric 0/1 flags.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"true", "1", "yes", "y", "on"}:
+            return True
+        if cleaned in {"false", "0", "no", "n", "off"}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    return default
+
 
 def parse_date_from_json(date_value):
     """Parse date from JSON string format back to date object"""
@@ -12093,7 +12127,7 @@ with col_freq_add:
     st.selectbox("Added Frequency", freq_options, key="multi_backtest_active_add_freq", on_change=update_add_freq, help="How often cash is added to the portfolio. 'Buy & Hold' reinvests cash immediately using current proportions. 'Buy & Hold (Target)' reinvests cash immediately using target allocations.")
 
 # Dividend handling option
-st.session_state["multi_backtest_active_collect_dividends_as_cash"] = active_portfolio.get('collect_dividends_as_cash', False)
+st.session_state["multi_backtest_active_collect_dividends_as_cash"] = parse_bool_from_json(active_portfolio.get('collect_dividends_as_cash', False), False)
 st.checkbox(
     "Collect Dividends as Cash", 
     key="multi_backtest_active_collect_dividends_as_cash",
@@ -13054,9 +13088,9 @@ if leveraged_tickers:
 
 st.subheader("Strategy")
 if "multi_backtest_active_use_momentum" not in st.session_state:
-    st.session_state["multi_backtest_active_use_momentum"] = active_portfolio['use_momentum']
+    st.session_state["multi_backtest_active_use_momentum"] = parse_bool_from_json(active_portfolio.get('use_momentum', False), False)
 if "multi_backtest_active_use_targeted_rebalancing" not in st.session_state:
-    st.session_state["multi_backtest_active_use_targeted_rebalancing"] = active_portfolio.get('use_targeted_rebalancing', False)
+    st.session_state["multi_backtest_active_use_targeted_rebalancing"] = parse_bool_from_json(active_portfolio.get('use_targeted_rebalancing', False), False)
 # Only show momentum strategy if targeted rebalancing is disabled
 if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False):
     st.checkbox("Use Momentum Strategy", key="multi_backtest_active_use_momentum", on_change=update_use_momentum, help="Enables momentum-based weighting of stocks.")
@@ -13173,7 +13207,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
 
     with col_beta_vol:
         if "multi_backtest_active_calc_beta" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_beta"] = active_portfolio['calc_beta']
+            st.session_state["multi_backtest_active_calc_beta"] = parse_bool_from_json(active_portfolio.get('calc_beta', False), False)
         st.checkbox("Include Beta in momentum weighting", key="multi_backtest_active_calc_beta", on_change=update_calc_beta, help="Penalizes high-beta stocks by reducing their allocation. Stocks with Beta > 1.0 (more volatile than market) get lower weights, while stocks with Beta < 1.0 (less volatile) get higher weights. This reduces portfolio risk by favoring stable stocks.")
         # Reset Beta button
         if st.button("Reset Beta", key=f"multi_backtest_reset_beta_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_beta_callback):
@@ -13191,7 +13225,7 @@ if st.session_state.get('multi_backtest_active_use_momentum', active_portfolio.g
             st.number_input("Beta Lookback (days)", min_value=1, key="multi_backtest_active_beta_window", on_change=update_beta_window)
             st.number_input("Beta Exclude (days)", min_value=0, key="multi_backtest_active_beta_exclude", on_change=update_beta_exclude)
         if "multi_backtest_active_calc_vol" not in st.session_state:
-            st.session_state["multi_backtest_active_calc_vol"] = active_portfolio['calc_volatility']
+            st.session_state["multi_backtest_active_calc_vol"] = parse_bool_from_json(active_portfolio.get('calc_volatility', False), False)
         st.checkbox("Include Volatility in momentum weighting", key="multi_backtest_active_calc_vol", on_change=update_calc_vol, help="Penalizes high-volatility stocks by reducing their allocation. Stocks with high price swings get lower weights, while stable stocks get higher weights. This reduces portfolio risk by favoring less volatile investments.")
         # Reset Volatility button
         if st.button("Reset Volatility", key=f"multi_backtest_reset_vol_btn_{st.session_state.multi_backtest_active_portfolio_index}", on_click=reset_vol_callback):
@@ -13506,7 +13540,7 @@ if not st.session_state.get(ma_filter_key, False) and not st.session_state.get('
 
     # Initialize targeted rebalancing state
     if "multi_backtest_active_use_targeted_rebalancing" not in st.session_state:
-        st.session_state["multi_backtest_active_use_targeted_rebalancing"] = active_portfolio.get('use_targeted_rebalancing', False)
+        st.session_state["multi_backtest_active_use_targeted_rebalancing"] = parse_bool_from_json(active_portfolio.get('use_targeted_rebalancing', False), False)
 
     # Show targeted rebalancing checkbox (only visible when both momentum and MA filter are disabled)
     st.checkbox(
@@ -13517,7 +13551,7 @@ if not st.session_state.get(ma_filter_key, False) and not st.session_state.get('
     )
 
     # Update active portfolio with current targeted rebalancing state
-    active_portfolio['use_targeted_rebalancing'] = st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False)
+    active_portfolio['use_targeted_rebalancing'] = parse_bool_from_json(st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False), False)
 
     if st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False):
         st.markdown("**Configure per-ticker allocation limits:**")
@@ -13642,7 +13676,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['ma_confirmation_days'] = st.session_state.get(ma_delay_key, 3)
     
     # Also update the active portfolio to keep it in sync
-    active_portfolio['use_targeted_rebalancing'] = st.session_state.get('multi_backtest_active_use_targeted_rebalancing', False)
+    active_portfolio['use_targeted_rebalancing'] = parse_bool_from_json(st.session_state.get('multi_backtest_active_use_targeted_rebalancing', False), False)
     active_portfolio['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     active_portfolio['sma_window'] = st.session_state.get(ma_window_key, 200)
     active_portfolio['ma_type'] = st.session_state.get(ma_type_key, 'SMA')
@@ -15540,6 +15574,20 @@ def paste_all_json_callback():
                 
                 # Multi-Backtest page specific: ensure all required fields are present
                 # and ignore fields that are specific to other pages
+                use_momentum = parse_bool_from_json(cfg.get('use_momentum', True), True)
+                use_minimal_threshold = parse_bool_from_json(cfg.get('use_minimal_threshold', False), False)
+                use_max_allocation = parse_bool_from_json(cfg.get('use_max_allocation', False), False)
+                use_equal_weight = parse_bool_from_json(cfg.get('use_equal_weight', False), False)
+                use_limit_to_top_n = parse_bool_from_json(cfg.get('use_limit_to_top_n', False), False)
+                calc_beta = parse_bool_from_json(cfg.get('calc_beta', False), False)
+                calc_volatility = parse_bool_from_json(cfg.get('calc_volatility', True), True)
+                collect_dividends_as_cash = parse_bool_from_json(cfg.get('collect_dividends_as_cash', False), False)
+                exclude_from_cashflow_sync = parse_bool_from_json(cfg.get('exclude_from_cashflow_sync', False), False)
+                exclude_from_rebalancing_sync = parse_bool_from_json(cfg.get('exclude_from_rebalancing_sync', False), False)
+                use_targeted_rebalancing = parse_bool_from_json(cfg.get('use_targeted_rebalancing', False), False)
+                use_sma_filter = parse_bool_from_json(cfg.get('use_sma_filter', False), False)
+                ma_cross_rebalance = parse_bool_from_json(cfg.get('ma_cross_rebalance', False), False)
+
                 multi_backtest_config = {
                     'name': cfg.get('name', 'New Portfolio'),
                     'stocks': stocks,
@@ -15552,34 +15600,34 @@ def paste_all_json_callback():
                     'end_date_user': parse_date_from_json(cfg.get('end_date_user')),
                     'start_with': cfg.get('start_with', 'all'),
                     'first_rebalance_strategy': cfg.get('first_rebalance_strategy', 'rebalancing_date'),
-                    'use_momentum': cfg.get('use_momentum', True),
+                    'use_momentum': use_momentum,
                     'momentum_strategy': momentum_strategy,
                     'negative_momentum_strategy': negative_momentum_strategy,
                     'momentum_windows': momentum_windows,
-                    'use_minimal_threshold': cfg.get('use_minimal_threshold', False),
+                    'use_minimal_threshold': use_minimal_threshold,
                     'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 4.0),
-                    'use_max_allocation': cfg.get('use_max_allocation', False),
+                    'use_max_allocation': use_max_allocation,
                     'max_allocation_percent': cfg.get('max_allocation_percent', 20.0),
-                    'use_equal_weight': cfg.get('use_equal_weight', False),
+                    'use_equal_weight': use_equal_weight,
                     'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers', 10),
-                    'use_limit_to_top_n': cfg.get('use_limit_to_top_n', False),
+                    'use_limit_to_top_n': use_limit_to_top_n,
                     'limit_to_top_n_tickers': cfg.get('limit_to_top_n_tickers', 10),
-                    'calc_beta': cfg.get('calc_beta', False),
-                    'calc_volatility': cfg.get('calc_volatility', True),
+                    'calc_beta': calc_beta,
+                    'calc_volatility': calc_volatility,
                     'beta_window_days': cfg.get('beta_window_days', 365),
                     'exclude_days_beta': cfg.get('exclude_days_beta', 30),
                     'vol_window_days': cfg.get('vol_window_days', 365),
                     'exclude_days_vol': cfg.get('exclude_days_vol', 30),
-                    'collect_dividends_as_cash': cfg.get('collect_dividends_as_cash', False),
+                    'collect_dividends_as_cash': collect_dividends_as_cash,
                     # Preserve sync exclusion settings from imported JSON
-                    'exclude_from_cashflow_sync': cfg.get('exclude_from_cashflow_sync', False),
-                    'exclude_from_rebalancing_sync': cfg.get('exclude_from_rebalancing_sync', False),
-                    'use_targeted_rebalancing': cfg.get('use_targeted_rebalancing', False),
+                    'exclude_from_cashflow_sync': exclude_from_cashflow_sync,
+                    'exclude_from_rebalancing_sync': exclude_from_rebalancing_sync,
+                    'use_targeted_rebalancing': use_targeted_rebalancing,
                     'targeted_rebalancing_settings': cfg.get('targeted_rebalancing_settings', {}),
-                    'use_sma_filter': cfg.get('use_sma_filter', False),
+                    'use_sma_filter': use_sma_filter,
                     'sma_window': cfg.get('sma_window', 200),
                     'ma_type': cfg.get('ma_type', 'SMA'),
-                    'ma_cross_rebalance': cfg.get('ma_cross_rebalance', False),
+                    'ma_cross_rebalance': ma_cross_rebalance,
                     'ma_tolerance_percent': cfg.get('ma_tolerance_percent', 2.0),
                     'ma_confirmation_days': cfg.get('ma_confirmation_days', 3),
                     # Preserve fusion portfolio configuration if present
@@ -15639,9 +15687,9 @@ def paste_all_json_callback():
                 st.session_state['multi_backtest_active_rebal_freq'] = processed_configs[0].get('rebalancing_frequency', 'none')
                 st.session_state['multi_backtest_active_add_freq'] = processed_configs[0].get('added_frequency', 'none')
                 st.session_state['multi_backtest_active_benchmark'] = processed_configs[0].get('benchmark_ticker', '')
-                st.session_state['multi_backtest_active_use_momentum'] = bool(processed_configs[0].get('use_momentum', True))
-                st.session_state['multi_backtest_active_collect_dividends_as_cash'] = bool(processed_configs[0].get('collect_dividends_as_cash', False))
-                st.session_state['multi_backtest_active_use_targeted_rebalancing'] = bool(processed_configs[0].get('use_targeted_rebalancing', False))
+                st.session_state['multi_backtest_active_use_momentum'] = parse_bool_from_json(processed_configs[0].get('use_momentum', True), True)
+                st.session_state['multi_backtest_active_collect_dividends_as_cash'] = parse_bool_from_json(processed_configs[0].get('collect_dividends_as_cash', False), False)
+                st.session_state['multi_backtest_active_use_targeted_rebalancing'] = parse_bool_from_json(processed_configs[0].get('use_targeted_rebalancing', False), False)
                 
                 # Use portfolio-specific MA Filter keys (for first portfolio, index 0)
                 st.session_state['multi_backtest_active_use_sma_filter_0'] = bool(processed_configs[0].get('use_sma_filter', False))
@@ -15654,7 +15702,7 @@ def paste_all_json_callback():
                 
                 # Also initialize MA Filter keys for ALL imported portfolios
                 for idx, cfg in enumerate(processed_configs):
-                    st.session_state[f'multi_backtest_active_use_sma_filter_{idx}'] = bool(cfg.get('use_sma_filter', False))
+                    st.session_state[f'multi_backtest_active_use_sma_filter_{idx}'] = parse_bool_from_json(cfg.get('use_sma_filter', False), False)
                     st.session_state[f'multi_backtest_active_ma_window_{idx}'] = cfg.get('sma_window', 200)
                     st.session_state[f'multi_backtest_active_ma_type_{idx}'] = cfg.get('ma_type', 'SMA')
                     st.session_state[f'multi_backtest_active_ma_multiplier_{idx}'] = cfg.get('ma_multiplier', 1.48)
