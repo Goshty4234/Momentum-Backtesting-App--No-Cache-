@@ -80,7 +80,7 @@ def calculate_cagr(values, dates):
 
 def calculate_volatility(returns):
     # Annualized volatility - same as Backtest_Engine.py
-    return returns.std() * np.sqrt(365) if len(returns) > 1 else np.nan
+    return returns.std() * np.sqrt(365.25) if len(returns) > 1 else np.nan
 
 def calculate_sharpe(returns, risk_free_rate):
     """Calculates the Sharpe ratio."""
@@ -96,7 +96,7 @@ def calculate_sharpe(returns, risk_free_rate):
     if excess_returns.std() == 0:
         return np.nan
         
-    return excess_returns.mean() / excess_returns.std() * np.sqrt(365)
+    return excess_returns.mean() / excess_returns.std() * np.sqrt(365.25)
 
 def calculate_sortino(returns, risk_free_rate):
     """Calculates the Sortino ratio."""
@@ -116,7 +116,7 @@ def calculate_sortino(returns, risk_free_rate):
     
     downside_std = downside_returns.std()
     
-    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365)
+    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365.25)
 
 def calculate_upi(cagr, ulcer_index):
     """Calculates the Ulcer Performance Index (UPI = CAGR / Ulcer Index, both as decimals)."""
@@ -139,7 +139,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'QQQTR': 'QQQ',          # NASDAQ-100 (with dividends) - 1999+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -200,7 +200,7 @@ def get_ticker_aliases():
         'BITCOIN': 'BTC-USD',    # Bitcoin (2014+) - No dividends
         
         # Leveraged & Inverse ETFs (Synthetic Aliases)
-        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'TQQQTR': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
         'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
         'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
         'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
@@ -210,7 +210,7 @@ def get_ticker_aliases():
         'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
         'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
         'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
-        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
+        'SQQQTR': '^NDX?L=-3?E=0.95',    # -3x NASDAQ-100 (price only, no dividends) - 1985+
         
         # Additional mappings for new aliases
         'SPYND': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
@@ -918,7 +918,7 @@ def get_ticker_aliases():
         'SPYTR': '^SP500TR',      # S&P 500 Total Return (with dividends) - 1988+
         'NASDAQ': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
         'NDX': '^NDX',           # NASDAQ 100 (price only, no dividends) - 1985+
-        'QQQTR': '^IXIC',        # NASDAQ Composite (price only, no dividends) - 1971+
+        'QQQTR': 'QQQ',          # NASDAQ-100 (with dividends) - 1999+
         'DOW': '^DJI',           # Dow Jones Industrial Average (price only, no dividends) - 1992+
         
         # Treasury Yield Indices (LONGEST HISTORY - 1960s+)
@@ -979,7 +979,7 @@ def get_ticker_aliases():
         'BITCOIN': 'BTC-USD',    # Bitcoin (2014+) - No dividends
         
         # Leveraged & Inverse ETFs (Synthetic Aliases)
-        'TQQQTR': '^IXIC?L=3?E=0.95',    # 3x NASDAQ Composite (price only) - 1971+
+        'TQQQTR': '^NDX?L=3?E=0.95',     # 3x NASDAQ-100 (price only) - 1985+
         'SPXLTR': '^SP500TR?L=3?E=1.00', # 3x S&P 500 (with dividends)
         'UPROTR': '^SP500TR?L=3?E=0.91', # 3x S&P 500 (with dividends)
         'QLDTR': '^IXIC?L=2?E=0.95',     # 2x NASDAQ Composite (price only) - 1971+
@@ -989,7 +989,7 @@ def get_ticker_aliases():
         'SDSTR': '^GSPC?L=-2?E=0.91',    # -2x S&P 500 (price only, no dividends) - 1927+
         'QIDTR': '^IXIC?L=-2?E=0.95',    # -2x NASDAQ Composite (price only, no dividends) - 1971+
         'SPXUTR': '^GSPC?L=-3?E=1.00',   # -3x S&P 500 (price only, no dividends) - 1927+
-        'SQQQTR': '^IXIC?L=-3?E=0.95',   # -3x NASDAQ Composite (price only, no dividends) - 1971+
+        'SQQQTR': '^NDX?L=-3?E=0.95',    # -3x NASDAQ-100 (price only, no dividends) - 1985+
         
         # Additional mappings for new aliases
         'SPYND': '^GSPC',         # S&P 500 (price only, no dividends) - 1927+
@@ -3686,7 +3686,7 @@ def calculate_max_drawdown(values):
 
 def calculate_volatility(returns):
     # Annualized volatility
-    return np.std(returns) * np.sqrt(365) if len(returns) > 1 else np.nan
+    return np.std(returns) * np.sqrt(365.25) if len(returns) > 1 else np.nan
 
 def calculate_beta(returns, benchmark_returns):
     # Use exact logic from app.py
@@ -3724,7 +3724,7 @@ def calculate_sortino(returns, risk_free_rate):
     
     downside_std = downside_returns.std()
     
-    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365)
+    return (aligned_returns.mean() - aligned_rf.mean()) / downside_std * np.sqrt(365.25)
 
 # FIXED: Correct Sharpe ratio calculation - EXACTLY like Backtest_Engine.py
 def calculate_sharpe(returns, risk_free_rate):
@@ -3741,7 +3741,7 @@ def calculate_sharpe(returns, risk_free_rate):
     if excess_returns.std() == 0:
         return np.nan
         
-    return excess_returns.mean() / excess_returns.std() * np.sqrt(365)
+    return excess_returns.mean() / excess_returns.std() * np.sqrt(365.25)
 
 # FIXED: Correct Ulcer Index calculation - EXACTLY like Backtest_Engine.py
 def calculate_ulcer_index(series):
@@ -3955,7 +3955,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 if len(returns_t_vol) < 2:
                     vol_vals[t] = np.nan
                 else:
-                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365)
+                    vol_vals[t] = returns_t_vol.std() * np.sqrt(365.25)
                 metrics[t]['Volatility'] = vol_vals[t]
 
         # attach raw momentum
@@ -7492,11 +7492,12 @@ with st.sidebar.expander("📈 Broad Long-Term Tickers", expanded=False):
     """)
 
 # Special Tickers Section
-# Use session state to control expander state
-if 'no_cache_strategy_special_tickers_expanded' not in st.session_state:
-    st.session_state.no_cache_strategy_special_tickers_expanded = False
+if 'no_cache_strategy_special_tickers_force_open_once' not in st.session_state:
+    st.session_state.no_cache_strategy_special_tickers_force_open_once = False
 
-with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_state.no_cache_strategy_special_tickers_expanded):
+force_open_special_tickers = st.session_state.no_cache_strategy_special_tickers_force_open_once
+
+with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=force_open_special_tickers):
     st.markdown("**Quick access to ticker aliases that the system accepts:**")
     
     # Get the actual ticker aliases from the function
@@ -7535,7 +7536,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_s
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
                 # Keep expander open and rerun immediately
-                st.session_state.no_cache_strategy_special_tickers_expanded = True
+                st.session_state.no_cache_strategy_special_tickers_force_open_once = True
                 st.rerun()
     
     with col2:
@@ -7575,7 +7576,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_s
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
                 # Keep expander open and rerun immediately
-                st.session_state.no_cache_strategy_special_tickers_expanded = True
+                st.session_state.no_cache_strategy_special_tickers_force_open_once = True
                 st.rerun()
     
     with col3:
@@ -7652,7 +7653,7 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_s
                 # Sync to all portfolios
                 sync_global_tickers_to_all_portfolios()
                 # Keep expander open and rerun immediately
-                st.session_state.no_cache_strategy_special_tickers_expanded = True
+                st.session_state.no_cache_strategy_special_tickers_force_open_once = True
                 st.rerun()
     
     st.markdown("---")
@@ -7666,6 +7667,9 @@ with st.sidebar.expander("🎯 Special Long-Term Tickers", expanded=st.session_s
     st.markdown("- `TNX` → `^TNX` (10Y Treasury Yield, 1962+), `TYX` → `^TYX` (30Y Treasury Yield, 1977+)")
     st.markdown("- `TBILL3M` → `^IRX` (3M Treasury Yield, 1982+), `SHY` → `SHY` (1-3 Year Treasury ETF, 2002+)")
     st.markdown("- `ZEROX` (Cash doing nothing - zero return), `GOLD50` → `GOLD_COMPLETE` (Complete Gold Dataset, 1975+), `ZROZ50` → `ZROZ_COMPLETE` (Complete ZROZ Dataset, 1962+), `TLT50` → `TLT_COMPLETE` (Complete TLT Dataset, 1962+), `BTC50` → `BTC_COMPLETE` (Complete Bitcoin Dataset, 2010+), `GOLDX` → `GC=F` (Gold Futures, 1975+)")
+
+if force_open_special_tickers:
+    st.session_state.no_cache_strategy_special_tickers_force_open_once = False
 
 with st.sidebar.expander("⚡ Leverage & Expense Ratio Guide", expanded=False):
     st.markdown("""
@@ -14498,4 +14502,19 @@ if 'strategy_comparison_ran' in st.session_state and st.session_state.strategy_c
         except Exception as e:
             st.error(f"❌ Error generating PDF: {str(e)}")
             st.exception(e)
+    
+    # Footer - Always visible
+    st.markdown("---")
+    st.markdown("""
+    <div style="
+        text-align: center; 
+        color: #666; 
+        margin: 2rem 0; 
+        padding: 1rem; 
+        font-size: 0.9rem;
+        font-weight: 500;
+    ">
+        Made by Nicolas Cool
+    </div>
+    """, unsafe_allow_html=True)
 
