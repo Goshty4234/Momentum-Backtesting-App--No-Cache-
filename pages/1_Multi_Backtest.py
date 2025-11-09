@@ -5633,7 +5633,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             ma_crossings_data = precompute_ma_crossings(reindexed_data, ma_window, ma_type, tolerance_percent, confirmation_days)
     
     # Handle first rebalance strategy - replace first rebalance date if needed
-    first_rebalance_strategy = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
+    first_rebalance_strategy = st.session_state.get('multi_backtest_first_rebalance_strategy', 'momentum_window_complete')
     if first_rebalance_strategy == "momentum_window_complete" and use_momentum and momentum_windows:
         try:
             # Calculate when momentum window completes
@@ -10452,14 +10452,14 @@ st.sidebar.radio(
 
 # First rebalance strategy option
 if "multi_backtest_first_rebalance_strategy_radio" not in st.session_state:
-    st.session_state["multi_backtest_first_rebalance_strategy_radio"] = st.session_state.get("multi_backtest_first_rebalance_strategy", "rebalancing_date")
+    st.session_state["multi_backtest_first_rebalance_strategy_radio"] = st.session_state.get("multi_backtest_first_rebalance_strategy", "momentum_window_complete")
 st.sidebar.radio(
     "When should the first rebalancing occur?",
     ["rebalancing_date", "momentum_window_complete"],
     format_func=lambda x: "First rebalance on rebalancing date" if x == "rebalancing_date" else "First rebalance when momentum window complete",
     help="""
-    **First rebalance on rebalancing date:** Wait for momentum calculation, then rebalance on the next scheduled date (e.g., 1st of month). More realistic but may delay start.
-    **First rebalance when momentum window complete:** Rebalance immediately when momentum data is ready, even on irregular dates. Faster start but less realistic timing.
+    **First rebalance on rebalancing date:** Wait for momentum calculation, then rebalance on the next scheduled date (e.g., 1st of month). This may delay the start slightly.
+    **First rebalance when momentum window complete:** Rebalance immediately when momentum data is ready, even on irregular dates. This usually produces the quickest start.
     """,
     key="multi_backtest_first_rebalance_strategy_radio",
     on_change=update_first_rebalance_strategy
@@ -13644,7 +13644,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config.pop('equal_if_all_negative', None)
     # Update global settings from session state
     cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
-    cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
+    cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'momentum_window_complete')
     
     # Update custom dates from global session state if enabled
     if st.session_state.get('multi_backtest_use_custom_dates', False):
@@ -15742,7 +15742,7 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config.pop('equal_if_all_negative', None)
             # Update global settings from session state
             cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
-            cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'rebalancing_date')
+            cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'momentum_window_complete')
             
             # Update custom dates from global session state if enabled
             if st.session_state.get('multi_backtest_use_custom_dates', False):
