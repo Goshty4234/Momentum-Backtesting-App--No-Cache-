@@ -14289,6 +14289,17 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                         common_end = min(common_end, user_end)
                 
                 if final_start > common_end:
+                    problematic_ranges = []
+                    for ticker, df in data.items():
+                        if isinstance(df, pd.DataFrame):
+                            first_idx = df.first_valid_index()
+                            last_idx = df.last_valid_index()
+                            if first_idx is not None and first_idx > common_end:
+                                problematic_ranges.append(f"{ticker}: starts {first_idx.date()} (after {common_end.date()})")
+                            elif last_idx is not None and last_idx < final_start:
+                                problematic_ranges.append(f"{ticker}: ends {last_idx.date()} (before {final_start.date()})")
+                    if problematic_ranges:
+                        st.warning("Data availability issue detected for:\n- " + "\n- ".join(problematic_ranges))
                     st.error(f"Start date {final_start.date()} is after end date {common_end.date()}. Cannot proceed.")
                     st.stop()
                 
