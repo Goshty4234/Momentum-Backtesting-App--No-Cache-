@@ -3839,7 +3839,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     dates_rebal = sorted(get_dates_by_freq(rebalancing_frequency, sim_index[0], sim_index[-1], sim_index))
     
     # Handle first rebalance strategy - ensure first rebalance happens after momentum window completes
-    first_rebalance_strategy = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
+    first_rebalance_strategy = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'momentum_window_complete')
     if use_momentum and momentum_windows:
         try:
             # Calculate when momentum window completes
@@ -7729,7 +7729,7 @@ st.sidebar.radio(
 
 # First rebalance strategy option
 if "strategy_comparison_first_rebalance_strategy_radio" not in st.session_state:
-    st.session_state["strategy_comparison_first_rebalance_strategy_radio"] = st.session_state.get("strategy_comparison_first_rebalance_strategy", "rebalancing_date")
+    st.session_state["strategy_comparison_first_rebalance_strategy_radio"] = st.session_state.get("strategy_comparison_first_rebalance_strategy", "momentum_window_complete")
 st.sidebar.radio(
     "When should the first rebalancing occur?",
     ["rebalancing_date", "momentum_window_complete"],
@@ -7812,7 +7812,7 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config.pop('equal_if_all_negative', None)
             # Update global settings from session state
             cleaned_config['start_with'] = st.session_state.get('strategy_comparison_start_with', 'all')
-            cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
+            cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'momentum_window_complete')
             
             # Ensure threshold and maximum allocation settings are included (read from current config)
             cleaned_config['use_minimal_threshold'] = config.get('use_minimal_threshold', False)
@@ -8986,7 +8986,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config.pop('equal_if_all_negative', None)
     # Update global settings from session state
     cleaned_config['start_with'] = st.session_state.get('strategy_comparison_start_with', 'all')
-    cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'rebalancing_date')
+    cleaned_config['first_rebalance_strategy'] = st.session_state.get('strategy_comparison_first_rebalance_strategy', 'momentum_window_complete')
     
     # Update targeted rebalancing settings from session state
     cleaned_config['use_targeted_rebalancing'] = st.session_state.get('strategy_comparison_active_use_targeted_rebalancing', False)
@@ -9330,6 +9330,17 @@ if st.session_state.get('strategy_comparison_run_backtest', False):
                     final_end = min(final_end, user_end)
             
             if final_start > final_end:
+                problematic_ranges = []
+                for ticker, df in data.items():
+                    if isinstance(df, pd.DataFrame):
+                        first_idx = df.first_valid_index()
+                        last_idx = df.last_valid_index()
+                        if first_idx is not None and first_idx > final_end:
+                            problematic_ranges.append(f"{ticker}: starts {first_idx.date()} (after {final_end.date()})")
+                        elif last_idx is not None and last_idx < final_start:
+                            problematic_ranges.append(f"{ticker}: ends {last_idx.date()} (before {final_start.date()})")
+                if problematic_ranges:
+                    st.warning("Data availability issue detected for:\n- " + "\n- ".join(problematic_ranges))
                 st.error(f"Start date {final_start.date()} is after end date {final_end.date()}. Cannot proceed.")
                 st.stop()
             
