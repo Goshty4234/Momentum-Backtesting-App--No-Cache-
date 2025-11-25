@@ -609,6 +609,9 @@ if ticker_symbol:
             
             # BY EXPIRATION Section
             with tabs[available_sections.index("📅 BY EXPIRATION")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "📅 BY EXPIRATION"
+                
                 st.subheader("📅 Options Chain by Expiration")
                 
                 # Display current price with timestamp and cache status
@@ -966,6 +969,9 @@ if ticker_symbol:
             
             # COMPLETE LIST Section
             with tabs[available_sections.index("📋 COMPLETE LIST")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "📋 COMPLETE LIST"
+                
                 st.subheader("📋 Complete Options List")
                 
                 # Display current price with timestamp
@@ -1033,6 +1039,9 @@ if ticker_symbol:
             
             # CALLS ONLY Section
             with tabs[available_sections.index("📈 CALLS ONLY")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "📈 CALLS ONLY"
+                
                 if show_calls and not calls_combined.empty:
                         st.subheader(f"📈 CALL Options ({len(calls_combined)} contracts)")
                         
@@ -1085,6 +1094,9 @@ if ticker_symbol:
             
             # PUTS ONLY Section
             with tabs[available_sections.index("📉 PUTS ONLY")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "📉 PUTS ONLY"
+                
                 if show_puts and not puts_combined.empty:
                         st.subheader(f"📉 PUT Options ({len(puts_combined)} contracts)")
                         
@@ -1137,6 +1149,9 @@ if ticker_symbol:
             
             # OPTION EVOLUTION Section
             with tabs[available_sections.index("📊 OPTION EVOLUTION")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "📊 OPTION EVOLUTION"
+                
                 if show_calls or show_puts:
                     st.subheader("📊 Option Evolution Over Time")
                     st.markdown("**Track the same strike across different expirations**")
@@ -2315,6 +2330,9 @@ if ticker_symbol:
             
             # BARBELL STRATEGY Section
             with tabs[available_sections.index("⚖️ BARBELL STRATEGY")]:
+                # Update session state to keep this tab selected on rerun
+                st.session_state.selected_section = "⚖️ BARBELL STRATEGY"
+                
                 st.subheader("⚖️ Barbell Strategy Calculator")
                 st.markdown("**Simulate LEAPS + Cash strategy - View returns based on underlying movement at expiration**")
                 
