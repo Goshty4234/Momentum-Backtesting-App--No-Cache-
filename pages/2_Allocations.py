@@ -2212,7 +2212,9 @@ def get_multiple_tickers_info_batch(ticker_list):
         if base_ticker.upper() in leveraged_map:
             resolved = leveraged_map[base_ticker.upper()]
         else:
-            resolved = resolve_index_to_etf_for_stats(resolve_ticker_alias(base_ticker, for_stats=True))
+            # Use original ticker for price data (not converted ticker)
+            # This ensures USD tickers show USD prices, CAD tickers show CAD prices
+            resolved = base_ticker
         
         resolved_map[ticker_symbol] = resolved
     
@@ -2562,6 +2564,133 @@ def calculate_mwrr(values, cash_flows, dates):
             return np.nan
     except Exception:
         return np.nan
+
+def get_exchange_rate(from_currency, to_currency, force_refresh=False):
+    """
+    Get exchange rate between two currencies using yfinance with disk cache.
+    Cache expires every 4 hours to ensure fresh rates even when converting mid-day.
+    
+    Args:
+        from_currency: Source currency (e.g., 'CAD', 'USD', 'EUR')
+        to_currency: Target currency (e.g., 'CAD', 'USD', 'EUR')
+        force_refresh: If True, bypass cache and fetch fresh rate
+    
+    Returns:
+        tuple: (exchange_rate, rate_date, from_cache) - Exchange rate, date of the rate, and whether it came from cache
+    """
+    if from_currency == to_currency:
+        return (1.0, datetime.now(), False)  # Not from cache, but no API call needed
+    
+    # Create cache key based on currency pair (cache expires every 4 hours)
+    # Version 2: Always use current time for rate_date display (invalidates old cache with 00:00:00 dates)
+    cache_key = f"exchange_rate_v2_{from_currency}_{to_currency}"
+    cache_dir = '.streamlit/exchange_rate_cache'
+    
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
+    
+    disk_cache = dc.Cache(cache_dir)
+    
+    # If force refresh, delete cache entry first
+    if force_refresh:
+        try:
+            disk_cache.delete(cache_key)
+        except:
+            pass
+    
+    # Try to get from cache first (cache stores both rate and fetch time)
+    # Note: diskcache.get() returns None if key doesn't exist OR if expired
+    if not force_refresh:
+        cached_data = disk_cache.get(cache_key)
+        if cached_data is not None:
+            # Handle both old format (just rate) and new format (dict with rate and fetch_time)
+            if isinstance(cached_data, dict):
+                # New format: dict with 'rate' and 'fetch_time'
+                cached_rate = float(cached_data.get('rate', cached_data))
+                fetch_time = cached_data.get('fetch_time', datetime.now())
+                # Convert fetch_time to datetime if it's a string
+                if isinstance(fetch_time, str):
+                    fetch_time = datetime.fromisoformat(fetch_time)
+                elif not isinstance(fetch_time, datetime):
+                    fetch_time = datetime.now()
+            elif isinstance(cached_data, tuple):
+                # Old format: tuple (rate, time)
+                cached_rate = float(cached_data[0])
+                fetch_time = cached_data[1] if len(cached_data) > 1 else datetime.now()
+            else:
+                # Old format: just rate (float)
+                cached_rate = float(cached_data)
+                fetch_time = datetime.now()
+            # Return cached rate with original fetch time (shows when rate was retrieved)
+            return (cached_rate, fetch_time, True)  # True = from cache
+    
+    # If not in cache (or force_refresh), fetch from API
+    try:
+        # Yahoo Finance uses format: CADUSD=X (CAD to USD) or USDCAD=X (USD to CAD)
+        # We need to figure out which format to use
+        pair = f"{from_currency}{to_currency}=X"
+        ticker = yf.Ticker(pair)
+        hist = ticker.history(period="1d")
+        
+        if not hist.empty:
+            rate = float(hist['Close'].iloc[-1])
+        else:
+            # Try reverse pair
+            pair = f"{to_currency}{from_currency}=X"
+            ticker = yf.Ticker(pair)
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                rate = float(hist['Close'].iloc[-1])
+                rate = 1.0 / rate  # Inverse the rate
+            else:
+                raise Exception("No data available")
+        
+        # Cache both rate and fetch time for 4 hours (14400 seconds)
+        # Store as dict to preserve fetch time
+        fetch_time = datetime.now()
+        cache_data = {
+            'rate': rate,
+            'fetch_time': fetch_time.isoformat()  # Store as ISO string for diskcache compatibility
+        }
+        disk_cache.set(cache_key, cache_data, expire=14400)
+        return (rate, fetch_time, False)  # False = from API (live)
+        
+    except Exception as e:
+        # Fallback to common rates if API fails
+        fallback_rates = {
+            ('CAD', 'USD'): 0.74,  # Approximate: 1 CAD = 0.74 USD
+            ('USD', 'CAD'): 1.35,  # Approximate: 1 USD = 1.35 CAD
+            ('EUR', 'USD'): 1.08,
+            ('USD', 'EUR'): 0.93,
+            ('GBP', 'USD'): 1.27,
+            ('USD', 'GBP'): 0.79,
+        }
+        if (from_currency, to_currency) in fallback_rates:
+            rate = fallback_rates[(from_currency, to_currency)]
+            # Cache fallback rates too (but shorter expiry - 1 hour)
+            # Store as dict with rate and fetch_time for consistency
+            fetch_time = datetime.now()
+            cache_data = {
+                'rate': rate,
+                'fetch_time': fetch_time.isoformat()
+            }
+            disk_cache.set(cache_key, cache_data, expire=3600)
+            return (rate, fetch_time, False)  # False = from fallback (not cache)
+        # Default to 1.0 if unknown
+        fetch_time = datetime.now()
+        cache_data = {
+            'rate': 1.0,
+            'fetch_time': fetch_time.isoformat()
+        }
+        disk_cache.set(cache_key, cache_data, expire=3600)
+        return (1.0, fetch_time, False)  # False = from fallback (not cache)
+
+def convert_currency(amount, from_currency, to_currency):
+    """Convert amount from one currency to another."""
+    if from_currency == to_currency:
+        return amount
+    rate, _, _ = get_exchange_rate(from_currency, to_currency)
+    return amount * rate
 # Backtest_Engine.py
 import streamlit as st
 import pandas as pd
@@ -7593,10 +7722,126 @@ if "alloc_active_name" not in st.session_state:
 
 col_left, col_right = st.columns([1, 1])
 with col_left:
+    # Handle pending portfolio value update (before widget instantiation)
+    if "_pending_portfolio_value" in st.session_state:
+        st.session_state["alloc_active_initial"] = st.session_state["_pending_portfolio_value"]
+        del st.session_state["_pending_portfolio_value"]
+    
     if "alloc_active_initial" not in st.session_state:
         # Treat this as the current portfolio value (not a backtest initial cash)
         st.session_state["alloc_active_initial"] = int(active_portfolio.get('initial_value', 0))
-    st.number_input("Portfolio Value ($)", min_value=0, step=1000, format="%d", key="alloc_active_initial", on_change=update_initial, help="Current total portfolio value used to compute required shares.")
+    st.number_input(
+        "Portfolio Value ($)",
+        min_value=0,
+        step=1000,
+        format="%d",
+        key="alloc_active_initial",
+        on_change=update_initial,
+        help="Total portfolio value. Shares are calculated using each ticker's price in its native currency (USD for US stocks, CAD for Canadian stocks, etc.). Use the currency converter below to convert from other currencies."
+    )
+    
+    # Currency converter - convert and apply to portfolio value
+    with st.expander("💱 Currency Converter", expanded=False):
+        currency_options = ['CAD', 'EUR', 'GBP', 'JPY', 'AUD', 'CHF', 'USD']
+        col_from, col_to = st.columns([1, 1])
+        with col_from:
+            from_curr = st.selectbox(
+                "From Currency",
+                currency_options,
+                key="conv_from",
+                index=0,  # Default to CAD
+                help="Select the currency you want to convert from"
+            )
+        with col_to:
+            to_curr = st.selectbox(
+                "To Currency",
+                currency_options,
+                key="conv_to",
+                index=6,  # Default to USD
+                help="Select the currency you want to convert to"
+            )
+        
+        conv_amount = st.number_input(
+            "Amount",
+            min_value=0,
+            value=0,
+            step=100,
+            format="%d",
+            key="conv_amount_input",
+            help=f"Enter the amount in {from_curr} to convert to {to_curr}"
+        )
+        
+        # Clear cache button
+        if st.button("🗑️ Clear Exchange Rate Cache", key="clear_exchange_cache", help="Clear cached exchange rates to force fresh API calls"):
+            cache_dir = '.streamlit/exchange_rate_cache'
+            if os.path.exists(cache_dir):
+                try:
+                    disk_cache = dc.Cache(cache_dir)
+                    disk_cache.clear()
+                    # Set flag to force refresh on next call
+                    st.session_state["_force_refresh_exchange_rate"] = True
+                    st.success("✅ Exchange rate cache cleared! Refreshing rates...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error clearing cache: {e}")
+            else:
+                st.info("Cache directory does not exist (no cache to clear)")
+        
+        # Auto-convert and display result (only if amount > 0)
+        if conv_amount > 0:
+            try:
+                # Check if we need to force refresh (but don't delete cache here - let get_exchange_rate handle it)
+                force_refresh = st.session_state.get("_force_refresh_exchange_rate", False)
+                if force_refresh:
+                    # Clear the flag
+                    del st.session_state["_force_refresh_exchange_rate"]
+                
+                # Get exchange rate (will use cache if available, otherwise fetch from API)
+                # Pass force_refresh flag to get_exchange_rate if needed
+                # Cache is valid for 4 hours, so no unnecessary API calls
+                rate_result = get_exchange_rate(from_curr, to_curr, force_refresh=force_refresh)
+                # Extract rate, date, and cache status
+                if isinstance(rate_result, tuple) and len(rate_result) >= 2:
+                    rate = float(rate_result[0])
+                    rate_date = rate_result[1]
+                    from_cache = rate_result[2] if len(rate_result) >= 3 else False
+                else:
+                    # Fallback if not a tuple
+                    rate = float(rate_result) if not isinstance(rate_result, tuple) else float(rate_result[0])
+                    rate_date = datetime.now()
+                    from_cache = False
+                
+                # Ensure rate is a float
+                rate = float(rate)
+                converted = convert_currency(conv_amount, from_curr, to_curr)
+                
+                # Ensure converted is a float
+                converted = float(converted)
+                
+                # Format date
+                if isinstance(rate_date, pd.Timestamp):
+                    rate_date_str = rate_date.strftime("%Y-%m-%d %H:%M:%S")
+                elif hasattr(rate_date, 'strftime'):
+                    rate_date_str = rate_date.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    rate_date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Display cache status
+                cache_status = "✅ Using cache" if from_cache else "🔄 Live rate"
+                
+                st.info(f"**{conv_amount:,} {from_curr} = {converted:,.2f} {to_curr}**\n\n"
+                       f"Rate: 1 {from_curr} = {rate:.4f} {to_curr}\n"
+                       f"Rate Date: {rate_date_str}\n"
+                       f"Status: {cache_status}")
+                
+                # Button to use converted value as portfolio value
+                if st.button(f"Use {converted:,.2f} {to_curr} as Portfolio Value", key="use_converted"):
+                    # Store value in temporary key that will be used on next rerun
+                    st.session_state["_pending_portfolio_value"] = int(converted)
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Conversion error: {e}")
+        
 # Removed Added Amount / Added Frequency UI - allocation tracker is not running periodic additions
 
 # Swap positions: show Rebalancing Frequency first, then Added Frequency.
@@ -10733,17 +10978,33 @@ if st.session_state.get('alloc_backtest_run', False):
                         shares = 0.0
                         total_val = portfolio_value * alloc_pct
                     else:
-                        df = raw_data.get(tk)
+                        # ALWAYS fetch price using original ticker (not converted ticker)
+                        # This ensures USD tickers show USD prices, CAD tickers show CAD prices
+                        base_ticker, _ = parse_leverage_ticker(tk)
                         price = None
-                        # Ensure df is a valid DataFrame with Close prices before accessing
-                        if isinstance(df, pd.DataFrame) and 'Close' in df.columns and not df['Close'].dropna().empty:
-                            if price_date is None:
-                                try:
-                                    price = float(df['Close'].iloc[-1])
-                                except Exception:
-                                    price = None
-                            else:
-                                price = _price_on_or_before(df, price_date)
+                        try:
+                            # Use original ticker for price (preserves currency)
+                            original_hist = get_ticker_data(base_ticker, period='1d')
+                            if original_hist is not None and not original_hist.empty:
+                                if price_date is None:
+                                    price = float(original_hist['Close'].iloc[-1])
+                                else:
+                                    price = _price_on_or_before(original_hist, price_date)
+                        except Exception:
+                            pass
+                        
+                        # Fallback: Use raw_data if original ticker fetch fails
+                        if price is None:
+                            df = raw_data.get(tk)
+                            # Ensure df is a valid DataFrame with Close prices before accessing
+                            if isinstance(df, pd.DataFrame) and 'Close' in df.columns and not df['Close'].dropna().empty:
+                                if price_date is None:
+                                    try:
+                                        price = float(df['Close'].iloc[-1])
+                                    except Exception:
+                                        price = None
+                                else:
+                                    price = _price_on_or_before(df, price_date)
                         try:
                             if price and price > 0:
                                 allocation_value = portfolio_value * alloc_pct
@@ -10869,14 +11130,31 @@ if st.session_state.get('alloc_backtest_run', False):
                         # Get info from batch results
                         info = all_infos.get(ticker, {})
                         
-                        # Get current price
-                        current_price = info.get('currentPrice', info.get('regularMarketPrice', None))
+                        # ALWAYS fetch price using original ticker (not converted ticker)
+                        # This ensures USD tickers show USD prices, CAD tickers show CAD prices
+                        base_ticker, _ = parse_leverage_ticker(ticker)
+                        current_price = None
+                        try:
+                            # Use original ticker for price (preserves currency)
+                            original_hist = get_ticker_data(base_ticker, period='1d')
+                            if original_hist is not None and not original_hist.empty:
+                                current_price = original_hist['Close'].iloc[-1]
+                        except Exception:
+                            pass
+                        
+                        # Fallback: If original ticker fails, try info dict (but this may be in wrong currency)
                         if current_price is None:
-                            # Try to get from historical data using get_ticker_data_for_valuation
-                            # This ensures leveraged tickers (NVDL) use underlying data (NVDA) for price
-                            hist_data = get_ticker_data_for_valuation(ticker, period='1d')
-                            if hist_data is not None and not hist_data.empty:
-                                current_price = hist_data['Close'].iloc[-1]
+                            current_price = info.get('currentPrice', info.get('regularMarketPrice', info.get('price', info.get('lastPrice', info.get('close', None)))))
+                        
+                        # Final fallback: For leveraged tickers (NVDL → NVDA), use valuation function
+                        if current_price is None:
+                            try:
+                                # Only use this for leveraged tickers, not for currency conversion
+                                hist_data = get_ticker_data_for_valuation(ticker, period='1d')
+                                if hist_data is not None and not hist_data.empty:
+                                    current_price = hist_data['Close'].iloc[-1]
+                            except Exception:
+                                pass
                         
                         # Calculate allocation values
                         alloc_pct = float(alloc_dict.get(ticker, 0))
@@ -13176,17 +13454,33 @@ if st.session_state.get('alloc_backtest_run', False):
                         shares = 0
                         total_val = portfolio_value * alloc_pct
                     else:
-                        df = raw_data.get(tk)
+                        # ALWAYS fetch price using original ticker (not converted ticker)
+                        # This ensures USD tickers show USD prices, CAD tickers show CAD prices
+                        base_ticker, _ = parse_leverage_ticker(tk)
                         price = None
-                        if isinstance(df, pd.DataFrame) and 'Close' in df.columns and not df['Close'].dropna().empty:
-                            if price_date is None:
-                                # use latest price
-                                try:
-                                    price = float(df['Close'].iloc[-1])
-                                except Exception:
-                                    price = None
-                            else:
-                                price = _price_on_or_before(df, price_date)
+                        try:
+                            # Use original ticker for price (preserves currency)
+                            original_hist = get_ticker_data(base_ticker, period='1d')
+                            if original_hist is not None and not original_hist.empty:
+                                if price_date is None:
+                                    price = float(original_hist['Close'].iloc[-1])
+                                else:
+                                    price = _price_on_or_before(original_hist, price_date)
+                        except Exception:
+                            pass
+                        
+                        # Fallback: Use raw_data if original ticker fetch fails
+                        if price is None:
+                            df = raw_data.get(tk)
+                            if isinstance(df, pd.DataFrame) and 'Close' in df.columns and not df['Close'].dropna().empty:
+                                if price_date is None:
+                                    # use latest price
+                                    try:
+                                        price = float(df['Close'].iloc[-1])
+                                    except Exception:
+                                        price = None
+                                else:
+                                    price = _price_on_or_before(df, price_date)
                         try:
                             if price and price > 0:
                                 allocation_value = portfolio_value * alloc_pct
