@@ -19,7 +19,7 @@ if 'api_call_count' not in st.session_state:
 def get_ticker_with_cache(ticker_symbol: str):
     """Get yf.Ticker object with 4-hour cache"""
     try:
-        cache_key = f"ticker_obj_{ticker_symbol}
+        cache_key = f"ticker_obj_{ticker_symbol}"
         cache_dir = '.streamlit/ticker_cache'
         if not os.path.exists(cache_dir):
             os.makedirs(cache_dir, exist_ok=True)
