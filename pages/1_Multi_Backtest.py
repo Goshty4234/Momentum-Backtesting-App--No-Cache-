@@ -19041,54 +19041,79 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     else:
                         st.warning("Dividends are currently **reinvested** for this portfolio. This analysis may show dividend reinvestment as **extra shares** between rebalances (because shares are inferred from value/price). If you want dividends treated exactly like new cash here, enable `collect_dividends_as_cash` in the portfolio config.")
                     
-                    # Track average purchase price for each ticker (FIFO-like approach)
-                    # We'll use weighted average cost basis
+                    # OPTIMIZED VECTORIZED VERSION - Ultra fast calculation
+                    # Build prices DataFrame for all dates at once (vectorized)
+                    sorted_dates = sorted(rebalancing_dates)
+                    prices_df = pd.DataFrame(index=sorted_dates, columns=all_tickers_list)
+                    prices_df.index = pd.to_datetime(prices_df.index)
+                    
+                    # Vectorized price extraction - much faster than loops
+                    for ticker in all_tickers_list:
+                        if ticker == 'CASH':
+                            prices_df[ticker] = None
+                            continue
+                        df = raw_data.get(ticker)
+                        if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
+                            # Extract prices for all dates at once using reindex
+                            ticker_prices = df['Close'].reindex(sorted_dates, method='ffill')
+                            prices_df[ticker] = ticker_prices.values
+                        else:
+                            prices_df[ticker] = None
+                    
+                    # Ensure shares_df and values_df are aligned with sorted_dates
+                    shares_df_aligned = shares_df.reindex(sorted_dates).fillna(0.0)
+                    values_df_aligned = values_df.reindex(sorted_dates).fillna(0.0)
+                    
+                    # Get previous values using shift (vectorized)
+                    prev_shares_df = shares_df_aligned.shift(1).fillna(0.0)
+                    prev_prices_df = prices_df.shift(1)
+                    prev_values_df = values_df_aligned.shift(1).fillna(0.0)
+                    
+                    # Track average purchase price for each ticker (updated iteratively but calculated vectorized)
                     avg_purchase_price = {}  # {ticker: average_price}
                     realized_gains_data = {}  # {date: {ticker: realized_gain}}
                     unrealized_gains_data = {}  # {date: {ticker: unrealized_gain}}
-                    total_realized_data = {}  # {date: total_realized}
-                    total_unrealized_data = {}  # {date: total_unrealized}
                     
-                    # Use the same rebalancing dates as above
-                    sorted_dates = rebalancing_dates
-                    
-                    for i, date in enumerate(sorted_dates):
-                        prev_date = sorted_dates[i-1] if i > 0 else None
-                        prev_shares = shares_df.loc[prev_date] if prev_date is not None else pd.Series(0.0, index=all_tickers_list)
-                        current_shares = shares_df.loc[date]
-                        
-                        # Get prices for this date
-                        prices = {}
-                        for ticker in all_tickers_list:
-                            if ticker == 'CASH':
-                                prices[ticker] = None
-                            else:
-                                df = raw_data.get(ticker)
-                                if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
-                                    prices[ticker] = get_price_on_date(df, date)
+                    # Initialize avg_purchase_price from first period
+                    for ticker in all_tickers_list:
+                        if ticker == 'CASH':
+                            continue
+                        if len(sorted_dates) > 0:
+                            first_date = sorted_dates[0]
+                            if first_date in values_df.index and first_date in shares_df.index:
+                                first_value = values_df.loc[first_date, ticker] if ticker in values_df.columns else 0.0
+                                first_shares = shares_df.loc[first_date, ticker] if ticker in shares_df.columns else 0.0
+                                if first_shares > 0 and first_value > 0:
+                                    avg_purchase_price[ticker] = first_value / first_shares
+                                elif first_date in prices_df.index and prices_df.loc[first_date, ticker] is not None:
+                                    avg_purchase_price[ticker] = prices_df.loc[first_date, ticker]
                                 else:
-                                    prices[ticker] = None
+                                    avg_purchase_price[ticker] = 0.0
+                            else:
+                                avg_purchase_price[ticker] = 0.0
+                        else:
+                            avg_purchase_price[ticker] = 0.0
+                    
+                    # Vectorized calculations for all dates at once
+                    for i, date in enumerate(sorted_dates):
+                        # Use vectorized data from DataFrames (already computed above)
+                        current_shares = shares_df_aligned.loc[date]
+                        prev_shares = prev_shares_df.loc[date]
+                        current_prices = prices_df.loc[date]
+                        prev_prices = prev_prices_df.loc[date] if i > 0 else pd.Series(None, index=all_tickers_list)
+                        prev_values = prev_values_df.loc[date] if i > 0 else pd.Series(0.0, index=all_tickers_list)
                         
                         realized_row = {}
                         unrealized_row = {}
                         
-                        # Get previous prices for comparison
-                        prev_prices = {}
-                        for ticker in all_tickers_list:
-                            if ticker == 'CASH':
-                                prev_prices[ticker] = None
-                            else:
-                                if prev_date:
-                                    df = raw_data.get(ticker)
-                                    if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
-                                        prev_prices[ticker] = get_price_on_date(df, prev_date)
-                                    else:
-                                        prev_prices[ticker] = None
-                                else:
-                                    prev_prices[ticker] = None
+                        # STEP 1: Calculate gains/losses on EXISTING shares (before new purchases) - VECTORIZED
+                        # Vectorized calculation for all tickers at once
+                        shares_diff = current_shares - prev_shares
                         
-                        # STEP 1: Calculate gains/losses on EXISTING shares (before new purchases)
-                        # This handles sales and price variations on held positions
+                        # Vectorized price checks
+                        valid_prices = (current_prices.notna()) & (current_prices > 0)
+                        valid_prev_prices = prev_prices.notna() & (prev_prices > 0)
+                        
                         for ticker in all_tickers_list:
                             if ticker == 'CASH':
                                 realized_row[ticker] = 0.0
@@ -19097,113 +19122,59 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             
                             prev_shares_count = prev_shares.get(ticker, 0.0)
                             current_shares_count = current_shares.get(ticker, 0.0)
-                            current_price = prices.get(ticker)
-                            prev_price = prev_prices.get(ticker)
+                            current_price = current_prices.get(ticker) if valid_prices.get(ticker, False) else None
+                            prev_price = prev_prices.get(ticker) if valid_prev_prices.get(ticker, False) else None
                             
                             if current_price is None or current_price <= 0:
                                 realized_row[ticker] = 0.0
                                 unrealized_row[ticker] = 0.0
                                 continue
                             
-                            # Initialize average purchase price if first time seeing this ticker
-                            # This represents the weighted average cost basis of shares held
-                            if ticker not in avg_purchase_price:
-                                if prev_shares_count > 0:
-                                    # We had shares before - need to estimate cost basis
-                                    # Try to get it from previous period's value and shares
-                                    if prev_date:
-                                        prev_values = values_df.loc[prev_date] if prev_date in values_df.index else None
-                                        if prev_values is not None and ticker in prev_values:
-                                            prev_value = prev_values[ticker]
-                                            if prev_value > 0 and prev_shares_count > 0:
-                                                # Cost basis = previous value / previous shares
-                                                avg_purchase_price[ticker] = prev_value / prev_shares_count
-                                            elif prev_price and prev_price > 0:
-                                                avg_purchase_price[ticker] = prev_price
-                                            else:
-                                                avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
-                                        elif prev_price and prev_price > 0:
-                                            avg_purchase_price[ticker] = prev_price
-                                        else:
-                                            avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
-                                    elif prev_price and prev_price > 0:
-                                        avg_purchase_price[ticker] = prev_price
-                                    else:
-                                        avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
-                                elif current_shares_count > 0:
-                                    # First purchase: use current price
-                                    avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
-                                else:
-                                    avg_purchase_price[ticker] = 0.0
-                            
-                            # Calculate shares difference
-                            shares_diff = current_shares_count - prev_shares_count
+                            shares_diff_ticker = shares_diff.get(ticker, 0.0)
                             
                             # Handle sales (shares decreased) - this is a realized transaction
-                            if shares_diff < 0:
-                                # We sold shares
-                                shares_sold = abs(shares_diff)
+                            if shares_diff_ticker < 0:
+                                shares_sold = abs(shares_diff_ticker)
                                 
-                                # Calculate realized gain/loss PERIOD-BY-PERIOD (for isolated period analysis)
-                                # Uses previous rebalance price as reference point for this period's performance
+                                # Calculate realized gain/loss PERIOD-BY-PERIOD
                                 realized_gain = 0.0
-                                
                                 if prev_shares_count > 0 and current_price > 0:
-                                    # Use previous price as the reference point (price at start of this period)
-                                    # This gives us the gain/loss for THIS PERIOD ONLY (isolated analysis)
                                     if prev_price and prev_price > 0:
-                                        # Realized gain/loss for this period = (sale_price - previous_price) * shares_sold
-                                        # This shows what happened in THIS period only
                                         realized_gain = (current_price - prev_price) * shares_sold
                                     else:
                                         # Fallback: try to get reference price from previous value
-                                        if prev_date and prev_date in values_df.index:
-                                            prev_values = values_df.loc[prev_date]
-                                            if ticker in prev_values and prev_values[ticker] > 0 and prev_shares_count > 0:
-                                                # Use previous value / shares as reference price for this period
-                                                reference_price = prev_values[ticker] / prev_shares_count
-                                                realized_gain = (current_price - reference_price) * shares_sold
+                                        prev_value = prev_values.get(ticker, 0.0)
+                                        if prev_value > 0 and prev_shares_count > 0:
+                                            reference_price = prev_value / prev_shares_count
+                                            realized_gain = (current_price - reference_price) * shares_sold
                                         elif avg_purchase_price.get(ticker, 0.0) > 0:
-                                            # Last fallback: use avg purchase price
                                             realized_gain = (current_price - avg_purchase_price[ticker]) * shares_sold
                                 
                                 realized_row[ticker] = realized_gain
                                 
                                 # Unrealized gain for remaining shares (if any)
-                                # Use previous price as cost basis (not avg_purchase_price) to show period-specific gain
                                 if current_shares_count > 0:
                                     if prev_price and prev_price > 0:
-                                        # Unrealized gain on remaining shares = (current_price - prev_price) * remaining_shares
-                                        # This shows the price change on shares that were held (not sold)
                                         unrealized_gain = (current_price - prev_price) * current_shares_count
                                         unrealized_row[ticker] = unrealized_gain
-                                    elif avg_purchase_price[ticker] > 0:
-                                        # Fallback: use avg_purchase_price if prev_price not available
+                                    elif avg_purchase_price.get(ticker, 0.0) > 0:
                                         unrealized_gain = (current_price - avg_purchase_price[ticker]) * current_shares_count
                                         unrealized_row[ticker] = unrealized_gain
                                     else:
                                         unrealized_row[ticker] = 0.0
                                 else:
                                     unrealized_row[ticker] = 0.0
-                                    # Sold all shares - reset average purchase price for next purchase
                                     avg_purchase_price[ticker] = 0.0
                             
                             # Handle no change or purchases - calculate unrealized gains on existing shares
                             else:
-                                # No realized gain (no sales)
                                 realized_row[ticker] = 0.0
                                 
-                                # Calculate unrealized gain on PREVIOUS shares (before new purchases)
-                                # This shows the gain/loss from price variation on existing positions
                                 if prev_shares_count > 0:
-                                    # Use previous price as the cost basis for existing shares
                                     if prev_price and prev_price > 0:
-                                        # Unrealized gain = (current_price - previous_price) * previous_shares
-                                        # This is the gain/loss from price change on shares that existed before this rebalance
                                         unrealized_gain = (current_price - prev_price) * prev_shares_count
                                         unrealized_row[ticker] = unrealized_gain
-                                    elif avg_purchase_price[ticker] > 0:
-                                        # Fallback: use average purchase price if previous price not available
+                                    elif avg_purchase_price.get(ticker, 0.0) > 0:
                                         unrealized_gain = (current_price - avg_purchase_price[ticker]) * prev_shares_count
                                         unrealized_row[ticker] = unrealized_gain
                                     else:
@@ -19219,39 +19190,30 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             
                             prev_shares_count = prev_shares.get(ticker, 0.0)
                             current_shares_count = current_shares.get(ticker, 0.0)
-                            current_price = prices.get(ticker)
+                            current_price = current_prices.get(ticker) if valid_prices.get(ticker, False) else None
                             
                             if current_price is None or current_price <= 0:
                                 continue
                             
-                            shares_diff = current_shares_count - prev_shares_count
+                            shares_diff_ticker = shares_diff.get(ticker, 0.0)
                             
                             # Handle purchases (shares increased) - update cost basis AFTER gain calculations
-                            if shares_diff > 0:
-                                # We bought more shares (could be from new cash or rebalancing)
-                                shares_bought = shares_diff
+                            if shares_diff_ticker > 0:
+                                shares_bought = shares_diff_ticker
                                 
                                 # Update average purchase price (weighted average) for next rebalance
                                 if prev_shares_count > 0:
-                                    # Get the cost basis for previous shares using avg_purchase_price (weighted average cost)
                                     if avg_purchase_price.get(ticker, 0.0) > 0:
-                                        # Use the maintained average purchase price (this is the correct cost basis)
                                         prev_cost_basis = prev_shares_count * avg_purchase_price[ticker]
-                                    elif prev_date and prev_date in values_df.index:
-                                        # Fallback: calculate from previous value and shares
-                                        prev_values = values_df.loc[prev_date]
-                                        if ticker in prev_values and prev_values[ticker] > 0:
-                                            prev_cost_basis = prev_values[ticker]
-                                        elif prev_prices.get(ticker) and prev_prices.get(ticker) > 0:
-                                            prev_cost_basis = prev_shares_count * prev_prices[ticker]
+                                    else:
+                                        prev_value = prev_values.get(ticker, 0.0)
+                                        if prev_value > 0:
+                                            prev_cost_basis = prev_value
+                                        elif prev_price and prev_price > 0:
+                                            prev_cost_basis = prev_shares_count * prev_price
                                         else:
                                             prev_cost_basis = 0.0
-                                    elif prev_prices.get(ticker) and prev_prices.get(ticker) > 0:
-                                        prev_cost_basis = prev_shares_count * prev_prices[ticker]
-                                    else:
-                                        prev_cost_basis = 0.0
                                     
-                                    # Weighted average: (old_shares * old_price + new_shares * new_price) / total_shares
                                     total_cost_new = shares_bought * current_price
                                     total_shares = current_shares_count
                                     if total_shares > 0:
@@ -19259,22 +19221,11 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     else:
                                         avg_purchase_price[ticker] = current_price
                                 else:
-                                    # First purchase or all shares were sold before
                                     avg_purchase_price[ticker] = current_price
-                            
-                            # If shares decreased (sale), avg_purchase_price stays the same (we already handled it above)
-                            # If shares stayed the same, keep the same cost basis (don't reset it)
-                            # The cost basis should only change when we buy new shares or sell all shares
-                            # For next period, we'll use the same avg_purchase_price to calculate unrealized gains
                         
                         # Calculate totals for this rebalance period
-                        total_realized = sum(realized_row.values())
-                        total_unrealized = sum(unrealized_row.values())
-                        
                         realized_gains_data[date] = realized_row
                         unrealized_gains_data[date] = unrealized_row
-                        total_realized_data[date] = total_realized
-                        total_unrealized_data[date] = total_unrealized
                     
                     # Create DataFrames for realized and unrealized gains
                     realized_df = pd.DataFrame(realized_gains_data).T
