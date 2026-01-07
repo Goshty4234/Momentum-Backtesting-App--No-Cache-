@@ -533,6 +533,7 @@ def get_risk_free_rate_robust(dates):
         for symbol in symbols:
             try:
                 ticker = get_ticker_with_cache(symbol)
+                st.session_state.api_call_count += 1
                 hist = ticker.history(period="max", auto_adjust=False)
                 if hist is not None and not hist.empty and 'Close' in hist.columns:
                     break
@@ -542,6 +543,7 @@ def get_risk_free_rate_robust(dates):
         if ticker is None:
             # Final fallback to ^TNX
             ticker = get_ticker_with_cache("^TNX")
+            st.session_state.api_call_count += 1
         hist = ticker.history(period="max", auto_adjust=False)
         
         if hist is not None and not hist.empty and 'Close' in hist.columns:
@@ -634,6 +636,7 @@ def get_risk_free_rate_robust(dates):
         for symbol in symbols:
             try:
                 ticker = get_ticker_with_cache(symbol)
+                st.session_state.api_call_count += 1
                 hist = ticker.history(period="max", auto_adjust=False)
                 if hist is not None and not hist.empty and 'Close' in hist.columns:
                     break
@@ -643,6 +646,7 @@ def get_risk_free_rate_robust(dates):
         if ticker is None:
             # Final fallback to ^TNX
             ticker = get_ticker_with_cache("^TNX")
+            st.session_state.api_call_count += 1
         hist = ticker.history(period="max", auto_adjust=False)
         
         if hist is not None and not hist.empty and 'Close' in hist.columns:
@@ -986,6 +990,7 @@ def generate_zero_return_data(period="max"):
     """Generate synthetic zero return data for ZEROX ticker"""
     try:
         ref_ticker = get_ticker_with_cache("SPY")
+        st.session_state.api_call_count += 1
         ref_hist = ref_ticker.history(period=period)
         if ref_hist.empty:
             end_date = pd.Timestamp.now()
@@ -1024,6 +1029,7 @@ def get_gold_complete_data(period="max"):
         
         # Get GLD data for recent updates
         gld_ticker = get_ticker_with_cache("GLD")
+        st.session_state.api_call_count += 1
         gld_data = gld_ticker.history(period="max", auto_adjust=True)
         
         if not gld_data.empty:
@@ -1061,6 +1067,7 @@ def get_gold_complete_data(period="max"):
         # Fallback to GLD
         try:
             ticker = get_ticker_with_cache("GLD")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
@@ -1081,6 +1088,7 @@ def get_zroz_complete_data(period="max"):
         if zroz_data is None:
             # Fallback to ZROZ if our custom ticker fails
             ticker = get_ticker_with_cache("ZROZ")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         
         # Convert to the expected format
@@ -1094,6 +1102,7 @@ def get_zroz_complete_data(period="max"):
         # Fallback to ZROZ if anything fails
         try:
             ticker = get_ticker_with_cache("ZROZ")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
@@ -1114,6 +1123,7 @@ def get_tlt_complete_data(period="max"):
         if tlt_data is None:
             # Fallback to TLT if our custom ticker fails
             ticker = get_ticker_with_cache("TLT")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         
         # Convert to the expected format
@@ -1127,6 +1137,7 @@ def get_tlt_complete_data(period="max"):
         # Fallback to TLT if anything fails
         try:
             ticker = get_ticker_with_cache("TLT")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
@@ -1147,6 +1158,7 @@ def get_bitcoin_complete_data(period="max"):
         if bitcoin_data is None:
             # Fallback to BTC-USD if our custom ticker fails
             ticker = get_ticker_with_cache("BTC-USD")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         
         # Convert to the expected format
@@ -1160,6 +1172,7 @@ def get_bitcoin_complete_data(period="max"):
         # Fallback to BTC-USD if anything fails
         try:
             ticker = get_ticker_with_cache("BTC-USD")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
@@ -1180,6 +1193,7 @@ def get_ief_complete_data(period="max"):
     except Exception as e:
         try:
             ticker = get_ticker_with_cache("IEF")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
@@ -1285,6 +1299,7 @@ def get_goldsim_complete_data(period="max"):
             print("⚠️ WARNING: GOLDSIM ticker returned empty data, falling back to GLD")
             # Fallback to GLD if GOLDSIM fails
             ticker = get_ticker_with_cache("GLD")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
             
     except ImportError as e:
@@ -1297,9 +1312,123 @@ def get_goldsim_complete_data(period="max"):
         # Fallback to GLD if everything fails
         try:
             ticker = get_ticker_with_cache("GLD")
+            st.session_state.api_call_count += 1
             return ticker.history(period=period, auto_adjust=True)[["Close", "Dividends"]]
         except:
             return pd.DataFrame()
+
+def get_multiple_tickers_info_batch(ticker_list):
+    """
+    TRUE BATCH download ticker info for multiple tickers using yahooquery.
+    
+    Args:
+        ticker_list: List of ticker symbols
+        
+    Returns:
+        dict: {ticker: {info_dict}} for each ticker
+    """
+    results = {}
+    
+    # Initialize API call counter if not exists
+    if 'api_call_count' not in st.session_state:
+        st.session_state.api_call_count = 0
+    
+    # Resolve ticker aliases
+    resolved_map = {}
+    for ticker_symbol in ticker_list:
+        try:
+            base_ticker, _ = parse_leverage_ticker(ticker_symbol)
+            resolved_ticker = resolve_ticker_alias(base_ticker, for_stats=True)
+            resolved_map[ticker_symbol] = resolved_ticker
+        except Exception:
+            resolved_map[ticker_symbol] = ticker_symbol
+    
+    # Get unique resolved tickers
+    unique_resolved = list(set(resolved_map.values()))
+    
+    # TRUE BATCH CALL using yahooquery
+    try:
+        from yahooquery import Ticker as YahooQueryTicker
+        
+        batch_ticker = YahooQueryTicker(unique_resolved)
+        key_stats = batch_ticker.summary_detail
+        
+        # Count this as 1 API call
+        st.session_state.api_call_count += 1
+        
+        # Process results
+        info_results = {}
+        for resolved in unique_resolved:
+            try:
+                if resolved in key_stats and key_stats[resolved]:
+                    stats = key_stats[resolved]
+                    info_results[resolved] = {
+                        'trailingPE': stats.get('trailingPE'),
+                        'forwardPE': stats.get('forwardPE'),
+                        'priceToBook': stats.get('priceToBook'),
+                        'priceToSalesTrailing12Months': stats.get('priceToSalesTrailing12Months'),
+                        'enterpriseToRevenue': stats.get('enterpriseToRevenue'),
+                        'enterpriseToEbitda': stats.get('enterpriseToEbitda'),
+                        'beta': stats.get('beta'),
+                        'marketCap': stats.get('marketCap'),
+                        'totalCash': stats.get('totalCash'),
+                        'totalDebt': stats.get('totalDebt'),
+                        'returnOnEquity': stats.get('returnOnEquity'),
+                        'returnOnAssets': stats.get('returnOnAssets'),
+                        'debtToEquity': stats.get('debtToEquity'),
+                        'currentRatio': stats.get('currentRatio'),
+                        'quickRatio': stats.get('quickRatio'),
+                        'grossMargins': stats.get('grossMargins'),
+                        'operatingMargins': stats.get('operatingMargins'),
+                        'profitMargins': stats.get('profitMargins'),
+                        'revenueGrowth': stats.get('revenueGrowth'),
+                        'earningsGrowth': stats.get('earningsGrowth'),
+                        'dividendYield': stats.get('dividendYield'),
+                        'payoutRatio': stats.get('payoutRatio'),
+                        '52WeekHigh': stats.get('fiftyTwoWeekHigh'),
+                        '52WeekLow': stats.get('fiftyTwoWeekLow'),
+                        'averageVolume': stats.get('averageVolume'),
+                        'volume': stats.get('volume'),
+                        'regularMarketPrice': stats.get('regularMarketPrice'),
+                        'regularMarketPreviousClose': stats.get('regularMarketPreviousClose'),
+                        'regularMarketOpen': stats.get('regularMarketOpen'),
+                        'regularMarketDayHigh': stats.get('regularMarketDayHigh'),
+                        'regularMarketDayLow': stats.get('regularMarketDayLow'),
+                        'regularMarketVolume': stats.get('regularMarketVolume'),
+                        'currency': stats.get('currency'),
+                        'exchange': stats.get('exchange'),
+                        'quoteType': stats.get('quoteType'),
+                        'longName': stats.get('longName'),
+                        'shortName': stats.get('shortName'),
+                        'sector': stats.get('sector'),
+                        'industry': stats.get('industry'),
+                        'fullTimeEmployees': stats.get('fullTimeEmployees'),
+                        'website': stats.get('website'),
+                        'city': stats.get('city'),
+                        'state': stats.get('state'),
+                        'country': stats.get('country'),
+                        'businessSummary': stats.get('businessSummary'),
+                        'maxAge': stats.get('maxAge')
+                    }
+                else:
+                    info_results[resolved] = {}
+            except Exception as e:
+                print(f"Error processing stats for {resolved}: {e}")
+                info_results[resolved] = {}
+        
+        # Map back to original ticker symbols
+        for ticker_symbol in ticker_list:
+            resolved = resolved_map[ticker_symbol]
+            results[ticker_symbol] = info_results.get(resolved, {})
+            
+    except ImportError:
+        st.error("❌ yahooquery not available - PE data will be skipped")
+        return {}
+    except Exception as e:
+        st.error(f"❌ yahooquery failed: {e} - PE data will be skipped")
+        return {}
+    
+    return results
 
 def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     """
@@ -1403,7 +1532,7 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
     # Batch downloads force ALL tickers to have the SAME date range (intersection of all dates)
     # This breaks backtesting because each ticker should have its own unique history
     # Individual downloads preserve each ticker's actual historical data range
-    USE_BATCH_DOWNLOAD = False  # Set to False to preserve unique date ranges
+    USE_BATCH_DOWNLOAD = True  # Set to True for optimized API calls
     
     try:
         # BATCH DOWNLOAD - Fast path (1 API call for all)
@@ -1415,6 +1544,7 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                 progress=False,
                 group_by='ticker'
             )
+            st.session_state.api_call_count += 1
             
             # Process batch data
             if not batch_data.empty:
@@ -3259,7 +3389,7 @@ def generate_simple_pdf_report(custom_name=""):
                                 if portfolio_cfg:
                                     rebalancing_frequency = portfolio_cfg.get('rebalancing_frequency', 'Monthly')
                                     initial_value = portfolio_cfg.get('initial_value', 10000)
-                                    # Compute a display value from final backtest results (fallback to initial)
+                                    # Compute current/final portfolio value for display (instead of initial)
                                     display_portfolio_value = initial_value
                                     try:
                                         if 'multi_all_results' in st.session_state and portfolio_name in st.session_state.multi_all_results:
@@ -3626,10 +3756,6 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
             'max_allocation_percent': 20.0,
-            'use_equal_weight': False,
-            'equal_weight_n_tickers': 10,
-            'use_limit_to_top_n': False,
-            'limit_to_top_n_tickers': 10,
         },
         # 2) Momentum-based portfolio using SPY, QQQ, GLD, TLT
         {
@@ -3668,10 +3794,6 @@ if 'multi_backtest_page_initialized' not in st.session_state:
             'minimal_threshold_percent': 4.0,
             'use_max_allocation': False,
             'max_allocation_percent': 20.0,
-            'use_equal_weight': False,
-            'equal_weight_n_tickers': 10,
-            'use_limit_to_top_n': False,
-            'limit_to_top_n_tickers': 10,
         },
         # 3) Equal weight (No Momentum) using the same tickers
         {
@@ -4321,7 +4443,11 @@ def precompute_individual_portfolio_charts():
                 # Store everything in the cache
                 st.session_state.individual_portfolio_cache[portfolio_name] = portfolio_cache
         
-        st.success(f"✅ Processed ALL data for {len(all_results)} portfolios (with 4h ticker cache)")
+        st.success(f"Processed ALL data for {len(all_results)} portfolios (with 4h ticker cache)")
+        
+        # Display API call counter
+        api_calls = st.session_state.get('api_call_count', 0)
+        st.info(f"**API Calls Made:** {api_calls} total calls to Yahoo Finance")
         
     except Exception as e:
         st.error(f"Error pre-computing portfolio data: {str(e)}")
@@ -5809,6 +5935,14 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         rets_keys = list(rets.keys())
         all_negative = all(rets[t] <= 0 for t in rets_keys)
         relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
+        
+        # Calculate effective strategy for negative momentum (needed for equal weight logic)
+        effective_strategy_for_equal_weight = None
+        if all_negative:
+            is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
+            effective_strategy_for_equal_weight = negative_momentum_strategy
+            if is_sp500top20 and negative_momentum_strategy == 'Cash':
+                effective_strategy_for_equal_weight = 'Relative momentum'
 
         def calculate_near_zero_symmetric_momentum(returns, neutral_zone=0.05):
             """
@@ -5941,14 +6075,6 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
             # If filtering removes all weight (sum==0), fall back to unfiltered weights
             if ssum > 0:
                 weights = {t: filtered[t] / ssum for t in filtered}
-
-        # Calculate effective strategy for negative momentum (needed for equal weight logic)
-        effective_strategy_for_equal_weight = None
-        if all_negative:
-            is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
-            effective_strategy_for_equal_weight = negative_momentum_strategy
-            if is_sp500top20 and negative_momentum_strategy == 'Cash':
-                effective_strategy_for_equal_weight = 'Relative momentum'
 
         # Apply allocation filters in correct order: Max Allocation -> Min Threshold -> Max Allocation (two-pass system)
         use_max_allocation = config.get('use_max_allocation', False)
@@ -6247,6 +6373,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 if total_weight > 0:
                     weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
                 else:
+                    # Fallback: if somehow total is 0, keep the new_weights as is
                     weights = new_weights
 
         # Final allocation filters (after Top N / Equal Weight): Max Allocation -> Min Threshold -> Max Allocation
@@ -7037,7 +7164,7 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
                 use_threshold = config.get('use_minimal_threshold', False)
                 threshold_percent = config.get('minimal_threshold_percent', 2.0)
                 apply_caps_before_top_n = False
-
+                
                 # Start with original allocations
                 rebalance_allocations = {t: allocations.get(t, 0) for t in tickers}
                 
@@ -7497,6 +7624,14 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
         rets_keys = list(rets.keys())
         all_negative = all(rets[t] <= 0 for t in rets_keys)
         relative_mode = isinstance(momentum_strategy, str) and momentum_strategy.lower().startswith('relat')
+        
+        # Calculate effective strategy for negative momentum (needed for equal weight logic)
+        effective_strategy_for_equal_weight = None
+        if all_negative:
+            is_sp500top20 = any(is_special_dynamic_ticker(t) for t in rets_keys) or config.get('dynamic_portfolio_data') is not None
+            effective_strategy_for_equal_weight = negative_momentum_strategy
+            if is_sp500top20 and negative_momentum_strategy == 'Cash':
+                effective_strategy_for_equal_weight = 'Relative momentum'
 
         def calculate_near_zero_symmetric_momentum(returns, neutral_zone=0.05):
             """
@@ -7628,6 +7763,108 @@ def single_backtest_year_aware(config, sim_index, reindexed_data, _cache_version
             total_filtered = sum(filtered.values())
             if total_filtered > 0:
                 weights = {t: filtered[t] / total_filtered for t in filtered}
+
+        # STEP 1: Apply Limit to Top N filter FIRST (if enabled) - SECOND OCCURRENCE
+        use_limit_to_top_n = config.get('use_limit_to_top_n', False)
+        limit_to_top_n_tickers = config.get('limit_to_top_n_tickers', 10)
+        
+        should_apply_limit_to_top_n = False
+        if use_limit_to_top_n and limit_to_top_n_tickers > 0 and weights:
+            if all_negative:
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_limit_to_top_n = True
+            else:
+                should_apply_limit_to_top_n = True
+        
+        if should_apply_limit_to_top_n:
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() 
+                            if ticker != 'CASH' and weight > 0]
+            ticker_weights.sort(key=lambda x: x[1], reverse=True)
+            
+            if ticker_weights:
+                n_to_select = min(limit_to_top_n_tickers, len(ticker_weights))
+                top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+                
+                new_weights = {}
+                total_top_n_weight = 0.0
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                        total_top_n_weight += weights.get(ticker, 0.0)
+                    else:
+                        new_weights[ticker] = 0.0
+                
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0 and total_top_n_weight > 0:
+                    for ticker in top_n_tickers:
+                        ticker_weight = new_weights[ticker]
+                        proportion = ticker_weight / total_top_n_weight if total_top_n_weight > 0 else 0.0
+                        new_weights[ticker] += cash_weight * proportion
+                    new_weights['CASH'] = 0.0
+                
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    weights = new_weights
+
+        # STEP 2: Apply Equal Weight filter AFTER Limit to Top N (if enabled) - SECOND OCCURRENCE
+        use_equal_weight = config.get('use_equal_weight', False)
+        equal_weight_n_tickers = config.get('equal_weight_n_tickers', 10)
+        
+        should_apply_equal_weight = False
+        if use_equal_weight and equal_weight_n_tickers > 0 and weights:
+            if all_negative:
+                if effective_strategy_for_equal_weight in ['Relative momentum', 'Near-Zero Symmetry']:
+                    should_apply_equal_weight = True
+            else:
+                should_apply_equal_weight = True
+        
+        if should_apply_equal_weight:
+            ticker_weights = [(ticker, weight) for ticker, weight in weights.items() 
+                            if ticker != 'CASH' and weight > 0]
+            
+            if ticker_weights:
+                if should_apply_limit_to_top_n:
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights]
+                else:
+                    ticker_weights.sort(key=lambda x: x[1], reverse=True)
+                    n_to_select = min(equal_weight_n_tickers, len(ticker_weights))
+                    top_n_tickers = [ticker for ticker, _ in ticker_weights[:n_to_select]]
+                
+                # Calculate equal weight per ticker (1/n where n is the actual number selected)
+                equal_weight_per_ticker = 1.0 / len(top_n_tickers)
+                
+                # Create new weights dictionary with equal weights for top N, 0 for others
+                new_weights = {}
+                for ticker in weights.keys():
+                    if ticker == 'CASH':
+                        # Keep CASH weight as is (should be 0 in most cases)
+                        new_weights[ticker] = weights.get(ticker, 0.0)
+                    elif ticker in top_n_tickers:
+                        new_weights[ticker] = equal_weight_per_ticker
+                    else:
+                        # Set to 0 for tickers not in top N
+                        new_weights[ticker] = 0.0
+                
+                # If there's any CASH weight, distribute it proportionally to top N tickers
+                cash_weight = new_weights.get('CASH', 0.0)
+                if cash_weight > 0:
+                    # Add cash weight proportionally to top N tickers
+                    for ticker in top_n_tickers:
+                        new_weights[ticker] += cash_weight / len(top_n_tickers)
+                    new_weights['CASH'] = 0.0
+                
+                # Final normalization to ensure weights sum to exactly 1.0 (100%)
+                # This is important especially when fewer tickers remain than requested N
+                total_weight = sum(new_weights.values())
+                if total_weight > 0:
+                    weights = {ticker: weight / total_weight for ticker, weight in new_weights.items()}
+                else:
+                    # Fallback: if somehow total is 0, keep the new_weights as is
+                    weights = new_weights
 
         return weights, metrics
     import numpy as np
@@ -8104,14 +8341,6 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
         portfolio['use_max_allocation'] = False
     if 'max_allocation_percent' not in portfolio:
         portfolio['max_allocation_percent'] = 20.0
-    if 'use_equal_weight' not in portfolio:
-        portfolio['use_equal_weight'] = False
-    if 'equal_weight_n_tickers' not in portfolio:
-        portfolio['equal_weight_n_tickers'] = 10
-    if 'use_limit_to_top_n' not in portfolio:
-        portfolio['use_limit_to_top_n'] = False
-    if 'limit_to_top_n_tickers' not in portfolio:
-        portfolio['limit_to_top_n_tickers'] = 10
     if 'use_sma_filter' not in portfolio:
         portfolio['use_sma_filter'] = False
     if 'sma_window' not in portfolio:
@@ -9162,10 +9391,6 @@ def paste_json_callback():
             json_data['minimal_threshold_percent'] = 4.0
         # Don't override max_allocation values from JSON - preserve imported values
         # REMOVED: Don't force max_allocation values to preserve JSON values
-        if 'use_equal_weight' not in json_data:
-            json_data['use_equal_weight'] = False
-        if 'equal_weight_n_tickers' not in json_data:
-            json_data['equal_weight_n_tickers'] = 10
         
         # Debug: Show what we received
         st.info(f"Received JSON keys: {list(json_data.keys())}")
@@ -9286,8 +9511,6 @@ def paste_json_callback():
         use_momentum = parse_bool_from_json(json_data.get('use_momentum', True), True)
         use_minimal_threshold = parse_bool_from_json(json_data.get('use_minimal_threshold', False), False)
         use_max_allocation = parse_bool_from_json(json_data.get('use_max_allocation', False), False)
-        use_equal_weight = parse_bool_from_json(json_data.get('use_equal_weight', False), False)
-        use_limit_to_top_n = parse_bool_from_json(json_data.get('use_limit_to_top_n', False), False)
         calc_beta = parse_bool_from_json(json_data.get('calc_beta', False), False)
         calc_volatility = parse_bool_from_json(json_data.get('calc_volatility', True), True)
         collect_dividends_as_cash = parse_bool_from_json(json_data.get('collect_dividends_as_cash', False), False)
@@ -9295,7 +9518,8 @@ def paste_json_callback():
         exclude_from_rebalancing_sync = parse_bool_from_json(json_data.get('exclude_from_rebalancing_sync', False), False)
         use_targeted_rebalancing = parse_bool_from_json(json_data.get('use_targeted_rebalancing', False), False)
         use_sma_filter = parse_bool_from_json(json_data.get('use_sma_filter', False), False)
-        ma_cross_rebalance = parse_bool_from_json(json_data.get('ma_cross_rebalance', False), False)
+        use_equal_weight = parse_bool_from_json(json_data.get('use_equal_weight', False), False)
+        use_limit_to_top_n = parse_bool_from_json(json_data.get('use_limit_to_top_n', False), False)
 
         multi_backtest_config = {
             'name': json_data.get('name', 'New Portfolio'),
@@ -9316,10 +9540,6 @@ def paste_json_callback():
             'minimal_threshold_percent': json_data.get('minimal_threshold_percent', 4.0),
             'use_max_allocation': use_max_allocation,
             'max_allocation_percent': json_data.get('max_allocation_percent', 20.0),
-            'use_equal_weight': use_equal_weight,
-            'equal_weight_n_tickers': json_data.get('equal_weight_n_tickers', 10),
-            'use_limit_to_top_n': use_limit_to_top_n,
-            'limit_to_top_n_tickers': json_data.get('limit_to_top_n_tickers', 10),
             'calc_beta': calc_beta,
             'calc_volatility': calc_volatility,
             'beta_window_days': json_data.get('beta_window_days', 365),
@@ -9336,9 +9556,13 @@ def paste_json_callback():
             'sma_window': json_data.get('sma_window', 200),
             'ma_type': json_data.get('ma_type', 'SMA'),
             'ma_multiplier': json_data.get('ma_multiplier', 1.48),
-            'ma_cross_rebalance': ma_cross_rebalance,
+            'ma_cross_rebalance': json_data.get('ma_cross_rebalance', False),
             'ma_tolerance_percent': json_data.get('ma_tolerance_percent', 2.0),
             'ma_confirmation_days': json_data.get('ma_confirmation_days', 3),
+            'use_equal_weight': use_equal_weight,
+            'equal_weight_n_tickers': json_data.get('equal_weight_n_tickers', 10),
+            'use_limit_to_top_n': use_limit_to_top_n,
+            'limit_to_top_n_tickers': json_data.get('limit_to_top_n_tickers', 10),
         }
         
         st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index] = multi_backtest_config
@@ -9382,7 +9606,7 @@ def paste_json_callback():
             st.session_state['multi_backtest_first_rebalance_strategy_radio'] = json_data['first_rebalance_strategy']
         
         # Update session state for targeted rebalancing settings
-        st.session_state['multi_backtest_active_use_targeted_rebalancing'] = parse_bool_from_json(multi_backtest_config.get('use_targeted_rebalancing', False), False)
+        st.session_state['multi_backtest_active_use_targeted_rebalancing'] = multi_backtest_config.get('use_targeted_rebalancing', False)
         
         # Use portfolio-specific MA Filter keys
         portfolio_index = st.session_state.multi_backtest_active_portfolio_index
@@ -9574,8 +9798,8 @@ def update_use_momentum():
                 # Update UI widgets to reflect restored values
                 st.session_state['multi_backtest_active_momentum_strategy'] = portfolio['momentum_strategy']
                 st.session_state['multi_backtest_active_negative_momentum_strategy'] = portfolio['negative_momentum_strategy']
-                st.session_state['multi_backtest_active_calc_beta'] = parse_bool_from_json(portfolio['calc_beta'], False)
-                st.session_state['multi_backtest_active_calc_vol'] = parse_bool_from_json(portfolio['calc_volatility'], False)
+                st.session_state['multi_backtest_active_calc_beta'] = portfolio['calc_beta']
+                st.session_state['multi_backtest_active_calc_vol'] = portfolio['calc_volatility']
                 st.session_state['multi_backtest_active_beta_window'] = portfolio['beta_window_days']
                 st.session_state['multi_backtest_active_beta_exclude'] = portfolio['exclude_days_beta']
                 st.session_state['multi_backtest_active_vol_window'] = portfolio['vol_window_days']
@@ -9612,7 +9836,7 @@ def update_use_momentum():
             portfolio['saved_momentum_settings'] = saved_settings
             # Don't clear momentum_windows - preserve them for variant generation
         
-        portfolio['use_momentum'] = parse_bool_from_json(new_val, False)
+        portfolio['use_momentum'] = new_val
         st.session_state.multi_backtest_rerun_flag = True
 
 def update_use_sma_filter():
@@ -9670,7 +9894,7 @@ def update_ma_reference_ticker(stock_index):
 def update_use_targeted_rebalancing():
     """Callback function for targeted rebalancing checkbox"""
     current_val = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index].get('use_targeted_rebalancing', False)
-    new_val = parse_bool_from_json(st.session_state.multi_backtest_active_use_targeted_rebalancing, False)
+    new_val = st.session_state.multi_backtest_active_use_targeted_rebalancing
     
     if current_val != new_val:
         portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
@@ -9792,11 +10016,10 @@ def update_sync_exclusion(sync_type):
     except Exception:
         pass
 
-
 def parse_bool_from_json(value, default=False):
     """
-    Normalize incoming JSON boolean-like values into Python booleans.
-    Accepts actual bools, strings (\"true\"/\"false\" etc.), and numeric 0/1 flags.
+    Normalize JSON boolean-like values into real Python booleans.
+    Accepts actual bools, string representations, and numeric 0/1 flags.
     """
     if isinstance(value, bool):
         return value
@@ -12120,6 +12343,11 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                         threshold_percent = variant.get('minimal_threshold_percent', 4.0)
                         clear_name_parts.append(f"- Min {threshold_percent:.2f}%")
                     
+                    # Add max allocation information (only show when enabled)
+                    if variant.get('use_max_allocation', False):
+                        max_allocation_percent = variant.get('max_allocation_percent', 20.0)
+                        clear_name_parts.append(f"- Max {max_allocation_percent:.2f}%")
+                    
                     # Add equal weight information (only show when enabled)
                     if variant.get('use_equal_weight', False):
                         equal_weight_n = variant.get('equal_weight_n_tickers', 10)
@@ -12128,11 +12356,6 @@ with st.expander("🔧 Generate Portfolio Variants", expanded=current_state):
                     if variant.get('use_limit_to_top_n', False):
                         top_n = variant.get('limit_to_top_n_tickers', 10)
                         clear_name_parts.append(f"- Tickers {top_n}")
-                    
-                    # Add max allocation information (only show when enabled)
-                    if variant.get('use_max_allocation', False):
-                        max_allocation_percent = variant.get('max_allocation_percent', 20.0)
-                        clear_name_parts.append(f"- Max {max_allocation_percent:.2f}%")
                     
                     # Add MA filter information (only show when enabled)
                     if variant.get('use_sma_filter', False):
@@ -12754,35 +12977,19 @@ with st.expander("🔧 Bulk Leverage Controls", expanded=False):
             pass
 
 # Special tickers and leverage guide sections
-with st.expander("📈 Broad Long-Term Tickers", expanded=False):
+with st.expander("The Power of Sticking to One Strategy", expanded=False):
     st.markdown("""
-    **Recommended tickers for long-term strategies:**
-    
-    **Core ETFs:**
-    - **SPY** - S&P 500 (0.09% expense ratio)
-    - **QQQ** - NASDAQ-100 (0.20% expense ratio)  
-    - **VTI** - Total Stock Market (0.03% expense ratio)
-    - **VEA** - Developed Markets (0.05% expense ratio)
-    - **VWO** - Emerging Markets (0.10% expense ratio)
-    
-    **Sector ETFs:**
-    - **XLK** - Technology (0.10% expense ratio)
-    - **XLF** - Financials (0.10% expense ratio)
-    - **XLE** - Energy (0.10% expense ratio)
-    - **XLV** - Healthcare (0.10% expense ratio)
-    - **XLI** - Industrials (0.10% expense ratio)
-    
-    **Bond ETFs:**
-    - **TLT** - 20+ Year Treasury (0.15% expense ratio)
-    - **IEF** - 7-10 Year Treasury (0.15% expense ratio)
-    - **LQD** - Investment Grade Corporate (0.14% expense ratio)
-    - **HYG** - High Yield Corporate (0.49% expense ratio)
-    
-    **Commodity ETFs:**
-    - **GLD** - Gold (0.40% expense ratio)
-    - **SLV** - Silver (0.50% expense ratio)
-    - **DBA** - Agriculture (0.93% expense ratio)
-    - **USO** - Oil (0.60% expense ratio)
+    ### The Power of Sticking to One Strategy
+    In investing, consistency almost always beats constant change. Many investors believe that switching strategies frequently will help them capture small incremental gains, but the data tells a very different story.
+    ### The Performance Gap is Real
+    A study by DALBAR, Inc. (1985-2015) found that the average equity fund investor earned just 3.66% annually while the S&P 500 returned 11.06% annually. This represents a performance penalty of over 7 percentage points per year.
+    Research by Morningstar, Inc. (2013-2022) revealed that investors underperformed by an average of 1.7 percentage points annually due to timing decisions.
+    In the study by Terrence Barber and Brad Odean (2000) tracking 66,465 households (1991-1996), the 20% most active traders earned 11.4% annually, while the market returned 17.9%.
+    A study by J.P. Morgan Asset Management shows that if an investor in the S&P 500 from July 2004 to July 2024 missed the 10 best days, their annualized return dropped from 10.5% to 6.2%; missing the 20 best days dropped it to 3.6%, and missing 30 best days to 1.4%. *(JPMorgan)*
+    Another study (1994-2024) found that missing the best 30 days dropped the annual return of the S&P 500 from 8.0% to 1.8%, and missing the best 50 days resulted in a negative return of –0.86%. *(Wells Fargo Advisors)*
+    ### The Bottom Line
+    Over multiple decades and market cycles, those who stay disciplined with a simple, well-understood strategy tend to outperform 80 to 90% of active investors across all time horizons.
+    Master one strategy and stick with it. Constantly changing direction not only increases risk and stress, it almost always lowers returns. In investing, patience and consistency are the real sources of alpha.
     """)
 
 # Special Tickers Section
@@ -13658,7 +13865,7 @@ if not st.session_state.get(ma_filter_key, False) and not st.session_state.get('
 
     # Initialize targeted rebalancing state
     if "multi_backtest_active_use_targeted_rebalancing" not in st.session_state:
-        st.session_state["multi_backtest_active_use_targeted_rebalancing"] = parse_bool_from_json(active_portfolio.get('use_targeted_rebalancing', False), False)
+        st.session_state["multi_backtest_active_use_targeted_rebalancing"] = active_portfolio.get('use_targeted_rebalancing', False)
 
     # Show targeted rebalancing checkbox (only visible when both momentum and MA filter are disabled)
     st.checkbox(
@@ -13669,7 +13876,7 @@ if not st.session_state.get(ma_filter_key, False) and not st.session_state.get('
     )
 
     # Update active portfolio with current targeted rebalancing state
-    active_portfolio['use_targeted_rebalancing'] = parse_bool_from_json(st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False), False)
+    active_portfolio['use_targeted_rebalancing'] = st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False)
 
     if st.session_state.get("multi_backtest_active_use_targeted_rebalancing", False):
         st.markdown("**Configure per-ticker allocation limits:**")
@@ -13794,7 +14001,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['ma_confirmation_days'] = st.session_state.get(ma_delay_key, 3)
     
     # Also update the active portfolio to keep it in sync
-    active_portfolio['use_targeted_rebalancing'] = parse_bool_from_json(st.session_state.get('multi_backtest_active_use_targeted_rebalancing', False), False)
+    active_portfolio['use_targeted_rebalancing'] = st.session_state.get('multi_backtest_active_use_targeted_rebalancing', False)
     active_portfolio['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     active_portfolio['sma_window'] = st.session_state.get(ma_window_key, 200)
     active_portfolio['ma_type'] = st.session_state.get(ma_type_key, 'SMA')
@@ -14342,7 +14549,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 successful_portfolios = 0
                 failed_portfolios = []
                 
-                st.info(f"🚀 **Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios (with 4h ticker cache)...**")
+                st.info(f"**Processing {len(st.session_state.multi_backtest_portfolio_configs)} portfolios (with 4h ticker cache)...**")
                 
                 # Start timing for performance measurement
                 import time as time_module
@@ -14436,62 +14643,6 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                             ticker = stock.get('ticker', '').strip()
                                             if ticker:
                                                 today_weights_map[ticker] = stock.get('allocation', 0)
-                                        
-                                        # Apply Targeted Rebalancing logic if enabled
-                                        if cfg.get('use_targeted_rebalancing', False):
-                                            targeted_settings = cfg.get('targeted_rebalancing_settings', {})
-                                            rebalanced_allocations = {}
-                                            
-                                            # Apply min/max thresholds
-                                            for ticker, allocation in today_weights_map.items():
-                                                if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
-                                                    min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
-                                                    max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
-                                                    
-                                                    # Apply thresholds
-                                                    capped_allocation = max(min_threshold, min(allocation, max_threshold))
-                                                    rebalanced_allocations[ticker] = capped_allocation
-                                                else:
-                                                    rebalanced_allocations[ticker] = allocation
-                                            
-                                            # Redistribute excess/deficit proportionally
-                                            total_capped = sum(rebalanced_allocations.values())
-                                            if total_capped != 1.0:
-                                                # Calculate excess/deficit
-                                                excess = total_capped - 1.0
-                                                
-                                                # Find eligible tickers for redistribution (not at their limits)
-                                                eligible_tickers = {}
-                                                for ticker, allocation in rebalanced_allocations.items():
-                                                    if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
-                                                        min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
-                                                        max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
-                                                        
-                                                        # Check if ticker can receive more allocation
-                                                        if allocation < max_threshold:
-                                                            eligible_tickers[ticker] = allocation
-                                                    else:
-                                                        # Non-targeted tickers can always be adjusted
-                                                        eligible_tickers[ticker] = allocation
-                                                
-                                                # Redistribute excess/deficit proportionally
-                                                if eligible_tickers:
-                                                    total_eligible = sum(eligible_tickers.values())
-                                                    if total_eligible > 0:
-                                                        for ticker in eligible_tickers:
-                                                            proportion = eligible_tickers[ticker] / total_eligible
-                                                            additional_allocation = excess * proportion
-                                                            new_allocation = rebalanced_allocations[ticker] + additional_allocation
-                                                            
-                                                            # Apply limits again
-                                                            if ticker in targeted_settings and targeted_settings[ticker].get('enabled', False):
-                                                                min_threshold = targeted_settings[ticker].get('min_threshold', 0) / 100.0
-                                                                max_threshold = targeted_settings[ticker].get('max_threshold', 100) / 100.0
-                                                                new_allocation = max(min_threshold, min(new_allocation, max_threshold))
-                                                            
-                                                            rebalanced_allocations[ticker] = new_allocation
-                                            
-                                            today_weights_map = rebalanced_allocations
                                         
                                         # Apply MA filter even when momentum is disabled
                                         if cfg.get('use_sma_filter', False):
@@ -14784,7 +14935,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     
                     processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and len(regular_portfolios) > 1 else "sequential"
                     worker_info = f" using {max_workers} workers" if processing_mode == "parallel" else ""
-                    st.info(f"🚀 **Phase 1: Processing {len(regular_portfolios)} regular portfolios in {processing_mode} mode{worker_info}...**")
+                    st.info(f"**Phase 1: Processing {len(regular_portfolios)} regular portfolios in {processing_mode} mode{worker_info}...**")
                     
                     if st.session_state.get('use_parallel_processing', True) and len(regular_portfolios) > 1:
                         # Process regular portfolios in parallel using optimized threading
@@ -14878,7 +15029,7 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     
                     processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and len(fusion_portfolios) > 1 else "sequential"
                     worker_info = f" using {max_workers} workers" if processing_mode == "parallel" else ""
-                    st.info(f"🚀 **Phase 2: Processing {len(fusion_portfolios)} fusion portfolios in {processing_mode} mode{worker_info} (depends on regular portfolios)...**")
+                    st.info(f"**Phase 2: Processing {len(fusion_portfolios)} fusion portfolios in {processing_mode} mode{worker_info} (depends on regular portfolios)...**")
                     
                     if st.session_state.get('use_parallel_processing', True) and len(fusion_portfolios) > 1:
                         # Process fusion portfolios in parallel using optimized threading
@@ -14986,11 +15137,14 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                 if successful_portfolios > 0:
                     processing_mode = "parallel" if st.session_state.get('use_parallel_processing', True) and total_portfolios > 1 else "sequential"
                     phase_info = f" (Phase 1: {len(regular_portfolios)} regular, Phase 2: {len(fusion_portfolios)} fusion)" if fusion_portfolios else f" ({len(regular_portfolios)} regular portfolios only)"
-                    st.success(f"🎉 **Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios in {processing_mode} mode{phase_info}!**")
-                    st.info(f"⏱️ **Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
+                    st.success(f"**Successfully processed {successful_portfolios}/{len(st.session_state.multi_backtest_portfolio_configs)} portfolios in {processing_mode} mode{phase_info}**")
+                    st.info(f"**Performance:** Total time: {total_time:.2f}s | Average per portfolio: {avg_time_per_portfolio:.2f}s | Mode: {processing_mode.upper()}")
+                    
+                    # Display API call counter
+                    api_calls = st.session_state.get('api_call_count', 0)
+                    st.info(f"**API Calls Made:** {api_calls} total calls to Yahoo Finance")
                 else:
                     st.error("❌ **No portfolios were processed successfully!** Please check your configuration.")
-                    # Don't stop - let the rest of the page render (including JSON section)
                 
                 # Memory cleanup
                 import gc
@@ -15429,11 +15583,19 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             st.session_state.multi_backtest_ran = True
             
             # OPTIMIZATION: Pre-compute and cache allocation evolution charts for all portfolios
-            st.info("🔄 Pre-computing charts for instant portfolio selection...")
+            st.info("Pre-computing charts for instant portfolio selection...")
             
-            # Pre-compute and cache individual portfolio charts
-            precompute_individual_portfolio_charts()
-            progress_bar = st.progress(0)
+            # Pre-compute and cache individual portfolio charts (guarded to avoid silent failures)
+            try:
+                precompute_individual_portfolio_charts()
+            except Exception as e:
+                st.warning(f"Post-processing (precompute) failed: {e}")
+            # Create progress bar for subsequent processing (guarded)
+            try:
+                progress_bar = st.progress(0)
+            except Exception as e:
+                st.warning(f"Post-processing (progress bar) init failed: {e}")
+                progress_bar = None
             
             # Get all available portfolio names for pre-computation
             available_portfolio_names = [cfg.get('name', 'Portfolio') for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])]
@@ -15468,10 +15630,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     except Exception as e:
                         st.warning(f"Could not pre-compute chart for {portfolio_name}: {str(e)}")
                 
-                progress_bar.progress((i + 1) / total_portfolios)
+                try:
+                    if progress_bar is not None:
+                        progress_bar.progress((i + 1) / total_portfolios)
+                except Exception as e:
+                    st.warning(f"Post-processing (progress update) failed: {e}")
             
-            progress_bar.empty()
-            st.success("✅ Charts processed! Portfolio selection is now instantaneous.")
+            try:
+                if progress_bar is not None:
+                    progress_bar.empty()
+            except Exception:
+                pass
+            st.success("Charts processed. Portfolio selection is now instantaneous.")
 
 # Sidebar JSON export/import for ALL portfolios
 def paste_all_json_callback():
@@ -15527,15 +15697,6 @@ def paste_all_json_callback():
                     portfolio['minimal_threshold_percent'] = 4.0
                 # Don't override max_allocation values from JSON - preserve imported values like minimal_threshold
                 # REMOVED: Don't force max_allocation values to preserve JSON values
-                if 'use_equal_weight' not in portfolio:
-                    portfolio['use_equal_weight'] = False
-                if 'equal_weight_n_tickers' not in portfolio:
-                    portfolio['equal_weight_n_tickers'] = 10
-                # Add missing limit to top N fields with default values
-                if 'use_limit_to_top_n' not in portfolio:
-                    portfolio['use_limit_to_top_n'] = False
-                if 'limit_to_top_n_tickers' not in portfolio:
-                    portfolio['limit_to_top_n_tickers'] = 10
                 
                 # Add missing anti-whipsaw fields with default values
                 if 'ma_cross_rebalance' not in portfolio:
@@ -15546,6 +15707,16 @@ def paste_all_json_callback():
                     portfolio['ma_confirmation_days'] = 3
                 if 'ma_multiplier' not in portfolio:
                     portfolio['ma_multiplier'] = 1.48  # Only default for new portfolios
+                # Add missing equal weight fields with default values
+                if 'use_equal_weight' not in portfolio:
+                    portfolio['use_equal_weight'] = False
+                if 'equal_weight_n_tickers' not in portfolio:
+                    portfolio['equal_weight_n_tickers'] = 10
+                # Add missing limit to top N fields with default values
+                if 'use_limit_to_top_n' not in portfolio:
+                    portfolio['use_limit_to_top_n'] = False
+                if 'limit_to_top_n_tickers' not in portfolio:
+                    portfolio['limit_to_top_n_tickers'] = 10
         
         if isinstance(obj, list):
             # Clear widget keys to force re-initialization
@@ -15706,8 +15877,6 @@ def paste_all_json_callback():
                 use_momentum = parse_bool_from_json(cfg.get('use_momentum', True), True)
                 use_minimal_threshold = parse_bool_from_json(cfg.get('use_minimal_threshold', False), False)
                 use_max_allocation = parse_bool_from_json(cfg.get('use_max_allocation', False), False)
-                use_equal_weight = parse_bool_from_json(cfg.get('use_equal_weight', False), False)
-                use_limit_to_top_n = parse_bool_from_json(cfg.get('use_limit_to_top_n', False), False)
                 calc_beta = parse_bool_from_json(cfg.get('calc_beta', False), False)
                 calc_volatility = parse_bool_from_json(cfg.get('calc_volatility', True), True)
                 collect_dividends_as_cash = parse_bool_from_json(cfg.get('collect_dividends_as_cash', False), False)
@@ -15715,6 +15884,8 @@ def paste_all_json_callback():
                 exclude_from_rebalancing_sync = parse_bool_from_json(cfg.get('exclude_from_rebalancing_sync', False), False)
                 use_targeted_rebalancing = parse_bool_from_json(cfg.get('use_targeted_rebalancing', False), False)
                 use_sma_filter = parse_bool_from_json(cfg.get('use_sma_filter', False), False)
+                use_equal_weight = parse_bool_from_json(cfg.get('use_equal_weight', False), False)
+                use_limit_to_top_n = parse_bool_from_json(cfg.get('use_limit_to_top_n', False), False)
                 ma_cross_rebalance = parse_bool_from_json(cfg.get('ma_cross_rebalance', False), False)
 
                 multi_backtest_config = {
@@ -15737,10 +15908,6 @@ def paste_all_json_callback():
                     'minimal_threshold_percent': cfg.get('minimal_threshold_percent', 4.0),
                     'use_max_allocation': use_max_allocation,
                     'max_allocation_percent': cfg.get('max_allocation_percent', 20.0),
-                    'use_equal_weight': use_equal_weight,
-                    'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers', 10),
-                    'use_limit_to_top_n': use_limit_to_top_n,
-                    'limit_to_top_n_tickers': cfg.get('limit_to_top_n_tickers', 10),
                     'calc_beta': calc_beta,
                     'calc_volatility': calc_volatility,
                     'beta_window_days': cfg.get('beta_window_days', 365),
@@ -15759,6 +15926,10 @@ def paste_all_json_callback():
                     'ma_cross_rebalance': ma_cross_rebalance,
                     'ma_tolerance_percent': cfg.get('ma_tolerance_percent', 2.0),
                     'ma_confirmation_days': cfg.get('ma_confirmation_days', 3),
+                    'use_equal_weight': use_equal_weight,
+                    'equal_weight_n_tickers': cfg.get('equal_weight_n_tickers', 10),
+                    'use_limit_to_top_n': use_limit_to_top_n,
+                    'limit_to_top_n_tickers': cfg.get('limit_to_top_n_tickers', 10),
                     # Preserve fusion portfolio configuration if present
                     'fusion_portfolio': cfg.get('fusion_portfolio', {'enabled': False, 'selected_portfolios': [], 'allocations': {}}),
                     # Note: Ignoring Backtest Engine specific fields like 'portfolio_drag_pct', 'use_custom_dates', etc.
@@ -15883,11 +16054,6 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['minimal_threshold_percent'] = config.get('minimal_threshold_percent', 4.0)
             cleaned_config['use_max_allocation'] = config.get('use_max_allocation', False)
             cleaned_config['max_allocation_percent'] = config.get('max_allocation_percent', 20.0)
-            cleaned_config['use_equal_weight'] = config.get('use_equal_weight', False)
-            cleaned_config['equal_weight_n_tickers'] = config.get('equal_weight_n_tickers', 10)
-            # Ensure limit to top N settings are included (read from current config) - same pattern as equal weight
-            cleaned_config['use_limit_to_top_n'] = config.get('use_limit_to_top_n', False)
-            cleaned_config['limit_to_top_n_tickers'] = config.get('limit_to_top_n_tickers', 10)
             cleaned_config['use_sma_filter'] = config.get('use_sma_filter', False)
             cleaned_config['sma_window'] = config.get('sma_window', 200)
             cleaned_config['ma_type'] = config.get('ma_type', 'SMA')
@@ -15895,6 +16061,12 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             cleaned_config['ma_cross_rebalance'] = config.get('ma_cross_rebalance', False)
             cleaned_config['ma_tolerance_percent'] = config.get('ma_tolerance_percent', 2.0)
             cleaned_config['ma_confirmation_days'] = config.get('ma_confirmation_days', 3)
+            # Ensure equal weight settings are included (read from current config) - same pattern as max_allocation
+            cleaned_config['use_equal_weight'] = config.get('use_equal_weight', False)
+            cleaned_config['equal_weight_n_tickers'] = config.get('equal_weight_n_tickers', 10)
+            # Ensure limit to top N settings are included (read from current config) - same pattern as equal weight
+            cleaned_config['use_limit_to_top_n'] = config.get('use_limit_to_top_n', False)
+            cleaned_config['limit_to_top_n_tickers'] = config.get('limit_to_top_n_tickers', 10)
             
             # Convert date objects to strings for JSON serialization
             if cleaned_config.get('start_date_user') is not None:
@@ -16307,6 +16479,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
         try:
             # Get VIX data for the same date range
             vix_data = get_batch_download_with_cache('^VIX', start=first_date, end=last_date, progress=False)
+            st.session_state.api_call_count += 1
             
             # VIX data has multi-level columns, need to access it properly
             # The structure is ('Close', '^VIX') instead of just 'Close'
@@ -16589,16 +16762,13 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     
                     if all_tickers:
                         # Fetch PE data for all tickers (cached per portfolio)
-                        pe_data = {}
-                        for ticker in all_tickers:
-                            try:
-                                stock = get_ticker_with_cache(ticker)
-                                info = stock.info
-                                pe_ratio = info.get('trailingPE', None)
-                                if pe_ratio is not None and pe_ratio > 0:
-                                    pe_data[ticker] = pe_ratio
-                            except:
-                                continue
+                        # Use batch download for PE data (much faster!)
+                        pe_data = get_multiple_tickers_info_batch(all_tickers)
+                        # Extract PE ratios from batch results
+                        pe_data = {ticker: info.get('trailingPE', None) for ticker, info in pe_data.items() if info.get('trailingPE') is not None and info.get('trailingPE') > 0}
+                        
+                        # Initialize historical PE data as empty (placeholder for future implementation)
+                        historical_pe_data = {}
                         
                         if pe_data:
                             # Calculate weighted average PE for this portfolio
@@ -18067,22 +18237,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     std_ret = series_clean.std(ddof=0) if total > 1 else np.nan
 
                     # Positive-only and negative-only yearly return stats
-                    pos_series_y = series_clean[series_clean > 0]
-                    neg_series_y = series_clean[series_clean < 0]
-                    pos_mean_y = pos_series_y.mean() if len(pos_series_y) > 0 else np.nan
-                    pos_median_y = pos_series_y.median() if len(pos_series_y) > 0 else np.nan
-                    neg_mean_y = neg_series_y.mean() if len(neg_series_y) > 0 else np.nan
-                    neg_median_y = neg_series_y.median() if len(neg_series_y) > 0 else np.nan
-
-                    # Positive-only and negative-only monthly return stats
-                    pos_series = series_clean[series_clean > 0]
-                    neg_series = series_clean[series_clean < 0]
-                    pos_mean = pos_series.mean() if len(pos_series) > 0 else np.nan
-                    pos_median = pos_series.median() if len(pos_series) > 0 else np.nan
-                    neg_mean = neg_series.mean() if len(neg_series) > 0 else np.nan
-                    neg_median = neg_series.median() if len(neg_series) > 0 else np.nan
-
-                    # Positive-only and negative-only yearly return stats
                     pos_series = series_clean[series_clean > 0]
                     neg_series = series_clean[series_clean < 0]
                     pos_mean = pos_series.mean() if len(pos_series) > 0 else np.nan
@@ -18113,7 +18267,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                     vols_ann = vols * np.sqrt(12.0)
                                     vol_year_ann_mean = float(vols_ann.mean())
                                     vol_year_ann_median = float(vols_ann.median())
-                                # Yearly beta from daily returns (fetch benchmark like monthly block)
+                                # Yearly beta from daily returns -> build benchmark daily series (like monthly section)
                                 raw_data = st.session_state.get('multi_backtest_raw_data', {})
                                 benchmark_ticker = None
                                 if st.session_state.get('multi_backtest_portfolio_configs'):
@@ -18142,6 +18296,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                             beta_year_median = float(np.median(betas_y))
                     except Exception:
                         pass
+
                     yearly_stats_rows.append([
                         nm,
                         positives,
@@ -18149,10 +18304,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         mean_ret,
                         median_ret,
                         std_ret,
-                        pos_mean_y,
-                        pos_median_y,
-                        neg_mean_y,
-                        neg_median_y,
+                        pos_mean,
+                        pos_median,
+                        neg_mean,
+                        neg_median,
                         vol_year_mean,
                         vol_year_median,
                         vol_year_ann_mean,
@@ -18418,6 +18573,14 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     median_ret = series_clean.median() if total > 0 else np.nan
                     std_ret = series_clean.std(ddof=0) if total > 1 else np.nan
 
+                    # Positive-only and negative-only monthly return stats
+                    pos_series = series_clean[series_clean > 0]
+                    neg_series = series_clean[series_clean < 0]
+                    pos_mean = pos_series.mean() if len(pos_series) > 0 else np.nan
+                    pos_median = pos_series.median() if len(pos_series) > 0 else np.nan
+                    neg_mean = neg_series.mean() if len(neg_series) > 0 else np.nan
+                    neg_median = neg_series.median() if len(neg_series) > 0 else np.nan
+
                     # Optional beta stats per month (mean/median) if benchmark data available
                     beta_mean = np.nan
                     beta_median = np.nan
@@ -18426,8 +18589,10 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     vol_month_ann_mean = np.nan
                     vol_month_ann_median = np.nan
                     try:
+                        # Require benchmark raw data and portfolio daily values
                         raw_data = st.session_state.get('multi_backtest_raw_data', {})
                         benchmark_ticker = None
+                        # Use the first portfolio config's benchmark (they typically share the same)
                         if st.session_state.get('multi_backtest_portfolio_configs'):
                             benchmark_ticker = st.session_state['multi_backtest_portfolio_configs'][0].get('benchmark_ticker', '^GSPC')
                         df_bench = raw_data.get(benchmark_ticker)
@@ -18437,6 +18602,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 port_series = series_obj['no_additions']
                             else:
                                 port_series = series_obj
+                            # Compute daily returns
                             port_daily = port_series.pct_change().dropna()
                             # Monthly realized vol from daily returns: std per month of daily returns
                             if not port_daily.empty:
@@ -18450,13 +18616,17 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                             if isinstance(df_bench, pd.DataFrame) and 'Price_change' in df_bench.columns:
                                 bench_daily = df_bench['Price_change'].dropna()
                             else:
+                                # Fallback: compute from Price if available
                                 if isinstance(df_bench, pd.DataFrame) and 'Price' in df_bench.columns:
                                     bench_daily = df_bench['Price'].pct_change().dropna()
                                 else:
                                     bench_daily = None
+
                             if bench_daily is not None and not port_daily.empty and not bench_daily.empty:
+                                # Align indices
                                 df_join = pd.concat([port_daily.rename('p'), bench_daily.rename('b')], axis=1).dropna()
                                 if not df_join.empty:
+                                    # Group by month and compute beta per month
                                     df_join['ym'] = df_join.index.to_period('M')
                                     betas = []
                                     for ym, grp in df_join.groupby('ym'):
@@ -18509,6 +18679,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         'Beta Median (Monthly)'
                     ]
                 )
+                # Format numeric columns
                 fmt_cols_pct = ['Mean % Change', 'Median % Change', 'Std % Change', 'Mean % (Months > 0)', 'Median % (Months > 0)', 'Mean % (Months < 0)', 'Median % (Months < 0)']
                 for c in fmt_cols_pct:
                     if c in stats_df_monthly.columns:
@@ -18640,7 +18811,765 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 else:
                     st.warning("No allocation data available for this portfolio.")
 
-            # Table 2: Momentum Metrics and Calculated Weights (moved right after Historical Allocations)
+            # Table 2: Historical Shares and Position Values
+            if selected_portfolio_detail in st.session_state.multi_all_allocations:
+                st.markdown("---")
+                st.markdown(f"**Historical Shares and Position Values for {selected_portfolio_detail}**")
+                
+                # Get allocation data and portfolio results
+                allocation_data = st.session_state.multi_all_allocations[selected_portfolio_detail]
+                portfolio_results = st.session_state.multi_all_results.get(selected_portfolio_detail)
+                
+                if allocation_data and portfolio_results:
+                    # Get portfolio value series (with additions)
+                    if isinstance(portfolio_results, dict) and 'with_additions' in portfolio_results:
+                        portfolio_values = portfolio_results['with_additions']
+                    elif isinstance(portfolio_results, pd.Series):
+                        portfolio_values = portfolio_results
+                    else:
+                        portfolio_values = None
+                    
+                    # Get raw data for prices
+                    raw_data = st.session_state.get('multi_backtest_raw_data', {})
+                    
+                    # Helper function to get price on or before a date
+                    def get_price_on_date(df, target_date):
+                        try:
+                            available_dates = df.index[df.index <= target_date]
+                            if len(available_dates) > 0:
+                                closest_date = available_dates[-1]
+                                return float(df.loc[closest_date, 'Close'])
+                            return None
+                        except Exception:
+                            return None
+                    
+                    # Build historical shares and values data
+                    shares_data = {}
+                    values_data = {}
+                    all_tickers_set = set()
+                    
+                    # Collect all tickers first
+                    for date, alloc_dict in allocation_data.items():
+                        all_tickers_set.update(alloc_dict.keys())
+                    
+                    # Remove None if present
+                    all_tickers_set.discard(None)
+                    all_tickers_list = sorted(list(all_tickers_set))
+                    if 'CASH' in all_tickers_list:
+                        all_tickers_list.remove('CASH')
+                        all_tickers_list.append('CASH')
+                    
+                    # Determine rebalancing dates (same logic used elsewhere)
+                    rebalancing_dates = []
+                    try:
+                        # Get portfolio config to read frequency
+                        portfolio_configs_local = st.session_state.get('multi_backtest_portfolio_configs', [])
+                        portfolio_cfg_local = next((cfg for cfg in portfolio_configs_local if cfg.get('name') == selected_portfolio_detail), None)
+                        rebalancing_frequency = portfolio_cfg_local.get('rebalancing_frequency', 'none') if portfolio_cfg_local else 'none'
+                        # Map to standard names
+                        frequency_mapping = {
+                            'monthly': 'Monthly',
+                            'weekly': 'Weekly',
+                            'bi-weekly': 'Biweekly',
+                            'biweekly': 'Biweekly',
+                            'quarterly': 'Quarterly',
+                            'semi-annually': 'Semiannually',
+                            'semiannually': 'Semiannually',
+                            'annually': 'Annually',
+                            'yearly': 'Annually',
+                            'never': 'Never',
+                            'none': 'Never',
+                            'buy & hold': 'Buy & Hold',
+                            'buy & hold (target)': 'Buy & Hold (Target)'
+                        }
+                        rb_freq_display = frequency_mapping.get(str(rebalancing_frequency).lower(), rebalancing_frequency)
+                        # Determine sim_index from results
+                        sim_index = None
+                        if isinstance(portfolio_results, dict) and 'no_additions' in portfolio_results:
+                            sim_index = portfolio_results['no_additions'].index
+                        elif isinstance(portfolio_results, pd.Series):
+                            sim_index = portfolio_results.index
+                        # Get cached rebalancing dates
+                        portfolio_rebalancing_dates = get_cached_rebalancing_dates(selected_portfolio_detail, rb_freq_display, sim_index)
+                        # Filter to dates we have in allocation_data
+                        if portfolio_rebalancing_dates:
+                            rebalancing_dates = sorted([d for d in portfolio_rebalancing_dates if d in allocation_data])
+                    except Exception:
+                        rebalancing_dates = []
+                    
+                    # Fallback: if no rebalancing dates and frequency implies periodic rebalancing, use all allocation dates
+                    if not rebalancing_dates:
+                        if rb_freq_display not in ['Never', 'Buy & Hold', 'Buy & Hold (Target)']:
+                            rebalancing_dates = sorted(allocation_data.keys())
+                    
+                    # Process only rebalancing dates
+                    for date in rebalancing_dates:
+                        alloc_dict = allocation_data[date]
+                        
+                        # Get portfolio value for this date
+                        if portfolio_values is not None and date in portfolio_values.index:
+                            portfolio_value = float(portfolio_values.loc[date])
+                        else:
+                            # Try to find closest date
+                            if portfolio_values is not None:
+                                available_dates = portfolio_values.index[portfolio_values.index <= date]
+                                if len(available_dates) > 0:
+                                    portfolio_value = float(portfolio_values.loc[available_dates[-1]])
+                                else:
+                                    portfolio_value = 0.0
+                            else:
+                                portfolio_value = 0.0
+                        
+                        shares_row = {}
+                        values_row = {}
+                        
+                        for ticker in all_tickers_list:
+                            # Get allocation percentage
+                            alloc_value = alloc_dict.get(ticker, 0)
+                            if isinstance(alloc_value, dict):
+                                alloc_pct = float(alloc_value.get('allocation', alloc_value.get('weight', 0)))
+                            else:
+                                alloc_pct = float(alloc_value) if alloc_value is not None else 0.0
+                            
+                            if ticker == 'CASH':
+                                shares_row[ticker] = 0.0
+                                values_row[ticker] = portfolio_value * alloc_pct
+                            else:
+                                # Get price for this ticker on this date
+                                df = raw_data.get(ticker)
+                                price = None
+                                if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
+                                    price = get_price_on_date(df, date)
+                                
+                                if price and price > 0:
+                                    allocation_value = portfolio_value * alloc_pct
+                                    shares = allocation_value / price
+                                    shares_row[ticker] = round(shares, 2)
+                                    values_row[ticker] = shares * price
+                                else:
+                                    shares_row[ticker] = 0.0
+                                    values_row[ticker] = portfolio_value * alloc_pct
+                        
+                        shares_data[date] = shares_row
+                        values_data[date] = values_row
+                    
+                    # Create DataFrames
+                    shares_df = pd.DataFrame(shares_data).T
+                    shares_df.index = pd.to_datetime(shares_df.index)
+                    shares_df = shares_df.sort_index()
+                    shares_df = shares_df.fillna(0.0)
+                    shares_df = shares_df[all_tickers_list]
+                    shares_df.index.name = "Date"
+                    
+                    values_df = pd.DataFrame(values_data).T
+                    values_df.index = pd.to_datetime(values_df.index)
+                    values_df = values_df.sort_index()
+                    values_df = values_df.fillna(0.0)
+                    values_df = values_df[all_tickers_list]
+                    values_df.index.name = "Date"
+                    
+                    # Display Shares table
+                    st.markdown("**Shares Held**")
+                    try:
+                        total_cells = shares_df.shape[0] * shares_df.shape[1]
+                        if total_cells > 200000:
+                            st.warning(f"Shares table is very large ({total_cells:,} cells). Showing simplified view.")
+                            recent_data = shares_df.tail(100)
+                            st.dataframe(recent_data, use_container_width=True)
+                            st.caption("Showing last 100 rows. Use filters to narrow down the data.")
+                        else:
+                            pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                            
+                            def highlight_shares_rows(s):
+                                is_even_row = shares_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = shares_df.style.apply(highlight_shares_rows, axis=1)
+                            styler.format('{:,.2f}', na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error displaying shares table: {str(e)}")
+                        st.dataframe(shares_df.head(1000))
+                    
+                    # Display Values table
+                    st.markdown("**Position Values ($)**")
+                    try:
+                        total_cells = values_df.shape[0] * values_df.shape[1]
+                        if total_cells > 200000:
+                            st.warning(f"Values table is very large ({total_cells:,} cells). Showing simplified view.")
+                            recent_data = values_df.tail(100)
+                            st.dataframe(recent_data, use_container_width=True)
+                            st.caption("Showing last 100 rows. Use filters to narrow down the data.")
+                        else:
+                            pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                            
+                            def highlight_values_rows(s):
+                                is_even_row = values_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = values_df.style.apply(highlight_values_rows, axis=1)
+                            styler.format('${:,.2f}', na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error displaying values table: {str(e)}")
+                        st.dataframe(values_df.head(1000))
+                    
+                    # Table 2b: Realized and Unrealized Gains/Losses from Purchases vs Price Variations
+                    st.markdown("---")
+                    st.markdown(f"**Realized and Unrealized Gains/Losses Analysis for {selected_portfolio_detail}**")
+                    st.markdown("*Shows gains/losses from purchases/sales vs price variations at each rebalance*")
+                    
+                    # IMPORTANT: Dividend handling affects interpretation.
+                    # - If dividends are collected as cash (collect_dividends_as_cash=True), they behave like "new cash"
+                    #   and will NOT create artificial realized gains in this analysis.
+                    # - If dividends are reinvested, they increase position value and may appear as additional shares
+                    #   between rebalances (because we infer shares from value/price snapshots).
+                    portfolio_cfg_for_div = None
+                    try:
+                        portfolio_cfg_for_div = next(
+                            (cfg for cfg in st.session_state.get('multi_backtest_portfolio_configs', [])
+                             if cfg.get('name') == selected_portfolio_detail),
+                            None
+                        )
+                    except Exception:
+                        portfolio_cfg_for_div = None
+                    collect_div_as_cash = bool(portfolio_cfg_for_div.get('collect_dividends_as_cash', False)) if portfolio_cfg_for_div else False
+                    if collect_div_as_cash:
+                        st.info("Dividends are **collected as cash** for this portfolio. In this analysis, dividends behave like **new cash** (added after gain/loss calculations, then reflected in the next rebalance snapshot).")
+                    else:
+                        st.warning("Dividends are currently **reinvested** for this portfolio. This analysis may show dividend reinvestment as **extra shares** between rebalances (because shares are inferred from value/price). If you want dividends treated exactly like new cash here, enable `collect_dividends_as_cash` in the portfolio config.")
+                    
+                    # Track average purchase price for each ticker (FIFO-like approach)
+                    # We'll use weighted average cost basis
+                    avg_purchase_price = {}  # {ticker: average_price}
+                    realized_gains_data = {}  # {date: {ticker: realized_gain}}
+                    unrealized_gains_data = {}  # {date: {ticker: unrealized_gain}}
+                    total_realized_data = {}  # {date: total_realized}
+                    total_unrealized_data = {}  # {date: total_unrealized}
+                    
+                    # Use the same rebalancing dates as above
+                    sorted_dates = rebalancing_dates
+                    
+                    for i, date in enumerate(sorted_dates):
+                        prev_date = sorted_dates[i-1] if i > 0 else None
+                        prev_shares = shares_df.loc[prev_date] if prev_date is not None else pd.Series(0.0, index=all_tickers_list)
+                        current_shares = shares_df.loc[date]
+                        
+                        # Get prices for this date
+                        prices = {}
+                        for ticker in all_tickers_list:
+                            if ticker == 'CASH':
+                                prices[ticker] = None
+                            else:
+                                df = raw_data.get(ticker)
+                                if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
+                                    prices[ticker] = get_price_on_date(df, date)
+                                else:
+                                    prices[ticker] = None
+                        
+                        realized_row = {}
+                        unrealized_row = {}
+                        
+                        # Get previous prices for comparison
+                        prev_prices = {}
+                        for ticker in all_tickers_list:
+                            if ticker == 'CASH':
+                                prev_prices[ticker] = None
+                            else:
+                                if prev_date:
+                                    df = raw_data.get(ticker)
+                                    if isinstance(df, pd.DataFrame) and 'Close' in df.columns:
+                                        prev_prices[ticker] = get_price_on_date(df, prev_date)
+                                    else:
+                                        prev_prices[ticker] = None
+                                else:
+                                    prev_prices[ticker] = None
+                        
+                        # STEP 1: Calculate gains/losses on EXISTING shares (before new purchases)
+                        # This handles sales and price variations on held positions
+                        for ticker in all_tickers_list:
+                            if ticker == 'CASH':
+                                realized_row[ticker] = 0.0
+                                unrealized_row[ticker] = 0.0
+                                continue
+                            
+                            prev_shares_count = prev_shares.get(ticker, 0.0)
+                            current_shares_count = current_shares.get(ticker, 0.0)
+                            current_price = prices.get(ticker)
+                            prev_price = prev_prices.get(ticker)
+                            
+                            if current_price is None or current_price <= 0:
+                                realized_row[ticker] = 0.0
+                                unrealized_row[ticker] = 0.0
+                                continue
+                            
+                            # Initialize average purchase price if first time seeing this ticker
+                            # This represents the weighted average cost basis of shares held
+                            if ticker not in avg_purchase_price:
+                                if prev_shares_count > 0:
+                                    # We had shares before - need to estimate cost basis
+                                    # Try to get it from previous period's value and shares
+                                    if prev_date:
+                                        prev_values = values_df.loc[prev_date] if prev_date in values_df.index else None
+                                        if prev_values is not None and ticker in prev_values:
+                                            prev_value = prev_values[ticker]
+                                            if prev_value > 0 and prev_shares_count > 0:
+                                                # Cost basis = previous value / previous shares
+                                                avg_purchase_price[ticker] = prev_value / prev_shares_count
+                                            elif prev_price and prev_price > 0:
+                                                avg_purchase_price[ticker] = prev_price
+                                            else:
+                                                avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
+                                        elif prev_price and prev_price > 0:
+                                            avg_purchase_price[ticker] = prev_price
+                                        else:
+                                            avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
+                                    elif prev_price and prev_price > 0:
+                                        avg_purchase_price[ticker] = prev_price
+                                    else:
+                                        avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
+                                elif current_shares_count > 0:
+                                    # First purchase: use current price
+                                    avg_purchase_price[ticker] = current_price if current_price > 0 else 0.0
+                                else:
+                                    avg_purchase_price[ticker] = 0.0
+                            
+                            # Calculate shares difference
+                            shares_diff = current_shares_count - prev_shares_count
+                            
+                            # Handle sales (shares decreased) - this is a realized transaction
+                            if shares_diff < 0:
+                                # We sold shares
+                                shares_sold = abs(shares_diff)
+                                
+                                # Calculate realized gain/loss PERIOD-BY-PERIOD (for isolated period analysis)
+                                # Uses previous rebalance price as reference point for this period's performance
+                                realized_gain = 0.0
+                                
+                                if prev_shares_count > 0 and current_price > 0:
+                                    # Use previous price as the reference point (price at start of this period)
+                                    # This gives us the gain/loss for THIS PERIOD ONLY (isolated analysis)
+                                    if prev_price and prev_price > 0:
+                                        # Realized gain/loss for this period = (sale_price - previous_price) * shares_sold
+                                        # This shows what happened in THIS period only
+                                        realized_gain = (current_price - prev_price) * shares_sold
+                                    else:
+                                        # Fallback: try to get reference price from previous value
+                                        if prev_date and prev_date in values_df.index:
+                                            prev_values = values_df.loc[prev_date]
+                                            if ticker in prev_values and prev_values[ticker] > 0 and prev_shares_count > 0:
+                                                # Use previous value / shares as reference price for this period
+                                                reference_price = prev_values[ticker] / prev_shares_count
+                                                realized_gain = (current_price - reference_price) * shares_sold
+                                        elif avg_purchase_price.get(ticker, 0.0) > 0:
+                                            # Last fallback: use avg purchase price
+                                            realized_gain = (current_price - avg_purchase_price[ticker]) * shares_sold
+                                
+                                realized_row[ticker] = realized_gain
+                                
+                                # Unrealized gain for remaining shares (if any)
+                                # Use previous price as cost basis (not avg_purchase_price) to show period-specific gain
+                                if current_shares_count > 0:
+                                    if prev_price and prev_price > 0:
+                                        # Unrealized gain on remaining shares = (current_price - prev_price) * remaining_shares
+                                        # This shows the price change on shares that were held (not sold)
+                                        unrealized_gain = (current_price - prev_price) * current_shares_count
+                                        unrealized_row[ticker] = unrealized_gain
+                                    elif avg_purchase_price[ticker] > 0:
+                                        # Fallback: use avg_purchase_price if prev_price not available
+                                        unrealized_gain = (current_price - avg_purchase_price[ticker]) * current_shares_count
+                                        unrealized_row[ticker] = unrealized_gain
+                                    else:
+                                        unrealized_row[ticker] = 0.0
+                                else:
+                                    unrealized_row[ticker] = 0.0
+                                    # Sold all shares - reset average purchase price for next purchase
+                                    avg_purchase_price[ticker] = 0.0
+                            
+                            # Handle no change or purchases - calculate unrealized gains on existing shares
+                            else:
+                                # No realized gain (no sales)
+                                realized_row[ticker] = 0.0
+                                
+                                # Calculate unrealized gain on PREVIOUS shares (before new purchases)
+                                # This shows the gain/loss from price variation on existing positions
+                                if prev_shares_count > 0:
+                                    # Use previous price as the cost basis for existing shares
+                                    if prev_price and prev_price > 0:
+                                        # Unrealized gain = (current_price - previous_price) * previous_shares
+                                        # This is the gain/loss from price change on shares that existed before this rebalance
+                                        unrealized_gain = (current_price - prev_price) * prev_shares_count
+                                        unrealized_row[ticker] = unrealized_gain
+                                    elif avg_purchase_price[ticker] > 0:
+                                        # Fallback: use average purchase price if previous price not available
+                                        unrealized_gain = (current_price - avg_purchase_price[ticker]) * prev_shares_count
+                                        unrealized_row[ticker] = unrealized_gain
+                                    else:
+                                        unrealized_row[ticker] = 0.0
+                                else:
+                                    unrealized_row[ticker] = 0.0
+                        
+                        # STEP 2: AFTER calculating gains/losses, update average purchase price for new purchases
+                        # This way new cash investments don't affect the gain/loss calculations
+                        for ticker in all_tickers_list:
+                            if ticker == 'CASH':
+                                continue
+                            
+                            prev_shares_count = prev_shares.get(ticker, 0.0)
+                            current_shares_count = current_shares.get(ticker, 0.0)
+                            current_price = prices.get(ticker)
+                            
+                            if current_price is None or current_price <= 0:
+                                continue
+                            
+                            shares_diff = current_shares_count - prev_shares_count
+                            
+                            # Handle purchases (shares increased) - update cost basis AFTER gain calculations
+                            if shares_diff > 0:
+                                # We bought more shares (could be from new cash or rebalancing)
+                                shares_bought = shares_diff
+                                
+                                # Update average purchase price (weighted average) for next rebalance
+                                if prev_shares_count > 0:
+                                    # Get the cost basis for previous shares using avg_purchase_price (weighted average cost)
+                                    if avg_purchase_price.get(ticker, 0.0) > 0:
+                                        # Use the maintained average purchase price (this is the correct cost basis)
+                                        prev_cost_basis = prev_shares_count * avg_purchase_price[ticker]
+                                    elif prev_date and prev_date in values_df.index:
+                                        # Fallback: calculate from previous value and shares
+                                        prev_values = values_df.loc[prev_date]
+                                        if ticker in prev_values and prev_values[ticker] > 0:
+                                            prev_cost_basis = prev_values[ticker]
+                                        elif prev_prices.get(ticker) and prev_prices.get(ticker) > 0:
+                                            prev_cost_basis = prev_shares_count * prev_prices[ticker]
+                                        else:
+                                            prev_cost_basis = 0.0
+                                    elif prev_prices.get(ticker) and prev_prices.get(ticker) > 0:
+                                        prev_cost_basis = prev_shares_count * prev_prices[ticker]
+                                    else:
+                                        prev_cost_basis = 0.0
+                                    
+                                    # Weighted average: (old_shares * old_price + new_shares * new_price) / total_shares
+                                    total_cost_new = shares_bought * current_price
+                                    total_shares = current_shares_count
+                                    if total_shares > 0:
+                                        avg_purchase_price[ticker] = (prev_cost_basis + total_cost_new) / total_shares
+                                    else:
+                                        avg_purchase_price[ticker] = current_price
+                                else:
+                                    # First purchase or all shares were sold before
+                                    avg_purchase_price[ticker] = current_price
+                            
+                            # If shares decreased (sale), avg_purchase_price stays the same (we already handled it above)
+                            # If shares stayed the same, keep the same cost basis (don't reset it)
+                            # The cost basis should only change when we buy new shares or sell all shares
+                            # For next period, we'll use the same avg_purchase_price to calculate unrealized gains
+                        
+                        # Calculate totals for this rebalance period
+                        total_realized = sum(realized_row.values())
+                        total_unrealized = sum(unrealized_row.values())
+                        
+                        realized_gains_data[date] = realized_row
+                        unrealized_gains_data[date] = unrealized_row
+                        total_realized_data[date] = total_realized
+                        total_unrealized_data[date] = total_unrealized
+                    
+                    # Create DataFrames for realized and unrealized gains
+                    realized_df = pd.DataFrame(realized_gains_data).T
+                    realized_df.index = pd.to_datetime(realized_df.index)
+                    realized_df = realized_df.sort_index()
+                    realized_df = realized_df.fillna(0.0)
+                    # Ensure all tickers are present
+                    for ticker in all_tickers_list:
+                        if ticker not in realized_df.columns:
+                            realized_df[ticker] = 0.0
+                    realized_df = realized_df[all_tickers_list]
+                    realized_df['TOTAL'] = realized_df.sum(axis=1)
+                    
+                    # Create period labels for index (prev_date - current_date)
+                    # Keep original dates for year calculation
+                    sorted_dates_list = sorted(rebalancing_dates)
+                    period_labels = []
+                    period_to_date_map = {}  # Map period label to original date
+                    
+                    for i, current_date in enumerate(sorted_dates_list):
+                        if i > 0:
+                            prev_date = sorted_dates_list[i-1]
+                            # Format dates without time (YYYY-MM-DD)
+                            prev_date_str = prev_date.strftime('%Y-%m-%d') if isinstance(prev_date, pd.Timestamp) else str(prev_date)[:10]
+                            current_date_str = current_date.strftime('%Y-%m-%d') if isinstance(current_date, pd.Timestamp) else str(current_date)[:10]
+                            period_label = f"{prev_date_str} - {current_date_str}"
+                        else:
+                            # First period: show start date only or use first date as reference
+                            current_date_str = current_date.strftime('%Y-%m-%d') if isinstance(current_date, pd.Timestamp) else str(current_date)[:10]
+                            period_label = f"{current_date_str} (start)"
+                        period_labels.append((current_date, period_label))
+                        period_to_date_map[period_label] = current_date
+                    
+                    # Create mapping from date to period label
+                    period_map = {date: label for date, label in period_labels}
+                    
+                    # Store original dates mapping for annual aggregation
+                    original_dates_for_realized = {label: date for date, label in period_labels}
+                    
+                    # Update index with period labels
+                    new_index = [period_map.get(date, date.strftime('%Y-%m-%d') if isinstance(date, pd.Timestamp) else str(date)[:10]) 
+                                 for date in realized_df.index]
+                    realized_df.index = new_index
+                    realized_df.index.name = "Period"
+                    
+                    unrealized_df = pd.DataFrame(unrealized_gains_data).T
+                    unrealized_df.index = pd.to_datetime(unrealized_df.index)
+                    unrealized_df = unrealized_df.sort_index()
+                    unrealized_df = unrealized_df.fillna(0.0)
+                    # Ensure all tickers are present
+                    for ticker in all_tickers_list:
+                        if ticker not in unrealized_df.columns:
+                            unrealized_df[ticker] = 0.0
+                    unrealized_df = unrealized_df[all_tickers_list]
+                    unrealized_df['TOTAL'] = unrealized_df.sum(axis=1)
+                    
+                    # Store original dates mapping for unrealized as well
+                    original_dates_for_unrealized = {label: date for date, label in period_labels}
+                    
+                    # Update index with period labels (same mapping)
+                    new_index_unrealized = [period_map.get(date, date.strftime('%Y-%m-%d') if isinstance(date, pd.Timestamp) else str(date)[:10]) 
+                                           for date in unrealized_df.index]
+                    unrealized_df.index = new_index_unrealized
+                    unrealized_df.index.name = "Period"
+                    
+                    # Display Realized Gains/Losses table
+                    st.markdown("**Realized Gains/Losses (from Sales)**")
+                    try:
+                        total_cells = realized_df.shape[0] * realized_df.shape[1]
+                        if total_cells > 500000:  # Increased limit from 200000 to 500000
+                            st.warning(f"Realized gains table is very large ({total_cells:,} cells). Showing all data (may be slow to render).")
+                        # Always show full dataframe - removed the limit restriction
+                        pd.set_option("styler.render.max_elements", max(total_cells * 2, 1000000))
+                        
+                        if total_cells > 500000:
+                            # For very large tables, show all but warn user
+                            def highlight_realized_rows(s):
+                                is_even_row = realized_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = realized_df.style.apply(highlight_realized_rows, axis=1)
+                            format_dict = {col: '${:,.2f}' for col in realized_df.columns if col != 'TOTAL'}
+                            format_dict['TOTAL'] = '${:,.2f}'
+                            styler.format(format_dict, na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True, height=600)
+                        else:
+                            pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                            
+                            def highlight_realized_rows(s):
+                                is_even_row = realized_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = realized_df.style.apply(highlight_realized_rows, axis=1)
+                            # Format all columns except TOTAL as currency
+                            format_dict = {col: '${:,.2f}' for col in realized_df.columns if col != 'TOTAL'}
+                            format_dict['TOTAL'] = '${:,.2f}'  # Also format TOTAL
+                            styler.format(format_dict, na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error displaying realized gains table: {str(e)}")
+                        st.dataframe(realized_df.head(1000))
+                    
+                    # Display Unrealized Gains/Losses table
+                    st.markdown("**Unrealized Gains/Losses (from Price Variations)**")
+                    try:
+                        total_cells = unrealized_df.shape[0] * unrealized_df.shape[1]
+                        if total_cells > 500000:  # Increased limit from 200000 to 500000
+                            st.warning(f"Unrealized gains table is very large ({total_cells:,} cells). Showing all data (may be slow to render).")
+                        # Always show full dataframe - removed the limit restriction
+                        pd.set_option("styler.render.max_elements", max(total_cells * 2, 1000000))
+                        
+                        if total_cells > 500000:
+                            # For very large tables, show all but warn user
+                            def highlight_unrealized_rows(s):
+                                is_even_row = unrealized_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = unrealized_df.style.apply(highlight_unrealized_rows, axis=1)
+                            format_dict = {col: '${:,.2f}' for col in unrealized_df.columns}
+                            styler.format(format_dict, na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True, height=600)
+                        else:
+                            pd.set_option("styler.render.max_elements", max(total_cells * 2, 500000))
+                            
+                            def highlight_unrealized_rows(s):
+                                is_even_row = unrealized_df.index.get_loc(s.name) % 2 == 0
+                                bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                                return [f'{bg_color}; color: white;'] * len(s)
+                            
+                            styler = unrealized_df.style.apply(highlight_unrealized_rows, axis=1)
+                            # Format all columns as currency
+                            format_dict = {col: '${:,.2f}' for col in unrealized_df.columns}
+                            styler.format(format_dict, na_rep='N/A')
+                            st.dataframe(styler, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error displaying unrealized gains table: {str(e)}")
+                        st.dataframe(unrealized_df.head(1000))
+                    
+                    st.info("💡 **Explanation:** Realized gains/losses occur when shares are sold. Unrealized gains/losses show paper gains/losses from price changes on held positions. The TOTAL column shows the sum for each rebalance period.")
+                    
+                    # Annual Summary Table for Tax Purposes
+                    st.markdown("---")
+                    st.markdown(f"**📊 Annual Gains/Losses Summary (for Tax Calculation) - {selected_portfolio_detail}**")
+                    
+                    # Group by year and sum
+                    # Use original dates mapping to get the year
+                    annual_realized = {}
+                    annual_unrealized = {}
+                    
+                    # Map to get start and end dates for each period
+                    period_start_end_map = {}
+                    for i, (current_date, period_label) in enumerate(period_labels):
+                        if i > 0:
+                            prev_date = sorted_dates_list[i-1]
+                            period_start_end_map[period_label] = (prev_date, current_date)
+                        else:
+                            # First period: use current_date as both start and end
+                            period_start_end_map[period_label] = (current_date, current_date)
+                    
+                    for period_label in realized_df.index:
+                        # Get start and end dates for this period
+                        start_end = period_start_end_map.get(period_label)
+                        if start_end is None:
+                            continue
+                        start_date, end_date = start_end
+                        
+                        # Get years
+                        start_year = start_date.year if isinstance(start_date, pd.Timestamp) else pd.to_datetime(start_date).year
+                        end_year = end_date.year if isinstance(end_date, pd.Timestamp) else pd.to_datetime(end_date).year
+                        
+                        # Include period in the year range it belongs to
+                        # A period belongs to a year range "prev_year-year" if it starts in prev_year OR ends in year
+                        # Example: "2025-01-01 - 2025-07-01" starts in 2025 → belongs to "2025-2026" (year 2026)
+                        #          "2025-07-01 - 2026-01-01" ends in 2026 → belongs to "2025-2026" (year 2026)
+                        # Rule: periods that start in year X are counted in year X+1 (which shows "X-(X+1)")
+                        #       periods that end in year Y are counted in year Y (which shows "(Y-1)-Y")
+                        if start_year < end_year:
+                            # Period spans years: count in end year (shows as "(end_year-1)-end_year")
+                            year = end_year
+                        elif start_year == end_year:
+                            # Period within same year: count in year+1 (shows as "year-(year+1)")
+                            # This ensures periods starting in 2025 are in "2025-2026"
+                            year = end_year + 1
+                        else:
+                            # Should not happen, but use end_year as fallback
+                            year = end_year
+                        
+                        if year not in annual_realized:
+                            annual_realized[year] = 0.0
+                            annual_unrealized[year] = 0.0
+                        
+                        # Sum TOTAL column for each year
+                        if 'TOTAL' in realized_df.columns:
+                            annual_realized[year] += realized_df.loc[period_label, 'TOTAL']
+                        else:
+                            annual_realized[year] += realized_df.loc[period_label].sum()
+                    
+                    for period_label in unrealized_df.index:
+                        # Get start and end dates for this period
+                        start_end = period_start_end_map.get(period_label)
+                        if start_end is None:
+                            continue
+                        start_date, end_date = start_end
+                        
+                        # Get years
+                        start_year = start_date.year if isinstance(start_date, pd.Timestamp) else pd.to_datetime(start_date).year
+                        end_year = end_date.year if isinstance(end_date, pd.Timestamp) else pd.to_datetime(end_date).year
+                        
+                        # Same logic as realized gains
+                        if start_year < end_year:
+                            # Period spans years: count in end year (shows as "(end_year-1)-end_year")
+                            year = end_year
+                        elif start_year == end_year:
+                            # Period within same year: count in year+1 (shows as "year-(year+1)")
+                            # This ensures periods starting in 2025 are in "2025-2026"
+                            year = end_year + 1
+                        else:
+                            # Should not happen, but use end_year as fallback
+                            year = end_year
+                        
+                        if year not in annual_unrealized:
+                            annual_unrealized[year] = 0.0
+                        
+                        # Sum TOTAL column for each year
+                        if 'TOTAL' in unrealized_df.columns:
+                            annual_unrealized[year] += unrealized_df.loc[period_label, 'TOTAL']
+                        else:
+                            annual_unrealized[year] += unrealized_df.loc[period_label].sum()
+                    
+                    # Create annual summary DataFrame
+                    all_years = sorted(set(list(annual_realized.keys()) + list(annual_unrealized.keys())))
+                    annual_data = []
+                    for year in all_years:
+                        realized = annual_realized.get(year, 0.0)
+                        unrealized = annual_unrealized.get(year, 0.0)
+                        total = realized + unrealized
+                        
+                        # Calculate percentage of gains that are taxable (realized)
+                        # Use absolute values to ensure percentage is always between 0 and 100%
+                        abs_realized = abs(realized)
+                        abs_unrealized = abs(unrealized)
+                        abs_total = abs_realized + abs_unrealized
+                        
+                        if abs_total > 0.01:  # Total is significant (not near zero)
+                            # Percentage = realized / (abs(realized) + abs(unrealized)) * 100
+                            # This ensures the percentage is always between 0 and 100%
+                            taxable_pct = (abs_realized / abs_total) * 100
+                        else:  # Both are near zero
+                            taxable_pct = 0.0
+                        
+                        # Create period label: previous year - current year (e.g., "2024-2025")
+                        prev_year = year - 1
+                        period_label = f"{prev_year}-{year}"
+                        
+                        annual_data.append({
+                            'Period': period_label,
+                            'Realized Gains/Losses ($)': realized,
+                            'Unrealized Gains/Losses ($)': unrealized,
+                            'Total (Realized + Unrealized) ($)': total,
+                            '% Taxable (Realized)': taxable_pct
+                        })
+                    
+                    annual_df = pd.DataFrame(annual_data)
+                    annual_df = annual_df.set_index('Period')
+                    
+                    # Display annual table
+                    try:
+                        def highlight_annual_rows(s):
+                            is_even_row = annual_df.index.get_loc(s.name) % 2 == 0
+                            bg_color = 'background-color: #0e1117' if is_even_row else 'background-color: #262626'
+                            return [f'{bg_color}; color: white;'] * len(s)
+                        
+                        styler = annual_df.style.apply(highlight_annual_rows, axis=1)
+                        format_dict = {}
+                        for col in annual_df.columns:
+                            if '% Taxable' in col:
+                                format_dict[col] = '{:,.1f}%'
+                            else:
+                                format_dict[col] = '${:,.2f}'
+                        styler.format(format_dict, na_rep='N/A')
+                        st.dataframe(styler, use_container_width=True)
+                        
+                        st.warning("⚠️ **IMPORTANT FOR TAXES:** Only **Realized Gains/Losses** are taxable. Unrealized gains/losses are NOT taxable until shares are sold. Use the 'Realized Gains/Losses ($)' column for your tax calculations.")
+                        st.info("💡 **Note:** The 'Total (Realized + Unrealized)' column shows the total portfolio value change for the year (excluding dividends and new cash contributions). This is for reference only and does NOT represent taxable income.")
+                        st.info("📊 **How it works:** This table sums ALL rebalancing periods within each year. Whether you rebalance monthly, quarterly, or annually, all realized and unrealized gains from all rebalance periods in that year are aggregated here.")
+                    except Exception as e:
+                        st.error(f"Error displaying annual summary table: {str(e)}")
+                        st.dataframe(annual_df)
+                else:
+                    st.warning("No allocation or portfolio data available for shares and values table.")
+            
+            # Table 3: Momentum Metrics and Calculated Weights (moved after Historical Shares)
             if selected_portfolio_detail in st.session_state.multi_all_metrics:
                 st.markdown("---")
                 st.markdown(f"**Momentum Metrics and Calculated Weights for {selected_portfolio_detail}**")
@@ -18893,27 +19822,6 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 """, unsafe_allow_html=True)
 
                                 st.dataframe(styler_metrics, use_container_width=True)
-                                
-                                # Add informational message for non-momentum portfolios
-                                portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
-                                portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
-                                
-                                if portfolio_cfg:
-                                    momentum_strategy = portfolio_cfg.get('momentum_strategy', 'none')
-                                    
-                                    # Check if this is a non-momentum portfolio (broader condition)
-                                    is_non_momentum = (
-                                        momentum_strategy.lower() in ['none', 'never', 'disabled', ''] or
-                                        portfolio_cfg.get('name', '').lower().find('no momentum') != -1 or
-                                        portfolio_cfg.get('name', '').lower().find('equal weight') != -1
-                                    )
-                                    
-                                    if is_non_momentum:
-                                        st.info("""
-                                        **Note:** This portfolio does not use momentum-based allocation. 
-                                        The "Momentum Metrics and Calculated Weights" table above can be **completely ignored** 
-                                        as it has no impact on the actual portfolio allocation strategy.
-                                        """)
                         except Exception as e:
                             st.error(f"Error displaying metrics table: {str(e)}")
                             st.write("Raw data (first 1000 rows):")
@@ -18961,23 +19869,17 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         total_weight = sum(today_weights.values())
                         if total_weight < 1.0:
                             today_weights['CASH'] = 1.0 - total_weight
-                        else:
-                            today_weights['CASH'] = 0.0
             else:
-                # NON-MOMENTUM: Use today_weights_map from backtest data ONLY - NO FALLBACKS
+                # NON-MOMENTUM: Use portfolio configuration
                 if portfolio_cfg and portfolio_cfg.get('stocks'):
-                    # Try to get today_weights from backtest data first (same logic as page 2)
-                    if 'multi_backtest_snapshot_data' in st.session_state:
-                        snapshot = st.session_state.multi_backtest_snapshot_data
-                        today_weights_map = snapshot.get('today_weights_map', {})
-                        if selected_portfolio_detail in today_weights_map:
-                            today_weights = today_weights_map[selected_portfolio_detail]
-                        else:
-                            # NO FALLBACK - if no snapshot data, show nothing
-                            today_weights = {}
-                    else:
-                        # NO FALLBACK - if no snapshot data, show nothing
-                        today_weights = {}
+                    total_allocation = sum(stock.get('allocation', 0) for stock in portfolio_cfg['stocks'] if stock.get('ticker'))
+                    
+                    if total_allocation > 0:
+                        for stock in portfolio_cfg['stocks']:
+                            ticker = stock.get('ticker', '').strip()
+                            allocation = stock.get('allocation', 0)
+                            if ticker and allocation > 0:
+                                today_weights[ticker] = allocation / total_allocation
             
             # Create labels and values for the plot
             labels_today = [k for k, v in sorted(today_weights.items(), key=lambda x: (-x[1], x[0])) if v > 0]
@@ -19604,6 +20506,11 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     if final_date and last_rebal_date:
                         final_alloc = allocation_data.get(final_date, {})
                         rebal_alloc = allocation_data.get(last_rebal_date, {})
+                        
+                        # Check if this is a fusion portfolio
+                        portfolio_configs = st.session_state.get('multi_backtest_portfolio_configs', [])
+                        portfolio_cfg = next((cfg for cfg in portfolio_configs if cfg.get('name') == selected_portfolio_detail), None)
+                        is_fusion = portfolio_cfg and portfolio_cfg.get('fusion_portfolio', {}).get('enabled', False)
                         
                         # Get portfolio value for calculations
                         portfolio_value = get_portfolio_value(selected_portfolio_detail)
@@ -21131,7 +22038,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                 keys_to_clear = [key for key in st.session_state.keys() if key.startswith(('multi_allocation_evolution_chart_', 'processed_allocations_df_', 'processed_allocations_tickers_', 'pie_chart_'))]
                 for key in keys_to_clear:
                     del st.session_state[key]
-                st.success("Cache cleared! Charts will be recreated on next selection.")
+                st.success("Cache cleared. Charts will be recreated on next selection.")
                 st.rerun()
         
         with col2:
@@ -21486,28 +22393,13 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         all_tickers = sorted(list(all_tickers))
                         
                         if all_tickers:
-                            # Fetch PE data for all tickers sequentially to avoid threading issues
-                            pe_data = {}
+                            # Use batch download for PE data (much faster!)
+                            pe_data = get_multiple_tickers_info_batch(all_tickers)
+                            # Extract PE ratios from batch results
+                            pe_data = {ticker: info.get('trailingPE', None) for ticker, info in pe_data.items() if info.get('trailingPE') is not None and info.get('trailingPE') > 0}
+                            
+                            # Initialize historical PE data as empty (placeholder for future implementation)
                             historical_pe_data = {}
-                            with st.spinner("Fetching PE ratio data..."):
-                                for ticker in all_tickers:
-                                    try:
-                                        # Get stock info for current PE ratio
-                                        stock = get_ticker_with_cache(ticker)
-                                        info = stock.info
-                                        pe_ratio = info.get('trailingPE', None)
-                                        if pe_ratio is not None and pe_ratio > 0:
-                                            pe_data[ticker] = pe_ratio
-                                        
-                                        # Try to get historical earnings data (placeholder for future implementation)
-                                        try:
-                                            # For now, we'll use current PE ratios only
-                                            # Historical PE calculation can be added later with better data sources
-                                            pass
-                                        except:
-                                            pass
-                                    except:
-                                        continue
                             
                             if pe_data:
                                 # Calculate daily weighted PE ratio using the same approach as portfolio allocation evolution
