@@ -9062,7 +9062,15 @@ def add_portfolio_callback():
 def remove_portfolio_callback():
     if len(st.session_state.multi_backtest_portfolio_configs) > 1:
         st.session_state.multi_backtest_portfolio_configs.pop(st.session_state.multi_backtest_active_portfolio_index)
-        st.session_state.multi_backtest_active_portfolio_index = max(0, st.session_state.multi_backtest_active_portfolio_index - 1)
+        new_index = max(0, st.session_state.multi_backtest_active_portfolio_index - 1)
+        st.session_state.multi_backtest_active_portfolio_index = new_index
+        
+        # CRITICAL: Update selector to match new index after removal
+        if new_index < len(st.session_state.multi_backtest_portfolio_configs):
+            new_portfolio_name = st.session_state.multi_backtest_portfolio_configs[new_index].get('name', '')
+            if new_portfolio_name:
+                st.session_state.multi_backtest_portfolio_selector = new_portfolio_name
+        
         st.session_state.multi_backtest_rerun_flag = True
 
 def bulk_delete_portfolios_callback(portfolio_names_to_delete):
@@ -9083,10 +9091,21 @@ def bulk_delete_portfolios_callback(portfolio_names_to_delete):
     
     # Delete portfolios
     deleted_count = 0
+    current_active_index = st.session_state.multi_backtest_active_portfolio_index
     for idx in indices_to_delete:
         if len(st.session_state.multi_backtest_portfolio_configs) > 1:
             st.session_state.multi_backtest_portfolio_configs.pop(idx)
             deleted_count += 1
+            # Adjust active index if needed
+            if idx <= current_active_index:
+                current_active_index = max(0, current_active_index - 1)
+    
+    # CRITICAL: Update active index and selector after bulk deletion
+    if len(st.session_state.multi_backtest_portfolio_configs) > 0:
+        st.session_state.multi_backtest_active_portfolio_index = min(current_active_index, len(st.session_state.multi_backtest_portfolio_configs) - 1)
+        new_portfolio_name = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index].get('name', '')
+        if new_portfolio_name:
+            st.session_state.multi_backtest_portfolio_selector = new_portfolio_name
     
     # Clear all checkboxes after deletion
     st.session_state.multi_backtest_portfolio_checkboxes = {}
@@ -10202,6 +10221,9 @@ if st.sidebar.button("📊 Convert to SPY Portfolio",
     current['added_amount'] = 10000
     current['added_frequency'] = 'Annually'
     
+    # CRITICAL: Update selector to match new name
+    st.session_state.multi_backtest_portfolio_selector = 'SPY Benchmark'
+    
     st.toast("✅ Portfolio converted to SPY Benchmark!")
     st.rerun()
 
@@ -10217,6 +10239,9 @@ if st.sidebar.button("📈 Convert to SPY Total Return",
     current['use_momentum'] = False
     current['added_amount'] = 10000
     current['added_frequency'] = 'Annually'
+    
+    # CRITICAL: Update selector to match new name
+    st.session_state.multi_backtest_portfolio_selector = 'SPY Total Return'
     
     st.toast("✅ Portfolio converted to SPY Total Return!")
     st.rerun()
