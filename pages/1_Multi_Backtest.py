@@ -9045,7 +9045,18 @@ def add_portfolio_callback():
     
     # Use central function - automatically ensures unique name
     add_portfolio_to_configs(new_portfolio)
-    st.session_state.multi_backtest_active_portfolio_index = len(st.session_state.multi_backtest_portfolio_configs) - 1
+    new_index = len(st.session_state.multi_backtest_portfolio_configs) - 1
+    st.session_state.multi_backtest_active_portfolio_index = new_index
+    
+    # CRITICAL: Force update the selectbox to the new portfolio immediately
+    # This ensures the UI shows the correct portfolio even on Streamlit Cloud with potential lag
+    if new_index < len(st.session_state.multi_backtest_portfolio_configs):
+        new_portfolio_name = st.session_state.multi_backtest_portfolio_configs[new_index].get('name', '')
+        if new_portfolio_name:
+            # Set the selector value BEFORE rerun to ensure selectbox shows correct portfolio
+            st.session_state.multi_backtest_portfolio_selector = new_portfolio_name
+    
+    # Force immediate rerun to sync UI
     st.session_state.multi_backtest_rerun_flag = True
 
 def remove_portfolio_callback():
@@ -10086,21 +10097,85 @@ if (st.session_state.multi_backtest_active_portfolio_index is None or
     st.session_state.multi_backtest_active_portfolio_index < 0):
     st.session_state.multi_backtest_active_portfolio_index = 0 if portfolio_names else None
 
-# Use the current portfolio name as the default selection to make it more reliable
-current_portfolio_name = None
-if (st.session_state.multi_backtest_active_portfolio_index is not None and 
-    st.session_state.multi_backtest_active_portfolio_index < len(portfolio_names)):
-    current_portfolio_name = portfolio_names[st.session_state.multi_backtest_active_portfolio_index]
+# CRITICAL: Ensure selectbox and active portfolio are always in sync
+# Priority: 1) Check if selector value exists and is valid, 2) Use active index, 3) Default to first
+
+# First, check if selector value is set and valid (e.g., from add_portfolio_callback)
+if 'multi_backtest_portfolio_selector' in st.session_state:
+    selector_value = st.session_state.multi_backtest_portfolio_selector
+    if selector_value in portfolio_names:
+        # Selector value is valid - use it and sync index
+        current_portfolio_name = selector_value
+        st.session_state.multi_backtest_active_portfolio_index = portfolio_names.index(selector_value)
+    else:
+        # Selector value is invalid (portfolio was deleted?) - clear it and use index
+        del st.session_state.multi_backtest_portfolio_selector
+        if (st.session_state.multi_backtest_active_portfolio_index is not None and 
+            st.session_state.multi_backtest_active_portfolio_index < len(portfolio_names)):
+            current_portfolio_name = portfolio_names[st.session_state.multi_backtest_active_portfolio_index]
+        else:
+            current_portfolio_name = portfolio_names[0] if portfolio_names else None
+            st.session_state.multi_backtest_active_portfolio_index = 0 if portfolio_names else None
+else:
+    # No selector value - use active index
+    if (st.session_state.multi_backtest_active_portfolio_index is not None and 
+        st.session_state.multi_backtest_active_portfolio_index < len(portfolio_names)):
+        current_portfolio_name = portfolio_names[st.session_state.multi_backtest_active_portfolio_index]
+        # Sync selector with current index
+        st.session_state.multi_backtest_portfolio_selector = current_portfolio_name
+    else:
+        current_portfolio_name = portfolio_names[0] if portfolio_names else None
+        st.session_state.multi_backtest_active_portfolio_index = 0 if portfolio_names else None
+        if current_portfolio_name:
+            st.session_state.multi_backtest_portfolio_selector = current_portfolio_name
+
+# Determine the index to use for the selectbox - always use the synced value
+selectbox_index = st.session_state.multi_backtest_active_portfolio_index
+if current_portfolio_name and current_portfolio_name in portfolio_names:
+    selectbox_index = portfolio_names.index(current_portfolio_name)
+    # Double-check: ensure selector value matches
+    if st.session_state.get('multi_backtest_portfolio_selector') != current_portfolio_name:
+        st.session_state.multi_backtest_portfolio_selector = current_portfolio_name
 
 selected_portfolio_name = st.sidebar.selectbox(
     "Select Portfolio",
     options=portfolio_names,
-    index=st.session_state.multi_backtest_active_portfolio_index,
+    index=selectbox_index if selectbox_index is not None and selectbox_index < len(portfolio_names) else 0,
     key="multi_backtest_portfolio_selector",
     on_change=update_active_portfolio_index
 )
 
-active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+# FINAL SYNC: Ensure active_portfolio matches selected_portfolio_name
+# This is the critical fix - if they don't match, force sync
+if selected_portfolio_name != current_portfolio_name:
+    # Selectbox value doesn't match - update index to match selectbox
+    if selected_portfolio_name in portfolio_names:
+        st.session_state.multi_backtest_active_portfolio_index = portfolio_names.index(selected_portfolio_name)
+        current_portfolio_name = selected_portfolio_name
+        # Also update selector to ensure consistency
+        st.session_state.multi_backtest_portfolio_selector = selected_portfolio_name
+
+# CRITICAL: Double-check that active_portfolio_index is valid before accessing
+if (st.session_state.multi_backtest_active_portfolio_index is not None and 
+    st.session_state.multi_backtest_active_portfolio_index < len(st.session_state.multi_backtest_portfolio_configs)):
+    active_portfolio = st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]
+    
+    # FINAL VERIFICATION: Ensure the active portfolio name matches what's selected
+    if active_portfolio.get('name') != selected_portfolio_name:
+        # They don't match - find the correct index
+        for idx, cfg in enumerate(st.session_state.multi_backtest_portfolio_configs):
+            if cfg.get('name') == selected_portfolio_name:
+                st.session_state.multi_backtest_active_portfolio_index = idx
+                active_portfolio = cfg
+                break
+else:
+    # Invalid index - reset to first portfolio
+    if portfolio_names:
+        st.session_state.multi_backtest_active_portfolio_index = 0
+        active_portfolio = st.session_state.multi_backtest_portfolio_configs[0]
+        st.session_state.multi_backtest_portfolio_selector = portfolio_names[0]
+    else:
+        active_portfolio = None
 
 if st.sidebar.button("Add New Portfolio", on_click=add_portfolio_callback):
     pass
