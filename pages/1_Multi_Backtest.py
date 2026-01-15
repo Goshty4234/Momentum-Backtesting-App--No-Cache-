@@ -3865,6 +3865,14 @@ if "_import_start_with" in st.session_state:
 if "_import_first_rebalance_strategy" in st.session_state:
     st.session_state["multi_backtest_first_rebalance_strategy"] = st.session_state.pop("_import_first_rebalance_strategy")
     st.session_state["multi_backtest_first_rebalance_strategy_radio"] = st.session_state["multi_backtest_first_rebalance_strategy"]
+if "_import_auto_adjust_momentum_start" in st.session_state:
+    # Exact same pattern as first_rebalance_strategy - pop and set both values
+    # CRITICAL: Pop the value and immediately set both the boolean and radio values
+    imported_bool = st.session_state.pop("_import_auto_adjust_momentum_start")
+    st.session_state["multi_backtest_auto_adjust_momentum_start"] = imported_bool
+    # Convert boolean to radio value (same conversion as in callback)
+    # ALWAYS update the radio key, even if it exists (same as first_rebalance_strategy)
+    st.session_state["multi_backtest_auto_adjust_momentum_start_radio"] = "truncate_momentum_window" if imported_bool else "no_truncation"
 st.markdown("""
 <style>
     /* Global Styles for the App */
@@ -9562,6 +9570,7 @@ def paste_json_callback():
             'start_date_user': parse_date_from_json(json_data.get('start_date_user')),
             'end_date_user': parse_date_from_json(json_data.get('end_date_user')),
             'start_with': json_data.get('start_with', 'first'),
+            'first_rebalance_strategy': json_data.get('first_rebalance_strategy', 'momentum_window_complete'),
             'use_momentum': use_momentum,
             'momentum_strategy': momentum_strategy,
             'negative_momentum_strategy': negative_momentum_strategy,
@@ -9634,6 +9643,15 @@ def paste_json_callback():
             st.session_state['multi_backtest_first_rebalance_strategy'] = json_data['first_rebalance_strategy']
             # Update the radio button widget key
             st.session_state['multi_backtest_first_rebalance_strategy_radio'] = json_data['first_rebalance_strategy']
+        
+        # Handle auto_adjust_momentum_start from imported JSON
+        # Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
+        if 'auto_adjust_momentum_start' in json_data:
+            # Parse boolean from JSON (same as first_rebalance_strategy but with parse_bool_from_json)
+            imported_bool = parse_bool_from_json(json_data['auto_adjust_momentum_start'], False)
+            st.session_state['multi_backtest_auto_adjust_momentum_start'] = imported_bool
+            # Convert boolean to radio value (same conversion as in callback)
+            st.session_state['multi_backtest_auto_adjust_momentum_start_radio'] = "truncate_momentum_window" if imported_bool else "no_truncation"
         
         # Update session state for targeted rebalancing settings
         st.session_state['multi_backtest_active_use_targeted_rebalancing'] = multi_backtest_config.get('use_targeted_rebalancing', False)
@@ -9996,6 +10014,12 @@ def update_start_with():
 def update_first_rebalance_strategy():
     st.session_state.multi_backtest_first_rebalance_strategy = st.session_state.multi_backtest_first_rebalance_strategy_radio
 
+def update_auto_adjust_momentum_start():
+    # Convert radio value to boolean: "truncate_momentum_window" -> True, "no_truncation" -> False
+    # Exact same pattern as update_first_rebalance_strategy, just with boolean conversion
+    radio_value = st.session_state.multi_backtest_auto_adjust_momentum_start_radio
+    st.session_state.multi_backtest_auto_adjust_momentum_start = (radio_value == "truncate_momentum_window")
+
 def update_start_date():
     """Update all portfolio configs when start date changes"""
     start_date = st.session_state.multi_backtest_start_date
@@ -10256,6 +10280,7 @@ if st.sidebar.button("🗑️ Clear Ticker Cache",
         st.sidebar.success(f"✅ Cleared {total_cleared} cached items (tickers + PE/valuations)")
     else:
         st.sidebar.info("No cache to clear")
+
 
 # Clear all portfolios button - quick access outside dropdown
 if st.sidebar.button("🗑️ Clear All Portfolios", key="multi_backtest_clear_all_portfolios_immediate", 
@@ -10904,6 +10929,25 @@ st.sidebar.radio(
     """,
     key="multi_backtest_first_rebalance_strategy_radio",
     on_change=update_first_rebalance_strategy
+)
+
+# Option to auto-adjust start date for momentum window
+# Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
+if "multi_backtest_auto_adjust_momentum_start_radio" not in st.session_state:
+    # Initialize from boolean value (convert to radio value)
+    # Read from session_state, default to False if not set
+    current_bool = st.session_state.get("multi_backtest_auto_adjust_momentum_start", False)
+    st.session_state["multi_backtest_auto_adjust_momentum_start_radio"] = "truncate_momentum_window" if current_bool else "no_truncation"
+st.sidebar.radio(
+    "Auto-Adjust Start Date for Momentum Window",
+    ["no_truncation", "truncate_momentum_window"],
+    format_func=lambda x: "No truncation (default)" if x == "no_truncation" else "Truncate momentum window",
+    help="""
+    **No truncation (default):** Display the full backtest including the initial momentum waiting period. This shows the complete performance history.
+    **Truncate momentum window:** Start the backtest earlier internally to gather momentum data, but display results starting from your selected start date. This hides the initial cash-only period and ensures all portfolios start at the same value in the displayed period.
+    """,
+    key="multi_backtest_auto_adjust_momentum_start_radio",
+    on_change=update_auto_adjust_momentum_start
 )
 
 # Date range options
@@ -14070,6 +14114,7 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     # Update global settings from session state
     cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
     cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'momentum_window_complete')
+    cleaned_config['auto_adjust_momentum_start'] = st.session_state.get('multi_backtest_auto_adjust_momentum_start', False)
     
     # Update custom dates from global session state if enabled
     if st.session_state.get('multi_backtest_use_custom_dates', False):
@@ -14594,6 +14639,38 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                     if cfg.get('end_date_user'):
                         user_end = pd.to_datetime(cfg['end_date_user'])
                         common_end = min(common_end, user_end)
+                
+                # CRITICAL: Store original start date for display (before momentum adjustment)
+                original_display_start = final_start
+                
+                # Auto-adjust start date for momentum window if option is enabled
+                if st.session_state.get("multi_backtest_auto_adjust_momentum_start", False):
+                    # Find maximum momentum window across all portfolios
+                    max_momentum_window_days = 0
+                    for cfg in st.session_state.multi_backtest_portfolio_configs:
+                        if cfg.get('use_momentum', False):
+                            momentum_windows = cfg.get('momentum_windows', [])
+                            if momentum_windows:
+                                window_sizes = [int(w.get('lookback', 0)) for w in momentum_windows if w is not None]
+                                if window_sizes:
+                                    max_window = max(window_sizes)
+                                    max_momentum_window_days = max(max_momentum_window_days, max_window)
+                    
+                    # If we found momentum windows, adjust start date backwards
+                    if max_momentum_window_days > 0:
+                        # Calculate the adjusted start date (go back by the window duration)
+                        adjusted_start = final_start - pd.Timedelta(days=max_momentum_window_days)
+                        # Only adjust if we have data available (check against earliest data)
+                        valid_ticker_data = [data[t] for t in valid_portfolio_tickers if not isinstance(data[t], str)]
+                        if valid_ticker_data:
+                            earliest_data_date = min(df.first_valid_index() for df in valid_ticker_data)
+                            # Use the earlier of: adjusted_start or earliest_data_date
+                            final_start = min(adjusted_start, earliest_data_date)
+                        else:
+                            final_start = adjusted_start
+                
+                # Store original display start in session state for later truncation
+                st.session_state['_original_display_start_date'] = original_display_start
                 
                 if final_start > common_end:
                     problematic_ranges = []
@@ -15256,21 +15333,29 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             progress_bar.empty()
             
             # --- CALCULATE MWRR FOR ALL PORTFOLIOS AFTER LOOP COMPLETES ---
-            for unique_name, results in all_results.items():
-                if 'cash_flows' in results and 'portfolio_values' in results:
-                    cash_flows = results['cash_flows']
-                    portfolio_values = results['portfolio_values']
-                    # Calculate MWRR with complete cash flow series
-                    mwrr = calculate_mwrr(portfolio_values, cash_flows, portfolio_values.index)
-                    # Add MWRR to the stats
-                    if unique_name in all_stats:
-                        all_stats[unique_name]["MWRR"] = mwrr
-                    # Clean up temporary data
-                    del results['cash_flows']
-                    del results['portfolio_values']
-                else:
-                    if unique_name in all_stats:
-                        all_stats[unique_name]["MWRR"] = np.nan
+            # NOTE: MWRR will be recalculated AFTER truncation if auto-adjust is enabled
+            # to ensure it uses the correct truncated data and cash flows
+            if not st.session_state.get("multi_backtest_auto_adjust_momentum_start", False):
+                # Only calculate MWRR now if auto-adjust is NOT enabled
+                for unique_name, results in all_results.items():
+                    if 'cash_flows' in results and 'portfolio_values' in results:
+                        cash_flows = results['cash_flows']
+                        portfolio_values = results['portfolio_values']
+                        # Calculate MWRR with complete cash flow series
+                        mwrr = calculate_mwrr(portfolio_values, cash_flows, portfolio_values.index)
+                        # Add MWRR to the stats
+                        if unique_name in all_stats:
+                            all_stats[unique_name]["MWRR"] = mwrr
+                        # Clean up temporary data
+                        del results['cash_flows']
+                        del results['portfolio_values']
+                    else:
+                        if unique_name in all_stats:
+                            all_stats[unique_name]["MWRR"] = np.nan
+            else:
+                # If auto-adjust is enabled, keep cash_flows and portfolio_values for later recalculation
+                # They will be truncated and MWRR recalculated after truncation
+                pass
             # CRITICAL: Maintain portfolio order from portfolio_configs
             portfolio_order = [cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs if cfg['name'] in all_stats]
             stats_df = pd.DataFrame({name: all_stats[name] for name in portfolio_order}).T
@@ -15317,13 +15402,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             else:
                 pass
             # Yearly performance section (interactive table below)
+            # NOTE: all_years will be recalculated AFTER truncation if auto-adjust is enabled
+            # to ensure it uses the truncated data
             all_years = {}
-            for name, ser in all_results.items():
-                # Use the with-additions series for yearly performance (user requested)
-                yearly = ser['with_additions'].resample('YE').last()
-                all_years[name] = yearly
-            years = sorted(list(set(y.year for ser in all_years.values() for y in ser.index)))
-            names = list(all_years.keys())
+            if not st.session_state.get("multi_backtest_auto_adjust_momentum_start", False):
+                # Calculate all_years now if auto-adjust is NOT enabled
+                for name, ser in all_results.items():
+                    # Use the with-additions series for yearly performance (user requested)
+                    yearly = ser['with_additions'].resample('YE').last()
+                    all_years[name] = yearly
+            # If auto-adjust is enabled, all_years will be recalculated after truncation
+            years = sorted(list(set(y.year for ser in all_years.values() for y in ser.index))) if all_years else []
+            names = list(all_years.keys()) if all_years else []
             
             # Print console log yearly table correctly
             col_width = 22
@@ -15668,6 +15758,446 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             except Exception as e:
                 import traceback
                 traceback.print_exc()
+            
+            # CRITICAL: Truncate results to original display start date if auto-adjust was enabled
+            if st.session_state.get("multi_backtest_auto_adjust_momentum_start", False) and '_original_display_start_date' in st.session_state:
+                original_display_start = st.session_state['_original_display_start_date']
+                
+                # Truncate all_results and REINITIALIZE to initial_value
+                truncated_results = {}
+                for portfolio_name, portfolio_data in all_results.items():
+                    # Find the portfolio config to get initial_value and added_amount/frequency
+                    portfolio_config = None
+                    for cfg in st.session_state.multi_backtest_portfolio_configs:
+                        if cfg.get('name') == portfolio_name:
+                            portfolio_config = cfg
+                            break
+                    
+                    initial_value = portfolio_config.get('initial_value', 10000) if portfolio_config else 10000
+                    added_amount = portfolio_config.get('added_amount', 0) if portfolio_config else 0
+                    added_frequency = portfolio_config.get('added_frequency', 'none') if portfolio_config else 'none'
+                    
+                    if isinstance(portfolio_data, dict):
+                        truncated_portfolio = {}
+                        if 'with_additions' in portfolio_data:
+                            series = portfolio_data['with_additions']
+                            if isinstance(series, pd.Series) and len(series) > 0:
+                                # Truncate to start from original_display_start
+                                if original_display_start in series.index:
+                                    start_idx = series.index.get_loc(original_display_start)
+                                    truncated_series = series.iloc[start_idx:].copy()
+                                elif len(series.index[series.index >= original_display_start]) > 0:
+                                    # Find closest date >= original_display_start
+                                    closest_date = series.index[series.index >= original_display_start][0]
+                                    start_idx = series.index.get_loc(closest_date)
+                                    truncated_series = series.iloc[start_idx:].copy()
+                                else:
+                                    truncated_series = series.copy()
+                                
+                                # CRITICAL: Reinitialize to initial_value and recalculate periodic additions
+                                # Step 1: Normalize to preserve relative returns (dividends, price changes)
+                                # Step 2: Recalculate periodic cash additions from truncation date
+                                if len(truncated_series) > 0:
+                                    first_value = truncated_series.iloc[0]
+                                    if first_value > 0:
+                                        # Calculate normalization ratio (preserves relative returns)
+                                        normalization_ratio = initial_value / first_value
+                                        # Apply ratio to normalize base value to initial_value
+                                        normalized_series = truncated_series * normalization_ratio
+                                        
+                                        # Step 2: Recalculate periodic cash additions from original_display_start
+                                        # Get the no_additions series to calculate pure returns
+                                        no_additions_series = portfolio_data.get('no_additions')
+                                        if isinstance(no_additions_series, pd.Series) and len(no_additions_series) > 0:
+                                            # Truncate no_additions series
+                                            if original_display_start in no_additions_series.index:
+                                                no_add_start_idx = no_additions_series.index.get_loc(original_display_start)
+                                                no_add_truncated = no_additions_series.iloc[no_add_start_idx:].copy()
+                                            elif len(no_additions_series.index[no_additions_series.index >= original_display_start]) > 0:
+                                                closest_date = no_additions_series.index[no_additions_series.index >= original_display_start][0]
+                                                no_add_start_idx = no_additions_series.index.get_loc(closest_date)
+                                                no_add_truncated = no_additions_series.iloc[no_add_start_idx:].copy()
+                                            else:
+                                                no_add_truncated = no_additions_series.copy()
+                                            
+                                            # Normalize no_additions to initial_value
+                                            if len(no_add_truncated) > 0:
+                                                no_add_first = no_add_truncated.iloc[0]
+                                                if no_add_first > 0:
+                                                    no_add_ratio = initial_value / no_add_first
+                                                    no_add_normalized = no_add_truncated * no_add_ratio
+                                                else:
+                                                    no_add_normalized = no_add_truncated.copy()
+                                                    no_add_normalized.iloc[0] = initial_value
+                                            
+                                            # Calculate the difference (which represents cash additions)
+                                            # This gives us the pure cash additions effect
+                                            cash_additions_effect = normalized_series - no_add_normalized
+                                            
+                                            # Recalculate periodic additions from original_display_start
+                                            if added_amount > 0 and added_frequency != 'none':
+                                                # Calculate new addition dates starting from original_display_start + frequency period
+                                                # This ensures the first addition happens AFTER the truncation date, not before
+                                                def get_addition_dates_from_start(start_date, end_date, frequency, market_days):
+                                                    """Calculate addition dates starting from start_date + frequency period."""
+                                                    market_days = sorted(market_days)
+                                                    dates = []
+                                                    
+                                                    if frequency == "Weekly":
+                                                        # First addition: start_date + 1 week
+                                                        current = start_date + pd.Timedelta(weeks=1)
+                                                        while current <= end_date:
+                                                            # Find first market day on or after current
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.Timedelta(weeks=1)
+                                                    elif frequency == "Biweekly":
+                                                        # First addition: start_date + 2 weeks
+                                                        current = start_date + pd.Timedelta(weeks=2)
+                                                        while current <= end_date:
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.Timedelta(weeks=2)
+                                                    elif frequency == "Monthly":
+                                                        # First addition: start_date + 1 month
+                                                        current = start_date + pd.DateOffset(months=1)
+                                                        while current <= end_date:
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.DateOffset(months=1)
+                                                    elif frequency == "Quarterly":
+                                                        # First addition: start_date + 3 months
+                                                        current = start_date + pd.DateOffset(months=3)
+                                                        while current <= end_date:
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.DateOffset(months=3)
+                                                    elif frequency == "Semiannually":
+                                                        # First addition: start_date + 6 months
+                                                        current = start_date + pd.DateOffset(months=6)
+                                                        while current <= end_date:
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.DateOffset(months=6)
+                                                    elif frequency == "Annually" or frequency == "year":
+                                                        # First addition: start_date + 1 year
+                                                        current = start_date + pd.DateOffset(years=1)
+                                                        while current <= end_date:
+                                                            for md in market_days:
+                                                                if md >= current:
+                                                                    if md <= end_date:
+                                                                        dates.append(md)
+                                                                    break
+                                                            current += pd.DateOffset(years=1)
+                                                    
+                                                    return set(dates)
+                                                
+                                                new_dates_added = get_addition_dates_from_start(
+                                                    original_display_start, 
+                                                    truncated_series.index[-1], 
+                                                    added_frequency,
+                                                    truncated_series.index.tolist()
+                                                )
+                                                
+                                                # Rebuild with_additions by adding cash additions correctly to no_add_normalized
+                                                # This ensures cash flows match exactly with the portfolio values
+                                                # Start with normalized no_additions (pure returns, no cash additions)
+                                                # CRITICAL: Ensure first value is exactly initial_value for MWRR consistency
+                                                rebuilt_series = no_add_normalized.copy()
+                                                if len(rebuilt_series) > 0:
+                                                    rebuilt_series.iloc[0] = initial_value
+                                                
+                                                # Track additions that have been made and their growth
+                                                # We need to track each addition separately to calculate its growth accurately
+                                                additions_tracking = []  # List of (date, amount) tuples
+                                                
+                                                for i, date in enumerate(truncated_series.index):
+                                                    # Add new cash on addition dates
+                                                    if date in new_dates_added:
+                                                        additions_tracking.append((date, added_amount))
+                                                    
+                                                    # Calculate total value with all additions growing from their addition dates
+                                                    total_additions_value = 0.0
+                                                    for add_date, add_amount in additions_tracking:
+                                                        # Find the index of the addition date
+                                                        add_idx = truncated_series.index.get_loc(add_date)
+                                                        if add_idx <= i:
+                                                            # Calculate growth from addition date to current date
+                                                            if add_idx < len(no_add_normalized) and no_add_normalized.iloc[add_idx] > 0:
+                                                                growth_factor = no_add_normalized.iloc[i] / no_add_normalized.iloc[add_idx]
+                                                                total_additions_value += add_amount * growth_factor
+                                                    
+                                                    # Rebuilt series = no_additions (normalized) + all additions with their growth
+                                                    # For first date, ensure it's exactly initial_value (no additions yet)
+                                                    if i == 0:
+                                                        rebuilt_series.iloc[i] = initial_value
+                                                    else:
+                                                        rebuilt_series.iloc[i] = no_add_normalized.iloc[i] + total_additions_value
+                                                
+                                                truncated_series = rebuilt_series
+                                            else:
+                                                # No periodic additions - just use normalized series
+                                                truncated_series = normalized_series
+                                        else:
+                                            # No no_additions series available - just normalize
+                                            truncated_series = normalized_series
+                                    else:
+                                        # If first value is 0 or negative, just set to initial_value
+                                        truncated_series.iloc[0] = initial_value
+                                
+                                truncated_portfolio['with_additions'] = truncated_series
+                        if 'no_additions' in portfolio_data:
+                            series = portfolio_data['no_additions']
+                            if isinstance(series, pd.Series) and len(series) > 0:
+                                if original_display_start in series.index:
+                                    start_idx = series.index.get_loc(original_display_start)
+                                    truncated_series = series.iloc[start_idx:].copy()
+                                elif len(series.index[series.index >= original_display_start]) > 0:
+                                    closest_date = series.index[series.index >= original_display_start][0]
+                                    start_idx = series.index.get_loc(closest_date)
+                                    truncated_series = series.iloc[start_idx:].copy()
+                                else:
+                                    truncated_series = series.copy()
+                                
+                                # CRITICAL: Reinitialize to initial_value at the start
+                                # This normalization preserves relative returns (dividends, price changes)
+                                # but resets the base value to initial_value, removing any value changes
+                                # that occurred during the hidden period
+                                if len(truncated_series) > 0:
+                                    first_value = truncated_series.iloc[0]
+                                    if first_value > 0:
+                                        # Calculate normalization ratio
+                                        normalization_ratio = initial_value / first_value
+                                        # Apply ratio to all values to preserve relative returns
+                                        # This ensures dividends and price changes are proportionally adjusted
+                                        truncated_series = truncated_series * normalization_ratio
+                                    else:
+                                        # If first value is 0 or negative, just set to initial_value
+                                        truncated_series.iloc[0] = initial_value
+                                
+                                truncated_portfolio['no_additions'] = truncated_series
+                        if 'historical_allocations' in portfolio_data:
+                            truncated_portfolio['historical_allocations'] = {
+                                date: alloc for date, alloc in portfolio_data['historical_allocations'].items() 
+                                if date >= original_display_start
+                            }
+                        if 'historical_metrics' in portfolio_data:
+                            truncated_portfolio['historical_metrics'] = {
+                                date: metrics for date, metrics in portfolio_data['historical_metrics'].items() 
+                                if date >= original_display_start
+                            }
+                        # Truncate cash_flows and portfolio_values if they exist (for MWRR recalculation)
+                        # Use the recalculated with_additions series (truncated_series) instead of original portfolio_values
+                        if 'cash_flows' in portfolio_data and 'portfolio_values' in portfolio_data:
+                            # Use the recalculated with_additions series that has been properly normalized and rebuilt
+                            if 'with_additions' in truncated_portfolio:
+                                portfolio_values_trunc = truncated_portfolio['with_additions']
+                                
+                                # Recalculate cash flows for the recalculated series
+                                cash_flows_trunc = pd.Series(0.0, index=portfolio_values_trunc.index)
+                                # Initial investment: negative cash flow on first date
+                                if len(portfolio_values_trunc.index) > 0:
+                                    cash_flows_trunc.iloc[0] = -initial_value
+                                
+                                # Periodic additions: use the same function to get dates from original_display_start
+                                if added_amount > 0 and added_frequency != 'none':
+                                    def get_addition_dates_from_start(start_date, end_date, frequency, market_days):
+                                        """Calculate addition dates starting from start_date + frequency period."""
+                                        market_days = sorted(market_days)
+                                        dates = []
+                                        
+                                        if frequency == "Weekly":
+                                            current = start_date + pd.Timedelta(weeks=1)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.Timedelta(weeks=1)
+                                        elif frequency == "Biweekly":
+                                            current = start_date + pd.Timedelta(weeks=2)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.Timedelta(weeks=2)
+                                        elif frequency == "Monthly":
+                                            current = start_date + pd.DateOffset(months=1)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.DateOffset(months=1)
+                                        elif frequency == "Quarterly":
+                                            current = start_date + pd.DateOffset(months=3)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.DateOffset(months=3)
+                                        elif frequency == "Semiannually":
+                                            current = start_date + pd.DateOffset(months=6)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.DateOffset(months=6)
+                                        elif frequency == "Annually" or frequency == "year":
+                                            current = start_date + pd.DateOffset(years=1)
+                                            while current <= end_date:
+                                                for md in market_days:
+                                                    if md >= current:
+                                                        if md <= end_date:
+                                                            dates.append(md)
+                                                        break
+                                                current += pd.DateOffset(years=1)
+                                        
+                                        return set(dates)
+                                    
+                                    dates_added = get_addition_dates_from_start(
+                                        original_display_start,
+                                        portfolio_values_trunc.index[-1],
+                                        added_frequency,
+                                        portfolio_values_trunc.index.tolist()
+                                    )
+                                    
+                                    for d in dates_added:
+                                        if d in cash_flows_trunc.index and d != cash_flows_trunc.index[0]:
+                                            cash_flows_trunc.loc[d] -= added_amount
+                                
+                                # Final value: positive cash flow on last date for MWRR
+                                if len(portfolio_values_trunc.index) > 0:
+                                    cash_flows_trunc.iloc[-1] += portfolio_values_trunc.iloc[-1]
+                                
+                                truncated_portfolio['cash_flows'] = cash_flows_trunc
+                                truncated_portfolio['portfolio_values'] = portfolio_values_trunc
+                        
+                        truncated_results[portfolio_name] = truncated_portfolio
+                    elif isinstance(portfolio_data, pd.Series):
+                        # Direct Series
+                        if len(portfolio_data) > 0:
+                            if original_display_start in portfolio_data.index:
+                                start_idx = portfolio_data.index.get_loc(original_display_start)
+                                truncated_series = portfolio_data.iloc[start_idx:].copy()
+                            elif len(portfolio_data.index[portfolio_data.index >= original_display_start]) > 0:
+                                closest_date = portfolio_data.index[portfolio_data.index >= original_display_start][0]
+                                start_idx = portfolio_data.index.get_loc(closest_date)
+                                truncated_series = portfolio_data.iloc[start_idx:].copy()
+                            else:
+                                truncated_series = portfolio_data.copy()
+                            
+                            # CRITICAL: Reinitialize to initial_value at the start
+                            if len(truncated_series) > 0:
+                                first_value = truncated_series.iloc[0]
+                                if first_value > 0:
+                                    # Calculate normalization ratio
+                                    normalization_ratio = initial_value / first_value
+                                    # Apply ratio to all values to preserve relative returns
+                                    truncated_series = truncated_series * normalization_ratio
+                                else:
+                                    # If first value is 0 or negative, just set to initial_value
+                                    truncated_series.iloc[0] = initial_value
+                            
+                            truncated_results[portfolio_name] = truncated_series
+                        else:
+                            truncated_results[portfolio_name] = portfolio_data
+                    else:
+                        truncated_results[portfolio_name] = portfolio_data
+                all_results = truncated_results
+                
+                # Truncate all_allocations
+                truncated_allocations = {}
+                for portfolio_name, allocations_dict in all_allocations.items():
+                    truncated_allocations[portfolio_name] = {
+                        date: alloc for date, alloc in allocations_dict.items() 
+                        if date >= original_display_start
+                    }
+                all_allocations = truncated_allocations
+                
+                # Truncate all_metrics
+                truncated_metrics = {}
+                for portfolio_name, metrics_dict in all_metrics.items():
+                    truncated_metrics[portfolio_name] = {
+                        date: metrics for date, metrics in metrics_dict.items() 
+                        if date >= original_display_start
+                    }
+                all_metrics = truncated_metrics
+                
+                # Truncate all_drawdowns
+                truncated_drawdowns = {}
+                for portfolio_name, drawdown_series in all_drawdowns.items():
+                    if isinstance(drawdown_series, pd.Series) and len(drawdown_series) > 0:
+                        if original_display_start in drawdown_series.index:
+                            start_idx = drawdown_series.index.get_loc(original_display_start)
+                            truncated_drawdowns[portfolio_name] = drawdown_series.iloc[start_idx:].copy()
+                        elif len(drawdown_series.index[drawdown_series.index >= original_display_start]) > 0:
+                            closest_date = drawdown_series.index[drawdown_series.index >= original_display_start][0]
+                            start_idx = drawdown_series.index.get_loc(closest_date)
+                            truncated_drawdowns[portfolio_name] = drawdown_series.iloc[start_idx:].copy()
+                        else:
+                            truncated_drawdowns[portfolio_name] = drawdown_series
+                    else:
+                        truncated_drawdowns[portfolio_name] = drawdown_series
+                all_drawdowns = truncated_drawdowns
+                
+                # --- RECALCULATE MWRR WITH TRUNCATED DATA ---
+                for unique_name, results in all_results.items():
+                    if 'cash_flows' in results and 'portfolio_values' in results:
+                        cash_flows_trunc = results['cash_flows']
+                        portfolio_values_trunc = results['portfolio_values']
+                        # Calculate MWRR with truncated cash flow series
+                        mwrr = calculate_mwrr(portfolio_values_trunc, cash_flows_trunc, portfolio_values_trunc.index)
+                        # Update MWRR in stats
+                        if unique_name in all_stats:
+                            all_stats[unique_name]["MWRR"] = mwrr
+                        # Keep cash_flows and portfolio_values for later use in recomputation section
+                        # Don't delete them here - they will be used in the recomputation section
+                    else:
+                        if unique_name in all_stats:
+                            all_stats[unique_name]["MWRR"] = np.nan
+                
+                # Update stats_df with recalculated MWRR
+                if 'stats_df' in locals() and len(all_stats) > 0:
+                    portfolio_order = [cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs if cfg['name'] in all_stats]
+                    stats_df = pd.DataFrame({name: all_stats[name] for name in portfolio_order}).T
+                
+                # Recalculate all_years with truncated data
+                all_years = {}
+                for name, ser in all_results.items():
+                    # Use the with-additions series for yearly performance (user requested)
+                    if isinstance(ser, dict) and 'with_additions' in ser:
+                        yearly = ser['with_additions'].resample('YE').last()
+                        all_years[name] = yearly
+                years = sorted(list(set(y.year for ser in all_years.values() for y in ser.index)))
+                names = list(all_years.keys())
+                
+                # Clean up temporary storage
+                if '_original_display_start_date' in st.session_state:
+                    del st.session_state['_original_display_start_date']
             
             st.session_state.multi_all_results = all_results
             st.session_state.multi_backtest_all_drawdowns = all_drawdowns
@@ -16076,6 +16606,15 @@ def paste_all_json_callback():
             if processed_configs and 'first_rebalance_strategy' in processed_configs[0]:
                 st.session_state['_import_first_rebalance_strategy'] = processed_configs[0]['first_rebalance_strategy']
             
+            # Handle global auto_adjust_momentum_start setting from imported JSON
+            # Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
+            if processed_configs and 'auto_adjust_momentum_start' in processed_configs[0]:
+                # Parse boolean from JSON (same as first_rebalance_strategy but with parse_bool_from_json)
+                # Access value directly (same as first_rebalance_strategy), then parse it
+                raw_value = processed_configs[0]['auto_adjust_momentum_start']
+                parsed_bool = parse_bool_from_json(raw_value, False)
+                st.session_state['_import_auto_adjust_momentum_start'] = parsed_bool
+            
             # Reset active selection and derived mappings so the UI reflects the new configs
             if processed_configs:
                 st.session_state.multi_backtest_active_portfolio_index = 0
@@ -16143,6 +16682,7 @@ with st.sidebar.expander('All Portfolios JSON (Export / Import)', expanded=False
             # Update global settings from session state
             cleaned_config['start_with'] = st.session_state.get('multi_backtest_start_with', 'all')
             cleaned_config['first_rebalance_strategy'] = st.session_state.get('multi_backtest_first_rebalance_strategy', 'momentum_window_complete')
+            cleaned_config['auto_adjust_momentum_start'] = st.session_state.get('multi_backtest_auto_adjust_momentum_start', False)
             
             # Update custom dates from global session state if enabled
             if st.session_state.get('multi_backtest_use_custom_dates', False):
@@ -17235,19 +17775,34 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                     # Reconstruct cash flows for this portfolio
                     cfg_for_name = next((c for c in st.session_state.multi_backtest_portfolio_configs if c['name'] == name), None)
                     if cfg_for_name and len(portfolio_values) > 0:
-                        cash_flows = pd.Series(0.0, index=portfolio_values.index)
-                        # Initial investment: negative cash flow on first date
-                        cash_flows.iloc[0] = -cfg_for_name.get('initial_value', 0)
-                        # Periodic additions: negative cash flow on their respective dates
-                        dates_added = get_dates_by_freq(cfg_for_name.get('added_frequency'), portfolio_values.index[0], portfolio_values.index[-1], portfolio_values.index)
-                        for d in dates_added:
-                            if d in cash_flows.index and d != cash_flows.index[0]:
-                                cash_flows.loc[d] -= cfg_for_name.get('added_amount', 0)
-                        # Final value: positive cash flow on last date for MWRR
-                        cash_flows.iloc[-1] += portfolio_values.iloc[-1]
-                        # Calculate MWRR
-                        mwrr = calculate_mwrr(portfolio_values, cash_flows, portfolio_values.index)
-                        mwrr_val = mwrr
+                        # Check if we have truncated cash flows already (from truncation section)
+                        if 'cash_flows' in series_obj and 'portfolio_values' in series_obj:
+                            # Use pre-calculated truncated cash flows
+                            # IMPORTANT: Use the recalculated with_additions series, not portfolio_values
+                            # portfolio_values is the normalized original series, but with_additions is the properly recalculated one
+                            cash_flows = series_obj['cash_flows']
+                            # Use with_additions if available (recalculated series), otherwise fall back to portfolio_values
+                            portfolio_values_for_mwrr = series_obj.get('with_additions', series_obj['portfolio_values'])
+                            mwrr = calculate_mwrr(portfolio_values_for_mwrr, cash_flows, portfolio_values_for_mwrr.index)
+                            mwrr_val = mwrr
+                        else:
+                            # Fallback: reconstruct cash flows (for non-truncated or legacy data)
+                            cash_flows = pd.Series(0.0, index=portfolio_values.index)
+                            # Initial investment: negative cash flow on first date
+                            cash_flows.iloc[0] = -cfg_for_name.get('initial_value', 0)
+                            # Periodic additions: negative cash flow on their respective dates
+                            # Note: If truncation occurred, portfolio_values.index[0] is already the truncated start date
+                            # So we can use normal get_dates_by_freq which will calculate from the first index date
+                            dates_added = get_dates_by_freq(cfg_for_name.get('added_frequency'), portfolio_values.index[0], portfolio_values.index[-1], portfolio_values.index)
+                            
+                            for d in dates_added:
+                                if d in cash_flows.index and d != cash_flows.index[0]:
+                                    cash_flows.loc[d] -= cfg_for_name.get('added_amount', 0)
+                            # Final value: positive cash flow on last date for MWRR
+                            cash_flows.iloc[-1] += portfolio_values.iloc[-1]
+                            # Calculate MWRR
+                            mwrr = calculate_mwrr(portfolio_values, cash_flows, portfolio_values.index)
+                            mwrr_val = mwrr
 
                 # Calculate total money added for this portfolio
                 total_money_added = np.nan  # Use NaN instead of "N/A" string
