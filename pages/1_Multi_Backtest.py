@@ -3866,12 +3866,9 @@ if "_import_first_rebalance_strategy" in st.session_state:
     st.session_state["multi_backtest_first_rebalance_strategy"] = st.session_state.pop("_import_first_rebalance_strategy")
     st.session_state["multi_backtest_first_rebalance_strategy_radio"] = st.session_state["multi_backtest_first_rebalance_strategy"]
 if "_import_auto_adjust_momentum_start" in st.session_state:
-    # Exact same pattern as first_rebalance_strategy - pop and set both values
-    # CRITICAL: Pop the value and immediately set both the boolean and radio values
+    # EXACT same pattern as first_rebalance_strategy (line 3865-3867)
     imported_bool = st.session_state.pop("_import_auto_adjust_momentum_start")
     st.session_state["multi_backtest_auto_adjust_momentum_start"] = imported_bool
-    # Convert boolean to radio value (same conversion as in callback)
-    # ALWAYS update the radio key, even if it exists (same as first_rebalance_strategy)
     st.session_state["multi_backtest_auto_adjust_momentum_start_radio"] = "truncate_momentum_window" if imported_bool else "no_truncation"
 st.markdown("""
 <style>
@@ -9199,6 +9196,38 @@ def reset_portfolio_callback():
     if 'saved_momentum_settings' in default_cfg_found:
         del default_cfg_found['saved_momentum_settings']
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index] = default_cfg_found
+
+def convert_to_spy_portfolio_callback():
+    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+    current = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
+    
+    # Simple: just change what's needed for SPY
+    current['name'] = 'SPY Benchmark'
+    current['stocks'] = [{'ticker': 'SPY', 'allocation': 1.0, 'include_dividends': True}]
+    current['use_momentum'] = False
+    current['added_amount'] = 10000
+    current['added_frequency'] = 'Annually'
+    
+    # CRITICAL: Update selector to match new name
+    st.session_state.multi_backtest_portfolio_selector = 'SPY Benchmark'
+    st.session_state.multi_backtest_rerun_flag = True
+    st.session_state['_toast_message'] = "✅ Portfolio converted to SPY Benchmark!"
+
+def convert_to_spy_total_return_callback():
+    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
+    current = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
+    
+    # Simple: just change what's needed for SPY Total Return
+    current['name'] = 'SPY Total Return'
+    current['stocks'] = [{'ticker': 'SPYTR', 'allocation': 1.0, 'include_dividends': True}]
+    current['use_momentum'] = False
+    current['added_amount'] = 10000
+    current['added_frequency'] = 'Annually'
+    
+    # CRITICAL: Update selector to match new name
+    st.session_state.multi_backtest_portfolio_selector = 'SPY Total Return'
+    st.session_state.multi_backtest_rerun_flag = True
+    st.session_state['_toast_message'] = "✅ Portfolio converted to SPY Total Return!"
     st.session_state.multi_backtest_rerun_flag = True
 
 def reset_stock_selection_callback():
@@ -9626,32 +9655,10 @@ def paste_json_callback():
         has_imported_dates = imported_start_date is not None or imported_end_date is not None
         st.session_state["multi_backtest_use_custom_dates"] = has_imported_dates
         
-        # Handle global start_with setting from imported JSON
-        if 'start_with' in json_data:
-            # Handle start_with value mapping from other pages
-            start_with = json_data['start_with']
-            if start_with == 'first':
-                start_with = 'oldest'  # Map 'first' to 'oldest' (closest equivalent)
-            elif start_with not in ['all', 'oldest']:
-                start_with = 'all'  # Default fallback
-            st.session_state['multi_backtest_start_with'] = start_with
-            # Update the radio button widget key
-            st.session_state['multi_backtest_start_with_radio'] = start_with
-        
-        # Handle first rebalance strategy from imported JSON
-        if 'first_rebalance_strategy' in json_data:
-            st.session_state['multi_backtest_first_rebalance_strategy'] = json_data['first_rebalance_strategy']
-            # Update the radio button widget key
-            st.session_state['multi_backtest_first_rebalance_strategy_radio'] = json_data['first_rebalance_strategy']
-        
-        # Handle auto_adjust_momentum_start from imported JSON
-        # Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
-        if 'auto_adjust_momentum_start' in json_data:
-            # Parse boolean from JSON (same as first_rebalance_strategy but with parse_bool_from_json)
-            imported_bool = parse_bool_from_json(json_data['auto_adjust_momentum_start'], False)
-            st.session_state['multi_backtest_auto_adjust_momentum_start'] = imported_bool
-            # Convert boolean to radio value (same conversion as in callback)
-            st.session_state['multi_backtest_auto_adjust_momentum_start_radio'] = "truncate_momentum_window" if imported_bool else "no_truncation"
+        # NOTE: Global settings (start_with, first_rebalance_strategy, auto_adjust_momentum_start) 
+        # are NOT imported from individual portfolio JSON to avoid conflicts.
+        # These values are GLOBAL and should only be set via bulk JSON import.
+        # They are exported in individual portfolio JSON for compatibility, but not imported.
         
         # Update session state for targeted rebalancing settings
         st.session_state['multi_backtest_active_use_targeted_rebalancing'] = multi_backtest_config.get('use_targeted_rebalancing', False)
@@ -10234,41 +10241,19 @@ if st.sidebar.button("Reset Selected Portfolio", on_click=reset_portfolio_callba
 
 # Quick convert to SPY portfolio button
 if st.sidebar.button("📊 Convert to SPY Portfolio", 
-                    help="Transform selected portfolio to SPY benchmark: 100% SPY, $10k initial + $10k/year"):
-    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-    current = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
-    
-    # Simple: just change what's needed for SPY
-    current['name'] = 'SPY Benchmark'
-    current['stocks'] = [{'ticker': 'SPY', 'allocation': 1.0, 'include_dividends': True}]
-    current['use_momentum'] = False
-    current['added_amount'] = 10000
-    current['added_frequency'] = 'Annually'
-    
-    # CRITICAL: Update selector to match new name
-    st.session_state.multi_backtest_portfolio_selector = 'SPY Benchmark'
-    
-    st.toast("✅ Portfolio converted to SPY Benchmark!")
-    st.rerun()
+                    help="Transform selected portfolio to SPY benchmark: 100% SPY, $10k initial + $10k/year",
+                    on_click=convert_to_spy_portfolio_callback):
+    pass
 
 # Quick convert to SPY Total Return portfolio button
 if st.sidebar.button("📈 Convert to SPY Total Return", 
-                    help="Transform selected portfolio to SPY Total Return: 100% SPYTR, $10k initial + $10k/year"):
-    portfolio_index = st.session_state.multi_backtest_active_portfolio_index
-    current = st.session_state.multi_backtest_portfolio_configs[portfolio_index]
-    
-    # Simple: just change what's needed for SPY Total Return
-    current['name'] = 'SPY Total Return'
-    current['stocks'] = [{'ticker': 'SPYTR', 'allocation': 1.0, 'include_dividends': True}]
-    current['use_momentum'] = False
-    current['added_amount'] = 10000
-    current['added_frequency'] = 'Annually'
-    
-    # CRITICAL: Update selector to match new name
-    st.session_state.multi_backtest_portfolio_selector = 'SPY Total Return'
-    
-    st.toast("✅ Portfolio converted to SPY Total Return!")
-    st.rerun()
+                    help="Transform selected portfolio to SPY Total Return: 100% SPYTR, $10k initial + $10k/year",
+                    on_click=convert_to_spy_total_return_callback):
+    pass
+
+# Show toast message if set by callback
+if '_toast_message' in st.session_state:
+    st.toast(st.session_state.pop('_toast_message'))
 
 # Clear ticker cache button
 if st.sidebar.button("🗑️ Clear Ticker Cache", 
@@ -10935,7 +10920,8 @@ st.sidebar.radio(
 # Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
 if "multi_backtest_auto_adjust_momentum_start_radio" not in st.session_state:
     # Initialize from boolean value (convert to radio value)
-    # Read from session_state, default to False if not set
+    # Read from session_state - if it doesn't exist, default to False (no_truncation)
+    # This only runs if the _radio key doesn't exist (pop handler sets it first if importing)
     current_bool = st.session_state.get("multi_backtest_auto_adjust_momentum_start", False)
     st.session_state["multi_backtest_auto_adjust_momentum_start_radio"] = "truncate_momentum_window" if current_bool else "no_truncation"
 st.sidebar.radio(
@@ -16607,12 +16593,15 @@ def paste_all_json_callback():
                 st.session_state['_import_first_rebalance_strategy'] = processed_configs[0]['first_rebalance_strategy']
             
             # Handle global auto_adjust_momentum_start setting from imported JSON
-            # Exact same pattern as first_rebalance_strategy - copy paste then adapt for boolean
+            # EXACT same pattern as first_rebalance_strategy (line 16587-16588)
             if processed_configs and 'auto_adjust_momentum_start' in processed_configs[0]:
-                # Parse boolean from JSON (same as first_rebalance_strategy but with parse_bool_from_json)
-                # Access value directly (same as first_rebalance_strategy), then parse it
-                raw_value = processed_configs[0]['auto_adjust_momentum_start']
-                parsed_bool = parse_bool_from_json(raw_value, False)
+                auto_adjust_momentum_start = processed_configs[0]['auto_adjust_momentum_start']
+                # Parse boolean (first_rebalance_strategy doesn't need parsing, but we do)
+                if isinstance(auto_adjust_momentum_start, bool):
+                    parsed_bool = auto_adjust_momentum_start
+                else:
+                    parsed_bool = parse_bool_from_json(auto_adjust_momentum_start, False)
+                # Use _import_* system (EXACT same as first_rebalance_strategy line 16588)
                 st.session_state['_import_auto_adjust_momentum_start'] = parsed_bool
             
             # Reset active selection and derived mappings so the UI reflects the new configs
