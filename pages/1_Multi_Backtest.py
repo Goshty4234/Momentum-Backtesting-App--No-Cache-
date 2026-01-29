@@ -338,6 +338,60 @@ def resolve_ticker_alias(ticker):
     
     return aliases.get(upper_ticker, upper_ticker)
 
+
+def _get_addition_dates_from_start_vectorized(start_date, end_date, frequency, market_days):
+    """Vectorized: addition dates from start_date using searchsorted (O(periods * log(n)) instead of O(periods * n)). Returns set of dates."""
+    if not market_days:
+        return set()
+    market_days_sorted = sorted(market_days)
+    market_days_ns = np.array([pd.Timestamp(m).value for m in market_days_sorted], dtype=np.int64)
+    end_ns = pd.Timestamp(end_date).value
+    dates = []
+    if frequency == "Weekly":
+        current = start_date + pd.Timedelta(weeks=1)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.Timedelta(weeks=1)
+    elif frequency == "Biweekly":
+        current = start_date + pd.Timedelta(weeks=2)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.Timedelta(weeks=2)
+    elif frequency == "Monthly":
+        current = start_date + pd.DateOffset(months=1)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.DateOffset(months=1)
+    elif frequency == "Quarterly":
+        current = start_date + pd.DateOffset(months=3)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.DateOffset(months=3)
+    elif frequency == "Semiannually":
+        current = start_date + pd.DateOffset(months=6)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.DateOffset(months=6)
+    elif frequency == "Annually" or frequency == "year":
+        current = start_date + pd.DateOffset(years=1)
+        while current <= end_date:
+            idx = np.searchsorted(market_days_ns, current.value, side="left")
+            if idx < len(market_days_ns) and market_days_ns[idx] <= end_ns:
+                dates.append(market_days_sorted[idx])
+            current += pd.DateOffset(years=1)
+    return set(dates)
+
+
 def parse_raw_sp500_csv():
     """Parse the raw S&P 500 CSV data into a structured DataFrame"""
     try:
@@ -9797,6 +9851,8 @@ def update_active_portfolio_index():
 
 def update_name():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['name'] = st.session_state.multi_backtest_active_name
+    # Keep selector in sync so we stay on the same portfolio after rename
+    st.session_state.multi_backtest_portfolio_selector = st.session_state.multi_backtest_active_name
 
 def update_initial():
     st.session_state.multi_backtest_portfolio_configs[st.session_state.multi_backtest_active_portfolio_index]['initial_value'] = st.session_state.multi_backtest_active_initial
@@ -10158,14 +10214,17 @@ if 'multi_backtest_portfolio_selector' in st.session_state:
         current_portfolio_name = selector_value
         st.session_state.multi_backtest_active_portfolio_index = portfolio_names.index(selector_value)
     else:
-        # Selector value is invalid (portfolio was deleted?) - clear it and use index
-        del st.session_state.multi_backtest_portfolio_selector
+        # Selector value is invalid (e.g. portfolio was renamed) - keep current index, sync selector to current portfolio
         if (st.session_state.multi_backtest_active_portfolio_index is not None and 
             st.session_state.multi_backtest_active_portfolio_index < len(portfolio_names)):
+            # Preserve active portfolio: use current index, update selector to new name
             current_portfolio_name = portfolio_names[st.session_state.multi_backtest_active_portfolio_index]
+            st.session_state.multi_backtest_portfolio_selector = current_portfolio_name
         else:
             current_portfolio_name = portfolio_names[0] if portfolio_names else None
             st.session_state.multi_backtest_active_portfolio_index = 0 if portfolio_names else None
+            if current_portfolio_name:
+                st.session_state.multi_backtest_portfolio_selector = current_portfolio_name
 else:
     # No selector value - use active index
     if (st.session_state.multi_backtest_active_portfolio_index is not None and 
@@ -15822,120 +15881,31 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                             
                                             # Recalculate periodic additions from original_display_start
                                             if added_amount > 0 and added_frequency != 'none':
-                                                # Calculate new addition dates starting from original_display_start + frequency period
-                                                # This ensures the first addition happens AFTER the truncation date, not before
-                                                def get_addition_dates_from_start(start_date, end_date, frequency, market_days):
-                                                    """Calculate addition dates starting from start_date + frequency period."""
-                                                    market_days = sorted(market_days)
-                                                    dates = []
-                                                    
-                                                    if frequency == "Weekly":
-                                                        # First addition: start_date + 1 week
-                                                        current = start_date + pd.Timedelta(weeks=1)
-                                                        while current <= end_date:
-                                                            # Find first market day on or after current
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.Timedelta(weeks=1)
-                                                    elif frequency == "Biweekly":
-                                                        # First addition: start_date + 2 weeks
-                                                        current = start_date + pd.Timedelta(weeks=2)
-                                                        while current <= end_date:
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.Timedelta(weeks=2)
-                                                    elif frequency == "Monthly":
-                                                        # First addition: start_date + 1 month
-                                                        current = start_date + pd.DateOffset(months=1)
-                                                        while current <= end_date:
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.DateOffset(months=1)
-                                                    elif frequency == "Quarterly":
-                                                        # First addition: start_date + 3 months
-                                                        current = start_date + pd.DateOffset(months=3)
-                                                        while current <= end_date:
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.DateOffset(months=3)
-                                                    elif frequency == "Semiannually":
-                                                        # First addition: start_date + 6 months
-                                                        current = start_date + pd.DateOffset(months=6)
-                                                        while current <= end_date:
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.DateOffset(months=6)
-                                                    elif frequency == "Annually" or frequency == "year":
-                                                        # First addition: start_date + 1 year
-                                                        current = start_date + pd.DateOffset(years=1)
-                                                        while current <= end_date:
-                                                            for md in market_days:
-                                                                if md >= current:
-                                                                    if md <= end_date:
-                                                                        dates.append(md)
-                                                                    break
-                                                            current += pd.DateOffset(years=1)
-                                                    
-                                                    return set(dates)
-                                                
-                                                new_dates_added = get_addition_dates_from_start(
-                                                    original_display_start, 
-                                                    truncated_series.index[-1], 
+                                                # Vectorized: addition dates from start_date (searchsorted)
+                                                new_dates_added = _get_addition_dates_from_start_vectorized(
+                                                    original_display_start,
+                                                    truncated_series.index[-1],
                                                     added_frequency,
-                                                    truncated_series.index.tolist()
+                                                    truncated_series.index.tolist(),
                                                 )
                                                 
-                                                # Rebuild with_additions by adding cash additions correctly to no_add_normalized
-                                                # This ensures cash flows match exactly with the portfolio values
-                                                # Start with normalized no_additions (pure returns, no cash additions)
-                                                # CRITICAL: Ensure first value is exactly initial_value for MWRR consistency
-                                                rebuilt_series = no_add_normalized.copy()
-                                                if len(rebuilt_series) > 0:
-                                                    rebuilt_series.iloc[0] = initial_value
-                                                
-                                                # Track additions that have been made and their growth
-                                                # We need to track each addition separately to calculate its growth accurately
-                                                additions_tracking = []  # List of (date, amount) tuples
-                                                
-                                                for i, date in enumerate(truncated_series.index):
-                                                    # Add new cash on addition dates
-                                                    if date in new_dates_added:
-                                                        additions_tracking.append((date, added_amount))
-                                                    
-                                                    # Calculate total value with all additions growing from their addition dates
-                                                    total_additions_value = 0.0
-                                                    for add_date, add_amount in additions_tracking:
-                                                        # Find the index of the addition date
-                                                        add_idx = truncated_series.index.get_loc(add_date)
-                                                        if add_idx <= i:
-                                                            # Calculate growth from addition date to current date
-                                                            if add_idx < len(no_add_normalized) and no_add_normalized.iloc[add_idx] > 0:
-                                                                growth_factor = no_add_normalized.iloc[i] / no_add_normalized.iloc[add_idx]
-                                                                total_additions_value += add_amount * growth_factor
-                                                    
-                                                    # Rebuilt series = no_additions (normalized) + all additions with their growth
-                                                    # For first date, ensure it's exactly initial_value (no additions yet)
-                                                    if i == 0:
-                                                        rebuilt_series.iloc[i] = initial_value
-                                                    else:
-                                                        rebuilt_series.iloc[i] = no_add_normalized.iloc[i] + total_additions_value
-                                                
-                                                truncated_series = rebuilt_series
+                                                # Rebuild with_additions (vectorized): no_additions + sum of additions with growth
+                                                no_add_arr = np.asarray(no_add_normalized.values, dtype=np.float64)
+                                                n = len(no_add_arr)
+                                                addition_indices = sorted(
+                                                    truncated_series.index.get_loc(d) for d in new_dates_added
+                                                    if d in truncated_series.index
+                                                )
+                                                contribution = np.zeros(n, dtype=np.float64)
+                                                for add_idx in addition_indices:
+                                                    if add_idx < n and no_add_arr[add_idx] > 0:
+                                                        contribution[add_idx:] += added_amount * (
+                                                            no_add_arr[add_idx:] / no_add_arr[add_idx]
+                                                        )
+                                                rebuilt = no_add_arr + contribution
+                                                if n > 0:
+                                                    rebuilt[0] = initial_value
+                                                truncated_series = pd.Series(rebuilt, index=truncated_series.index)
                                             else:
                                                 # No periodic additions - just use normalized series
                                                 truncated_series = normalized_series
@@ -16000,75 +15970,13 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
                                 if len(portfolio_values_trunc.index) > 0:
                                     cash_flows_trunc.iloc[0] = -initial_value
                                 
-                                # Periodic additions: use the same function to get dates from original_display_start
+                                # Periodic additions: vectorized addition dates from original_display_start
                                 if added_amount > 0 and added_frequency != 'none':
-                                    def get_addition_dates_from_start(start_date, end_date, frequency, market_days):
-                                        """Calculate addition dates starting from start_date + frequency period."""
-                                        market_days = sorted(market_days)
-                                        dates = []
-                                        
-                                        if frequency == "Weekly":
-                                            current = start_date + pd.Timedelta(weeks=1)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.Timedelta(weeks=1)
-                                        elif frequency == "Biweekly":
-                                            current = start_date + pd.Timedelta(weeks=2)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.Timedelta(weeks=2)
-                                        elif frequency == "Monthly":
-                                            current = start_date + pd.DateOffset(months=1)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.DateOffset(months=1)
-                                        elif frequency == "Quarterly":
-                                            current = start_date + pd.DateOffset(months=3)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.DateOffset(months=3)
-                                        elif frequency == "Semiannually":
-                                            current = start_date + pd.DateOffset(months=6)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.DateOffset(months=6)
-                                        elif frequency == "Annually" or frequency == "year":
-                                            current = start_date + pd.DateOffset(years=1)
-                                            while current <= end_date:
-                                                for md in market_days:
-                                                    if md >= current:
-                                                        if md <= end_date:
-                                                            dates.append(md)
-                                                        break
-                                                current += pd.DateOffset(years=1)
-                                        
-                                        return set(dates)
-                                    
-                                    dates_added = get_addition_dates_from_start(
+                                    dates_added = _get_addition_dates_from_start_vectorized(
                                         original_display_start,
                                         portfolio_values_trunc.index[-1],
                                         added_frequency,
-                                        portfolio_values_trunc.index.tolist()
+                                        portfolio_values_trunc.index.tolist(),
                                     )
                                     
                                     for d in dates_added:
