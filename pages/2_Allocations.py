@@ -2463,6 +2463,10 @@ if 'alloc_portfolio_configs' in st.session_state:
             config['ma_tolerance_percent'] = 2.0
         if 'ma_confirmation_days' not in config:
             config['ma_confirmation_days'] = 3
+        if 'use_global_ma_reference' not in config:
+            config['use_global_ma_reference'] = False
+        if 'global_ma_reference_ticker' not in config:
+            config['global_ma_reference_ticker'] = ''
         
         # Ensure all stocks have include_in_sma_filter and ma_reference_ticker settings
         for stock in config.get('stocks', []):
@@ -3430,10 +3434,14 @@ def generate_allocations_pdf(custom_name=""):
         # Add tickers with enhanced information (without momentum - conditional columns based on MA filter)
         if active_portfolio.get('use_sma_filter', False):
             tickers_data = [['Ticker', 'Allocation\n%', 'Reinvest\nDividends', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+            global_ma_ref = (active_portfolio.get('global_ma_reference_ticker') or '').strip() if active_portfolio.get('use_global_ma_reference') else None
             for ticker_config in active_portfolio.get('stocks', []):
                 include_ma = "✓" if ticker_config.get('include_in_sma_filter', True) else "✗"
-                ma_ref = ticker_config.get('ma_reference_ticker', '')
-                ma_ref_str = ma_ref if ma_ref else ticker_config['ticker']  # Use own ticker if no custom reference
+                if global_ma_ref:
+                    ma_ref_str = global_ma_ref
+                else:
+                    ma_ref = ticker_config.get('ma_reference_ticker', '')
+                    ma_ref_str = ma_ref if ma_ref else ticker_config['ticker']
                 tickers_data.append([
                     ticker_config['ticker'],
                     f"{ticker_config['allocation']*100:.1f}%",
@@ -3506,12 +3514,12 @@ def generate_allocations_pdf(custom_name=""):
             # Create modified table with conditional columns for momentum strategies
             if active_portfolio.get('use_sma_filter', False):
                 tickers_data_momentum = [['Ticker', 'Reinvest\nDividends', 'Max Allocation\n%', 'Include in\nMA Filter', 'MA Reference\nTicker']]
+                global_ma_ref_pdf = (active_portfolio.get('global_ma_reference_ticker') or '').strip() if active_portfolio.get('use_global_ma_reference') else None
                 for ticker_config in active_portfolio.get('stocks', []):
                     max_alloc = ticker_config.get('max_allocation_percent')
                     max_alloc_str = f"{max_alloc:.1f}%" if max_alloc is not None else "No limit"
                     include_ma = "✓" if ticker_config.get('include_in_sma_filter', True) else "✗"
-                    ma_ref = ticker_config.get('ma_reference_ticker', '')
-                    ma_ref_str = ma_ref if ma_ref else ticker_config['ticker']  # Use own ticker if no custom reference
+                    ma_ref_str = global_ma_ref_pdf if global_ma_ref_pdf else (ticker_config.get('ma_reference_ticker') or '') or ticker_config['ticker']
                     tickers_data_momentum.append([
                         ticker_config['ticker'],
                         "✓" if ticker_config['include_dividends'] else "✗",
@@ -4970,16 +4978,22 @@ def precompute_ma_crossings(reindexed_data, ma_window, ma_type='SMA', tolerance_
     
     return crossings_data
 
-def precompute_ma_filters(reindexed_data, ma_window, ma_type='SMA', ma_multiplier=1.48, stocks_config=None):
+def precompute_ma_filters(reindexed_data, ma_window, ma_type='SMA', ma_multiplier=1.48, stocks_config=None, config=None):
     """
     ULTRA OPTIMIZATION: Precompute ALL MA filter results for all dates!
     This eliminates the need to check MA filters every day during backtest.
+    If config has use_global_ma_reference and global_ma_reference_ticker, that ticker is used for all.
     
     Returns:
         dict: {date: {ticker: is_above_ma}} for all dates and tickers
     """
     ma_col_name = f"MA_{ma_type}_{ma_window}"
     filter_results = {}
+    
+    # Global reference: same ticker for all (e.g. SPY)
+    global_ref = None
+    if config and config.get('use_global_ma_reference') and (config.get('global_ma_reference_ticker') or '').strip():
+        global_ref = resolve_ticker_alias((config.get('global_ma_reference_ticker') or '').strip())
     
     # Create mappings from stocks_config
     include_in_ma = {}
@@ -4989,10 +5003,13 @@ def precompute_ma_filters(reindexed_data, ma_window, ma_type='SMA', ma_multiplie
             ticker = stock.get('ticker')
             if ticker:
                 include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
-                ref = stock.get('ma_reference_ticker', '').strip()
-                if ref:
-                    ref = resolve_ticker_alias(ref)
-                ma_reference[ticker] = ref if ref else ticker
+                if global_ref:
+                    ma_reference[ticker] = global_ref
+                else:
+                    ref = stock.get('ma_reference_ticker', '').strip()
+                    if ref:
+                        ref = resolve_ticker_alias(ref)
+                    ma_reference[ticker] = ref if ref else ticker
     
     # Get all unique dates from all tickers
     all_dates = set()
@@ -5074,6 +5091,11 @@ def detect_ma_cross_with_anti_whipsaw(valid_assets, reindexed_data, date, ma_win
     crossed_assets = []
     cross_details = {}
     
+    # Global reference: same ticker for all (e.g. SPY)
+    global_ref = None
+    if config and config.get('use_global_ma_reference') and (config.get('global_ma_reference_ticker') or '').strip():
+        global_ref = resolve_ticker_alias((config.get('global_ma_reference_ticker') or '').strip())
+    
     # Create mappings from stocks_config
     include_in_ma = {}
     ma_reference = {}
@@ -5082,10 +5104,13 @@ def detect_ma_cross_with_anti_whipsaw(valid_assets, reindexed_data, date, ma_win
             ticker = stock.get('ticker')
             if ticker:
                 include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
-                ref = stock.get('ma_reference_ticker', '').strip()
-                if ref:
-                    ref = resolve_ticker_alias(ref)
-                ma_reference[ticker] = ref if ref else ticker
+                if global_ref:
+                    ma_reference[ticker] = global_ref
+                else:
+                    ref = stock.get('ma_reference_ticker', '').strip()
+                    if ref:
+                        ref = resolve_ticker_alias(ref)
+                    ma_reference[ticker] = ref if ref else ticker
     
     for ticker in valid_assets:
         is_included = include_in_ma.get(ticker, True)
@@ -5205,6 +5230,11 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
     excluded_assets = {}
     tickers_with_enough_data = []
     
+    # Global reference: same ticker for all (e.g. SPY)
+    global_ref = None
+    if config and config.get('use_global_ma_reference') and (config.get('global_ma_reference_ticker') or '').strip():
+        global_ref = resolve_ticker_alias((config.get('global_ma_reference_ticker') or '').strip())
+    
     # Create mappings from stocks_config
     include_in_ma = {}
     ma_reference = {}
@@ -5213,19 +5243,22 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
             ticker = stock.get('ticker')
             if ticker:
                 include_in_ma[ticker] = stock.get('include_in_sma_filter', True)
-                # Get MA reference ticker (empty or None means use ticker itself)
-                ref = stock.get('ma_reference_ticker', '').strip()
-                # Apply same transformations as regular tickers for consistency
-                if ref:
-                    ref = ref.replace(",", ".").upper()
-                    # Special conversion for Berkshire Hathaway
-                    if ref == 'BRK.B':
-                        ref = 'BRK-B'
-                    elif ref == 'BRK.A':
-                        ref = 'BRK-A'
-                    # Resolve alias (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
-                    ref = resolve_ticker_alias(ref)
-                ma_reference[ticker] = ref if ref else ticker
+                if global_ref:
+                    ma_reference[ticker] = global_ref
+                else:
+                    # Get MA reference ticker (empty or None means use ticker itself)
+                    ref = stock.get('ma_reference_ticker', '').strip()
+                    # Apply same transformations as regular tickers for consistency
+                    if ref:
+                        ref = ref.replace(",", ".").upper()
+                        # Special conversion for Berkshire Hathaway
+                        if ref == 'BRK.B':
+                            ref = 'BRK-B'
+                        elif ref == 'BRK.A':
+                            ref = 'BRK-A'
+                        # Resolve alias (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
+                        ref = resolve_ticker_alias(ref)
+                    ma_reference[ticker] = ref if ref else ticker
     
     for ticker in valid_assets:
         is_included = include_in_ma.get(ticker, True)
@@ -5611,7 +5644,7 @@ def single_backtest(config, sim_index, reindexed_data):
         
         # ULTRA OPTIMIZATION: Precompute ALL MA filters if MA filter is enabled
         if config.get('use_sma_filter', False):
-            ma_filter_data = precompute_ma_filters(reindexed_data, ma_window, ma_type, ma_multiplier, config.get('stocks', []))
+            ma_filter_data = precompute_ma_filters(reindexed_data, ma_window, ma_type, ma_multiplier, config.get('stocks', []), config=config)
         
         # ULTRA OPTIMIZATION: Precompute ALL MA crossings if MA cross rebalancing is enabled
         if config.get('ma_cross_rebalance', False):
@@ -7527,6 +7560,8 @@ def paste_json_callback():
             'ma_cross_rebalance': json_data.get('ma_cross_rebalance', False),
             'ma_tolerance_percent': json_data.get('ma_tolerance_percent', 2.0),
             'ma_confirmation_days': json_data.get('ma_confirmation_days', 3),
+            'use_global_ma_reference': json_data.get('use_global_ma_reference', False),
+            'global_ma_reference_ticker': (json_data.get('global_ma_reference_ticker') or '').strip(),
         }
         
         st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index] = allocations_config
@@ -7549,6 +7584,9 @@ def paste_json_callback():
         st.session_state['alloc_active_ma_cross_rebalance'] = allocations_config.get('ma_cross_rebalance', False)
         st.session_state['alloc_active_ma_tolerance'] = allocations_config.get('ma_tolerance_percent', 2.0)
         st.session_state['alloc_active_ma_delay'] = allocations_config.get('ma_confirmation_days', 3)
+        portfolio_index = st.session_state.alloc_active_portfolio_index
+        st.session_state[f'alloc_use_global_ma_reference_{portfolio_index}'] = allocations_config.get('use_global_ma_reference', False)
+        st.session_state[f'alloc_global_ma_reference_ticker_{portfolio_index}'] = (allocations_config.get('global_ma_reference_ticker') or '').strip()
         
         # Update session state for momentum settings (FIX FOR VISUAL BUG)
         st.session_state['alloc_active_use_momentum'] = allocations_config.get('use_momentum', True)
@@ -7978,6 +8016,28 @@ def update_ma_reference_ticker(stock_index):
             st.session_state.alloc_rerun_flag = True
 
 
+def _sync_global_ma_reference_to_portfolio_alloc():
+    """Sync 'Use same reference ticker for all' and the global reference ticker from session state to portfolio (page 5)."""
+    portfolio_index = st.session_state.alloc_active_portfolio_index
+    portfolio = st.session_state.alloc_portfolio_configs[portfolio_index]
+    use_key = f"alloc_use_global_ma_reference_{portfolio_index}"
+    ref_key = f"alloc_global_ma_reference_ticker_{portfolio_index}"
+    use_global = st.session_state.get(use_key, False)
+    raw_ref = (st.session_state.get(ref_key, '') or '').strip()
+    raw_ref = raw_ref.replace(",", ".").upper()
+    if raw_ref == 'BRK.B':
+        raw_ref = 'BRK-B'
+    elif raw_ref == 'BRK.A':
+        raw_ref = 'BRK-A'
+    resolved_ref = resolve_ticker_alias(raw_ref) if raw_ref else ''
+    if resolved_ref:
+        st.session_state[ref_key] = resolved_ref
+    portfolio['use_global_ma_reference'] = use_global
+    portfolio['global_ma_reference_ticker'] = resolved_ref
+    st.session_state.alloc_rerun_flag = True
+    st.rerun()
+
+
 def update_stock_dividends(index):
     try:
         key = f"alloc_div_{st.session_state.alloc_active_portfolio_index}_{index}"
@@ -8071,29 +8131,31 @@ for i in range(len(active_portfolio['stocks'])):
             if st.session_state[sma_key] != stock['include_in_sma_filter']:
                 st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['include_in_sma_filter'] = st.session_state[sma_key]
             
-            # MA Reference Ticker - allows using another ticker's MA for filtering
-            ma_ref_key = f"alloc_ma_reference_{st.session_state.alloc_active_portfolio_index}_{i}"
-            if 'ma_reference_ticker' not in stock:
-                stock['ma_reference_ticker'] = ""  # Empty = use own ticker
-            
-            if ma_ref_key not in st.session_state:
+            # MA Reference Ticker - only show when "Use same reference for all" is OFF (same as page 1)
+            use_global_ma_ref_key = f"alloc_use_global_ma_reference_{st.session_state.alloc_active_portfolio_index}"
+            global_ma_ref_key = f"alloc_global_ma_reference_ticker_{st.session_state.alloc_active_portfolio_index}"
+            use_global = st.session_state.get(use_global_ma_ref_key, False) or active_portfolio.get('use_global_ma_reference', False)
+            if not use_global:
+                ma_ref_key = f"alloc_ma_reference_{st.session_state.alloc_active_portfolio_index}_{i}"
+                if 'ma_reference_ticker' not in stock:
+                    stock['ma_reference_ticker'] = ""  # Empty = use own ticker
+                if ma_ref_key not in st.session_state:
+                    st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
                 st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
-            
-            # Always sync the session state with the portfolio config to show resolved ticker
-            st.session_state[ma_ref_key] = stock.get('ma_reference_ticker', '')
-            
-            st.text_input(
-                "MA Reference Ticker",
-                key=ma_ref_key,
-                placeholder=f"Leave empty for {stock['ticker']}",
-                help=f"Optional: Use another ticker's MA (e.g., SPY for SSO, QQQ for TQQQ). Leave empty to use {stock['ticker']}'s own MA.",
-                label_visibility="visible",
-                on_change=update_ma_reference_ticker,
-                args=(i,)
-            )
-            
-            if st.session_state[ma_ref_key] != stock.get('ma_reference_ticker', ''):
-                st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['ma_reference_ticker'] = st.session_state[ma_ref_key]
+                st.text_input(
+                    "MA Reference Ticker",
+                    key=ma_ref_key,
+                    placeholder=f"Leave empty for {stock['ticker']}",
+                    help=f"Optional: Use another ticker's MA (e.g., SPY for SSO, QQQ for TQQQ). Leave empty to use {stock['ticker']}'s own MA. Or use \"Use same reference ticker for all\" above to set one ticker for all.",
+                    label_visibility="visible",
+                    on_change=update_ma_reference_ticker,
+                    args=(i,)
+                )
+                if st.session_state[ma_ref_key] != stock.get('ma_reference_ticker', ''):
+                    st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['stocks'][i]['ma_reference_ticker'] = st.session_state[ma_ref_key]
+            else:
+                global_ref = st.session_state.get(global_ma_ref_key, '') or active_portfolio.get('global_ma_reference_ticker', '') or '—'
+                st.caption(f"Reference: {global_ref}")
             
         else:
             st.write("")
@@ -9123,6 +9185,26 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
 
     # MA controls (only show when MA filter is enabled)
     if st.session_state.get("alloc_active_use_sma_filter", False):
+        # Option: Use same reference ticker for all (e.g. SPY for every ticker) - same as page 1
+        portfolio_index = st.session_state.alloc_active_portfolio_index
+        use_global_ma_ref_key = f"alloc_use_global_ma_reference_{portfolio_index}"
+        global_ma_ref_key = f"alloc_global_ma_reference_ticker_{portfolio_index}"
+        if use_global_ma_ref_key not in st.session_state:
+            st.session_state[use_global_ma_ref_key] = active_portfolio.get('use_global_ma_reference', False)
+        if global_ma_ref_key not in st.session_state:
+            st.session_state[global_ma_ref_key] = active_portfolio.get('global_ma_reference_ticker', '') or ''
+        st.checkbox("Use same reference ticker for all",
+                    key=use_global_ma_ref_key,
+                    help="When enabled, every ticker will use the same reference for the MA filter (e.g. SPY). No need to enter the reference ticker for each ticker individually.",
+                    on_change=_sync_global_ma_reference_to_portfolio_alloc)
+        if st.session_state.get(use_global_ma_ref_key, False):
+            st.text_input("Reference ticker for all",
+                          key=global_ma_ref_key,
+                          placeholder="e.g. SPY",
+                          help="This ticker's MA will be used for all assets in the MA filter (e.g. SPY for a market-timing filter).",
+                          label_visibility="visible",
+                          on_change=_sync_global_ma_reference_to_portfolio_alloc)
+        
         col_ma_type, col_ma_window = st.columns([1, 1])
         
         with col_ma_type:
@@ -9227,8 +9309,13 @@ if not st.session_state.get("alloc_active_use_targeted_rebalancing", False):
             active_portfolio['ma_tolerance_percent'] = 2.0
             active_portfolio['ma_confirmation_days'] = 3
 
-    # Store MA filter state
+    # Store MA filter state (including global MA reference - same as page 1)
     active_portfolio['use_sma_filter'] = st.session_state.get('alloc_active_use_sma_filter', False)
+    use_global_ma_ref_key = f"alloc_use_global_ma_reference_{st.session_state.alloc_active_portfolio_index}"
+    global_ma_ref_key = f"alloc_global_ma_reference_ticker_{st.session_state.alloc_active_portfolio_index}"
+    active_portfolio['use_global_ma_reference'] = st.session_state.get(use_global_ma_ref_key, active_portfolio.get('use_global_ma_reference', False))
+    raw_global_ref = (st.session_state.get(global_ma_ref_key, '') or '').strip() or (active_portfolio.get('global_ma_reference_ticker') or '').strip()
+    active_portfolio['global_ma_reference_ticker'] = raw_global_ref
 else:
     # Hide MA filter when targeted rebalancing is enabled
     # Don't modify session state directly - let the checkbox handle it
@@ -9340,6 +9427,10 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['sma_window'] = st.session_state.get('alloc_active_sma_window', 200)
     cleaned_config['ma_type'] = st.session_state.get('alloc_active_ma_type', 'SMA')
     cleaned_config['ma_multiplier'] = st.session_state.get('alloc_active_ma_multiplier', 1.48)
+    use_global_ma_ref_key = f"alloc_use_global_ma_reference_{st.session_state.alloc_active_portfolio_index}"
+    global_ma_ref_key = f"alloc_global_ma_reference_ticker_{st.session_state.alloc_active_portfolio_index}"
+    cleaned_config['use_global_ma_reference'] = st.session_state.get(use_global_ma_ref_key, False)
+    cleaned_config['global_ma_reference_ticker'] = (st.session_state.get(global_ma_ref_key, '') or '').strip()
 
     # Ensure equal weight and limit-to-top-N settings are included
     cleaned_config['use_equal_weight'] = active_portfolio.get('use_equal_weight', False)
@@ -9740,16 +9831,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
             if base_ticker not in all_tickers:
                 all_tickers.append(base_ticker)
         
-        # CRITICAL FIX: Add MA reference tickers to ensure they are downloaded
+        # CRITICAL FIX: Add MA reference tickers to ensure they are downloaded (per-stock + global ref like page 1)
         ma_reference_tickers_to_add = set()
         for cfg in portfolio_list:
-            # Only collect MA reference tickers if MA filter is enabled
             if cfg.get('use_sma_filter', False):
+                # Global reference: one ticker for all
+                if cfg.get('use_global_ma_reference') and (cfg.get('global_ma_reference_ticker') or '').strip():
+                    global_ref = resolve_ticker_alias((cfg.get('global_ma_reference_ticker') or '').strip())
+                    if global_ref and global_ref not in all_tickers:
+                        ma_reference_tickers_to_add.add(global_ref)
                 for stock in cfg.get('stocks', []):
                     ma_ref_ticker = stock.get('ma_reference_ticker', '').strip()
-                    # If a custom reference ticker is specified (not empty)
                     if ma_ref_ticker:
-                        # Resolve aliases (e.g., TLTTR -> TLT_COMPLETE, GOLDX -> GOLD_COMPLETE)
                         resolved_ma_ref = resolve_ticker_alias(ma_ref_ticker)
                         if resolved_ma_ref not in all_tickers:
                             ma_reference_tickers_to_add.add(resolved_ma_ref)
