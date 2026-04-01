@@ -4773,15 +4773,35 @@ def get_cached_rebalancing_dates(portfolio_name, rebalancing_frequency, sim_inde
     
     return portfolio_rebalancing_dates
 
-def calculate_cagr(values, dates):
-    if len(values) < 2:
+def calculate_cagr(values, dates=None):
+    """CAGR from equity curve. Always uses positional first/last row (never Series[0] label lookup).
+
+    Accepts (Series) or (array-like values + index dates). Cloud/local differences often come from
+    index dtype (DatetimeIndex vs RangeIndex) or numpy vs Timestamp dates — .days on timedeltas
+    can fail on numpy types; we normalize with pd.Timestamp and Timedelta division.
+    """
+    try:
+        if isinstance(values, pd.Series):
+            s = values.dropna()
+        else:
+            arr = np.asarray(values, dtype=float).ravel()
+            if dates is None or len(dates) != len(arr):
+                return np.nan
+            s = pd.Series(arr, index=pd.Index(dates)).dropna()
+        if len(s) < 2:
+            return np.nan
+        start_val = float(s.iloc[0])
+        end_val = float(s.iloc[-1])
+        if start_val == 0 or not (np.isfinite(start_val) and np.isfinite(end_val)):
+            return np.nan
+        t0 = pd.Timestamp(s.index[0])
+        t1 = pd.Timestamp(s.index[-1])
+        years = float((t1 - t0) / pd.Timedelta(days=365.25))
+        if years <= 0 or not np.isfinite(years):
+            return np.nan
+        return (end_val / start_val) ** (1 / years) - 1
+    except Exception:
         return np.nan
-    start_val = values[0]
-    end_val = values[-1]
-    years = (dates[-1] - dates[0]).days / 365.25
-    if years <= 0 or start_val == 0:
-        return np.nan
-    return (end_val / start_val) ** (1 / years) - 1
 
 def calculate_max_drawdown(values):
     values = np.array(values)
@@ -18433,7 +18453,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                                 profit_factor = gross_profit / gross_loss if gross_loss > 0 else np.inf
                                 
                                 # Calculate monthly returns for monthly metrics
-                                monthly_returns = filtered_series.resample('M').last().pct_change().fillna(0) * 100
+                                monthly_returns = filtered_series.resample('ME').last().pct_change().fillna(0) * 100
                                 best_month = monthly_returns.max() if len(monthly_returns) > 0 else 0
                                 worst_month = monthly_returns.min() if len(monthly_returns) > 0 else 0
                                 median_monthly = monthly_returns.median() if len(monthly_returns) > 0 else 0
@@ -18965,7 +18985,7 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
                         else:
                             ser_noadd_full = series_obj if isinstance(series_obj, pd.Series) else None
                         if ser_noadd_full is not None and not ser_noadd_full.empty:
-                            monthly_ser = ser_noadd_full.resample('M').last().pct_change().dropna()
+                            monthly_ser = ser_noadd_full.resample('ME').last().pct_change().dropna()
                             if not monthly_ser.empty:
                                 vols = monthly_ser.groupby([monthly_ser.index.year]).std(ddof=0)
                                 if vols is not None and len(vols) > 0:
@@ -19136,9 +19156,9 @@ if 'multi_backtest_ran' in st.session_state and st.session_state.multi_backtest_
             try:
                 series_obj = st.session_state.multi_all_results.get(name)
                 if isinstance(series_obj, dict) and 'no_additions' in series_obj:
-                    ser_noadd = series_obj['no_additions'].resample('M').last()
+                    ser_noadd = series_obj['no_additions'].resample('ME').last()
                 elif isinstance(series_obj, pd.Series):
-                    ser_noadd = series_obj.resample('M').last()
+                    ser_noadd = series_obj.resample('ME').last()
             except Exception:
                 ser_noadd = None
 
