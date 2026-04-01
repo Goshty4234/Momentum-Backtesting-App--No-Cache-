@@ -12,6 +12,15 @@ import concurrent.futures
 import threading
 from functools import partial
 
+
+def _style_apply_cell(styler, fn, **kwargs):
+    """Per-cell styling: pandas 2.1+ uses Styler.map; older versions use applymap."""
+    apply_cell = getattr(styler, "map", None)
+    if apply_cell is not None:
+        return apply_cell(fn, **kwargs)
+    return styler.applymap(fn, **kwargs)
+
+
 st.set_page_config(
     page_title="S&P 500 Market Cap Analysis",
     page_icon="📈",
@@ -858,7 +867,7 @@ elif companies_df is not None and not companies_df.empty:
     # Apply styling to all available performance columns
     available_return_columns = [col for col in return_columns if col in display_df.columns]
     # Create styled dataframe with proper decimal formatting
-    styled_df = display_df.style.applymap(color_performance, subset=available_return_columns)
+    styled_df = _style_apply_cell(display_df.style, color_performance, subset=available_return_columns)
     
     # Format numeric columns in the styled dataframe
     format_dict = {}
@@ -986,7 +995,11 @@ elif companies_df is not None and not companies_df.empty:
         if col in ['Total Market Cap (B)', 'Avg Market Cap (B)', '% of S&P 500', 'Avg YTD Return %', 'Avg 1Y Return %', 'Avg Beta', 'Avg Volatility %']:
             format_sector_dict[col] = '{:.2f}'
     
-    styled_sector_stats = sector_stats.style.applymap(color_sector_performance, subset=['Avg YTD Return %', 'Avg 1Y Return %', 'Avg Volatility %']).format(format_sector_dict)
+    styled_sector_stats = _style_apply_cell(
+        sector_stats.style,
+        color_sector_performance,
+        subset=['Avg YTD Return %', 'Avg 1Y Return %', 'Avg Volatility %'],
+    ).format(format_sector_dict)
     
     st.dataframe(styled_sector_stats, use_container_width=True, height=450)
     
