@@ -12066,7 +12066,7 @@ if st.session_state.get('alloc_backtest_run', False):
                     
                     # Forward fill to handle weekends/holidays - create complete daily series
                     date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
-                    series_filled = series.reindex(date_range).fillna(method='ffill')
+                    series_filled = series.reindex(date_range).ffill()
                     
                     # Now get exact date (should exist after ffill)
                     if target_date in series_filled.index:
@@ -12286,7 +12286,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                     spy_window = spy_reference['Close'].loc[start_date:] if 'Close' in spy_reference.columns else None
                                     if spy_window is not None and len(spy_window) > 0:
                                         # Align portfolio to SPY trading days (same as beta logic)
-                                        portfolio_aligned = portfolio_window.reindex(spy_window.index, method='ffill')
+                                        portfolio_aligned = portfolio_window.reindex(spy_window.index).ffill()
                                         portfolio_returns_series = portfolio_aligned.pct_change().dropna()
                                         
                                         # Only use dates where both have data
@@ -12345,7 +12345,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 
                                 if benchmark_data_beta is not None and isinstance(benchmark_data_beta, pd.DataFrame) and 'Close' in benchmark_data_beta.columns:
                                     benchmark_series = benchmark_data_beta['Close']
-                                    benchmark_series_filled = benchmark_series.reindex(last_365_days.index, method='ffill')
+                                    benchmark_series_filled = benchmark_series.reindex(last_365_days.index).ffill()
                                     portfolio_aligned = last_365_days.reindex(benchmark_series_filled.index).dropna()
                                     benchmark_aligned = benchmark_series_filled.reindex(portfolio_aligned.index).dropna()
                                     
@@ -12545,7 +12545,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             except:
                                 pass
                         return ''
-                    styled_benchmark = styled_benchmark.applymap(style_pe, subset=[col])
+                    styled_benchmark = styled_benchmark.map(style_pe, subset=[col])
                 elif col not in ['Ticker', 'Beta', 'Volatility']:
                     def style_returns(val):
                         if isinstance(val, str) and val.endswith('%'):
@@ -12558,7 +12558,7 @@ if st.session_state.get('alloc_backtest_run', False):
                             except:
                                 pass
                         return ''
-                    styled_benchmark = styled_benchmark.applymap(style_returns, subset=[col])
+                    styled_benchmark = styled_benchmark.map(style_returns, subset=[col])
             
             # Highlight the PORTFOLIO row in benchmark table
             def highlight_benchmark_portfolio_row(row):
@@ -13703,7 +13703,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                 
                                 # Forward fill to handle weekends/holidays - create complete daily series
                                 date_range = pd.date_range(start=series.index[0], end=series.index[-1], freq='D')
-                                series_filled = series.reindex(date_range).fillna(method='ffill')
+                                series_filled = series.reindex(date_range).ffill()
                                 
                                 # Now get exact date (should exist after ffill)
                                 if target_date in series_filled.index:
@@ -13781,7 +13781,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                         bser = bdf['Close']
                                         bser.index = pd.to_datetime(bser.index)
                                         date_range = pd.date_range(start=bser.index.max() - pd.Timedelta(days=365), end=bser.index.max(), freq='D')
-                                        bfilled = bser.reindex(date_range).fillna(method='ffill')
+                                        bfilled = bser.reindex(date_range).ffill()
                                         bench_series = bfilled.pct_change().dropna()
                                 for _ticker in df_returns['Ticker'].tolist():
                                     if _ticker == 'PORTFOLIO HISTORICAL':
@@ -13792,7 +13792,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                     tser = tdf['Close'].copy()
                                     tser.index = pd.to_datetime(tser.index)
                                     date_range = pd.date_range(start=tser.index.max() - pd.Timedelta(days=365), end=tser.index.max(), freq='D')
-                                    tfilled = tser.reindex(date_range).fillna(method='ffill')
+                                    tfilled = tser.reindex(date_range).ffill()
                                     tret = tfilled.pct_change().dropna()
                                     if not missing_vol and not missing_beta:
                                         break
@@ -13855,7 +13855,7 @@ if st.session_state.get('alloc_backtest_run', False):
                                     
                                     # Create complete daily series with forward fill (same as get_value_days_ago)
                                     date_range = pd.date_range(start=pv.index[0], end=pv.index[-1], freq='D')
-                                    pv_filled = pv.reindex(date_range).fillna(method='ffill')
+                                    pv_filled = pv.reindex(date_range).ffill()
                                     
                                     for period_name, days in periods.items():
                                         try:
@@ -13979,7 +13979,7 @@ if st.session_state.get('alloc_backtest_run', False):
                 
                 # Apply styling only to returns/Momentum columns (exclude Volatility/Beta)
                 percent_cols = [c for c in ['Momentum', '1W', '1M', '3M', '6M', '1Y'] if c in returns_df.columns]
-                styled_returns = returns_df.style.applymap(style_returns, subset=percent_cols)
+                styled_returns = returns_df.style.map(style_returns, subset=percent_cols)
                 
                 # Highlight the PORTFOLIO row only
                 def highlight_portfolio_row(row):
