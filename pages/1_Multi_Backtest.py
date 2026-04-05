@@ -573,75 +573,6 @@ def _get_default_risk_free_rate(dates):
         result.index = result.index.tz_convert(None)
     return result
 
-def get_risk_free_rate_robust(dates):
-    """Simple risk-free rate fetcher using Yahoo Finance treasury data."""
-    try:
-        dates = pd.to_datetime(dates)
-        if isinstance(dates, pd.DatetimeIndex):
-            if getattr(dates, "tz", None) is not None:
-                dates = dates.tz_convert(None)
-        
-        # Get treasury data - use ^IRX (13-week treasury) as primary for leverage calculations
-        # Fallback hierarchy: ^IRX → ^FVX → ^TNX → ^TYX
-        symbols = ["^IRX", "^FVX", "^TNX", "^TYX"]
-        ticker = None
-        for symbol in symbols:
-            try:
-                ticker = get_ticker_with_cache(symbol)
-                st.session_state.api_call_count += 1
-                hist = ticker.history(period="max", auto_adjust=False)
-                if hist is not None and not hist.empty and 'Close' in hist.columns:
-                    break
-            except Exception:
-                continue
-        
-        if ticker is None:
-            # Final fallback to ^TNX
-            ticker = get_ticker_with_cache("^TNX")
-            st.session_state.api_call_count += 1
-        hist = ticker.history(period="max", auto_adjust=False)
-        
-        if hist is not None and not hist.empty and 'Close' in hist.columns:
-            # Filter valid data
-            valid_data = hist[hist['Close'].notnull() & (hist['Close'] > 0)]
-            
-            if not valid_data.empty:
-                # Convert annual percentage to daily rate
-                annual_rates = valid_data['Close'] / 100.0
-                daily_rates = (1 + annual_rates) ** (1 / 365.25) - 1.0
-                
-                # Create series with timezone-naive index
-                daily_rate_series = pd.Series(daily_rates.values, index=daily_rates.index)
-                if getattr(daily_rate_series.index, "tz", None) is not None:
-                    daily_rate_series.index = daily_rate_series.index.tz_convert(None)
-                
-                # For each target date, use the most recent available rate
-                result = pd.Series(index=dates, dtype=float)
-                
-                for i, target_date in enumerate(dates):
-                    # Find the most recent treasury date <= target_date
-                    valid_dates = daily_rate_series.index[daily_rate_series.index <= target_date]
-                    
-                    if len(valid_dates) > 0:
-                        closest_date = valid_dates.max()
-                        result.iloc[i] = daily_rate_series.loc[closest_date]
-                    else:
-                        # If no data before target date, use the earliest available
-                        result.iloc[i] = daily_rate_series.iloc[0]
-                
-                # Handle any remaining NaN values
-                if result.isna().any():
-                    result = result.fillna(method='ffill').fillna(method='bfill')
-                    if result.isna().any():
-                        result = result.fillna(0.000105)  # Default daily rate
-                
-                return result
-        
-        # Fallback to default if all else fails
-        return _get_default_risk_free_rate(dates)
-        
-    except Exception:
-        return _get_default_risk_free_rate(dates)
 import contextlib
 from datetime import datetime, timedelta, date, time
 import warnings
@@ -676,8 +607,13 @@ def _get_default_risk_free_rate(dates):
         result.index = result.index.tz_convert(None)
     return result
 
-def get_risk_free_rate_robust(dates):
-    """Simple risk-free rate fetcher using Yahoo Finance treasury data."""
+def get_risk_free_rate_robust(dates, before_first_quote_daily=None, fallback_zeros_on_failure=False):
+    """Fetch short-term Treasury-implied daily rates (^IRX chain).
+
+    before_first_quote_daily: if set (e.g. 0.0), dates before any Treasury quote use this daily rate
+        instead of back-filling the earliest quote (used for idle-cash yield).
+    fallback_zeros_on_failure: if True, any fetch/parsing failure returns 0% daily (plain cash).
+    """
     try:
         dates = pd.to_datetime(dates)
         if isinstance(dates, pd.DatetimeIndex):
@@ -729,21 +665,27 @@ def get_risk_free_rate_robust(dates):
                         closest_date = valid_dates.max()
                         result.iloc[i] = daily_rate_series.loc[closest_date]
                     else:
-                        # If no data before target date, use the earliest available
-                        result.iloc[i] = daily_rate_series.iloc[0]
+                        if before_first_quote_daily is not None:
+                            result.iloc[i] = float(before_first_quote_daily)
+                        else:
+                            result.iloc[i] = daily_rate_series.iloc[0]
                 
                 # Handle any remaining NaN values
                 if result.isna().any():
-                    result = result.fillna(method='ffill').fillna(method='bfill')
+                    result = result.ffill().bfill()
                     if result.isna().any():
-                        result = result.fillna(0.000105)  # Default daily rate
+                        result = result.fillna(0.0 if before_first_quote_daily is None else float(before_first_quote_daily))
                 
                 return result
         
         # Fallback to default if all else fails
+        if fallback_zeros_on_failure:
+            return pd.Series(0.0, index=dates)
         return _get_default_risk_free_rate(dates)
         
     except Exception:
+        if fallback_zeros_on_failure:
+            return pd.Series(0.0, index=pd.to_datetime(dates))
         return _get_default_risk_free_rate(dates)
 
 def parse_ticker_parameters(ticker_symbol: str) -> tuple[str, float, float]:
@@ -2336,6 +2278,7 @@ def generate_simple_pdf_report(custom_name=""):
                 ['Minimal Threshold', f"{config.get('minimal_threshold_percent', 4.0):.1f}%" if config.get('use_minimal_threshold', False) else 'Disabled', 'Minimum allocation percentage threshold'],
                 ['Maximum Allocation', f"{config.get('max_allocation_percent', 20.0):.1f}%" if config.get('use_max_allocation', False) else 'Disabled', 'Maximum allocation percentage per stock'],
                 ['MA Filter', 'Yes' if config.get('use_sma_filter', False) else 'No', 'Filter assets below moving average'],
+                ['Idle cash Treasury yield', 'Yes' if config.get('idle_cash_earns_treasury_yield', False) else 'No', 'Compound unallocated cash at short Treasury rate (^IRX)'],
                 ['MA Type', config.get('ma_type', 'SMA'), 'Type of moving average (SMA or EMA)'],
                 ['MA Window', f"{config.get('sma_window', 200)} days", 'Moving average calculation window'],
                 ['MA Multiplier', f"{config.get('ma_multiplier', 1.48):.4f}", 'Multiplier to convert market days to calendar days'],
@@ -6844,6 +6787,23 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
     historical_allocations[sim_index[0]] = {t: values[t][0] / initial_value if initial_value > 0 else 0 for t in tickers}
     historical_allocations[sim_index[0]]['CASH'] = unallocated_cash[0] / initial_value if initial_value > 0 else 0
     
+    # Daily Treasury yield on idle cash (^IRX family via get_risk_free_rate_robust), optional
+    # One fetch per backtest; 0% daily if no Treasury data / failure / pre-history (plain cash)
+    rf_daily_by_i = None
+    if config.get('idle_cash_earns_treasury_yield', False):
+        try:
+            _rf = get_risk_free_rate_robust(
+                pd.DatetimeIndex(sim_index),
+                before_first_quote_daily=0.0,
+                fallback_zeros_on_failure=True,
+            )
+            a = np.asarray(_rf.values, dtype=np.float64)
+            np.nan_to_num(a, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+            np.clip(a, -0.02 / 365.25, 0.02, out=a)
+            rf_daily_by_i = a
+        except Exception:
+            rf_daily_by_i = None
+    
     for i in range(len(sim_index)):
         # Check for interrupt every 5 iterations (much more frequent)
         if i % 5 == 0:
@@ -6857,85 +6817,9 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         
         date_prev = sim_index[i-1]
         total_unreinvested_dividends = 0
-        total_portfolio_prev = sum(values[t][-1] for t in tickers) + unreinvested_cash[-1]
-        daily_growth_factor = 1
-        if total_portfolio_prev > 0:
-            total_portfolio_current_before_changes = 0
-            for t in tickers:
-                df = reindexed_data[t]
-                price_prev = df.loc[date_prev, "Close"]
-                val_prev = values[t][-1]
-                nb_shares = val_prev / price_prev if price_prev > 0 else 0
-                # --- Dividend fix: find the correct trading day for dividend ---
-                div = 0.0
-                # CRITICAL FIX: For leveraged tickers, get dividends from the base ticker, not the leveraged ticker
-                if "?L=" in t or "?E=" in t:
-                    # For leveraged tickers, get dividend data from the base ticker
-                    base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                    if base_ticker in reindexed_data:
-                        base_df = reindexed_data[base_ticker]
-                        if "Dividends" in base_df.columns:
-                            if date in base_df.index:
-                                div = base_df.loc[date, "Dividends"]
-                            else:
-                                # Find next trading day in index after 'date'
-                                future_dates = base_df.index[base_df.index > date]
-                                if len(future_dates) > 0:
-                                    div = base_df.loc[future_dates[0], "Dividends"]
-                else:
-                    # For regular tickers, get dividend data normally
-                    if "Dividends" in df.columns:
-                        if date in df.index:
-                            div = df.loc[date, "Dividends"]
-                        else:
-                            # Find next trading day in index after 'date'
-                            future_dates = df.index[df.index > date]
-                            if len(future_dates) > 0:
-                                div = df.loc[future_dates[0], "Dividends"]
-                var = df.loc[date, "Price_change"] if date in df.index else 0.0
-                
-                # Expense ratio is already applied in apply_daily_leverage() when data is fetched
-                # No need to re-apply it here (would be double application + slow loop)
-                
-                if include_dividends.get(t, False):
-                    # Check if dividends should be collected as cash instead of reinvested
-                    collect_as_cash = config.get('collect_dividends_as_cash', False)
-                    if collect_as_cash and div > 0:
-                        # Calculate dividend cash and add to unreinvested cash
-                        nb_shares = val_prev / price_prev if price_prev > 0 else 0
-                        dividend_cash = nb_shares * div
-                        total_unreinvested_dividends += dividend_cash
-                        # Don't include dividend in rate of return
-                        rate_of_return = var
-                        val_new = val_prev * (1 + rate_of_return)
-                    else:
-                        # Reinvest dividends (original behavior)
-                        # CRITICAL FIX: For leveraged tickers, dividends should be handled differently
-                        # When simulating leveraged ETFs, the dividend RATE should be the same as the base asset
-                        if "?L=" in t or "?E=" in t:
-                            # For leveraged tickers, get the base ticker's dividend rate (not amount)
-                            base_ticker, leverage, expense_ratio = parse_ticker_parameters(t)
-                            if base_ticker in reindexed_data:
-                                base_df = reindexed_data[base_ticker]
-                                base_price_prev = base_df.loc[date_prev, "Close"]
-                                # Use the base ticker's dividend rate, not the leveraged amount
-                                dividend_rate = div / base_price_prev if base_price_prev > 0 else 0
-                                rate_of_return = var + dividend_rate
-                            else:
-                                # Fallback: use leveraged price (may cause issues)
-                                rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
-                        else:
-                            # For regular tickers, use normal dividend reinvestment
-                            rate_of_return = var + (div / price_prev if price_prev > 0 else 0)
-                        
-                        # Calculate val_new for both leveraged and regular tickers
-                        val_new = val_prev * (1 + rate_of_return)
-                else:
-                    val_new = val_prev * (1 + var)
-                    # If dividends are not included, do NOT add to unreinvested cash or anywhere else
-                total_portfolio_current_before_changes += val_new
-            total_portfolio_current_before_changes += unreinvested_cash[-1] + total_unreinvested_dividends
-            daily_growth_factor = total_portfolio_current_before_changes / total_portfolio_prev
+        stocks_prev = sum(values[t][-1] for t in tickers)
+        uc_prev = unallocated_cash[-1]
+        ur_prev = unreinvested_cash[-1]
         for t in tickers:
             df = reindexed_data[t]
             price_prev = df.loc[date_prev, "Close"]
@@ -7011,7 +6895,26 @@ def single_backtest(config, sim_index, reindexed_data, _cache_version="v2_daily_
         if date in dates_added:
             unallocated_cash[-1] += added_amount
         unreinvested_cash.append(unreinvested_cash[-1] + total_unreinvested_dividends)
-        portfolio_no_additions.append(portfolio_no_additions[-1] * daily_growth_factor)
+        
+        dr_eff = 0.0
+        if rf_daily_by_i is not None and i < len(rf_daily_by_i):
+            dr_eff = float(rf_daily_by_i[i])
+        if not (np.isfinite(dr_eff) and dr_eff > -0.99):
+            dr_eff = 0.0
+        yf = (1.0 + dr_eff) if config.get('idle_cash_earns_treasury_yield', False) else 1.0
+        if yf != 1.0:
+            if unallocated_cash[-1] > 0:
+                unallocated_cash[-1] *= yf
+            if unreinvested_cash[-1] > 0:
+                unreinvested_cash[-1] *= yf
+        
+        stocks_after = sum(values[t][-1] for t in tickers)
+        prev_total = stocks_prev + uc_prev + ur_prev
+        if prev_total > 0:
+            new_total_na = stocks_after + uc_prev * yf + (ur_prev + total_unreinvested_dividends) * yf
+            portfolio_no_additions.append(portfolio_no_additions[-1] * (new_total_na / prev_total))
+        else:
+            portfolio_no_additions.append(portfolio_no_additions[-1])
         
         current_total = sum(values[t][-1] for t in tickers) + unallocated_cash[-1] + unreinvested_cash[-1]
         
@@ -8477,6 +8380,8 @@ for portfolio in st.session_state.multi_backtest_portfolio_configs:
         portfolio['use_global_ma_reference'] = False
     if 'global_ma_reference_ticker' not in portfolio:
         portfolio['global_ma_reference_ticker'] = ''
+    if 'idle_cash_earns_treasury_yield' not in portfolio:
+        portfolio['idle_cash_earns_treasury_yield'] = False
     
     # Ensure all stocks have include_in_sma_filter setting
     for stock in portfolio.get('stocks', []):
@@ -9164,6 +9069,7 @@ def add_portfolio_callback():
         'use_limit_to_top_n': False,
         'limit_to_top_n_tickers': 10,
         'collect_dividends_as_cash': False,
+        'idle_cash_earns_treasury_yield': False,
         'start_date_user': inherit_start_date,
         'end_date_user': inherit_end_date,
         'fusion_portfolio': {'enabled': False, 'selected_portfolios': [], 'allocations': {}}
@@ -9702,6 +9608,7 @@ def paste_json_callback():
         calc_beta = parse_bool_from_json(json_data.get('calc_beta', False), False)
         calc_volatility = parse_bool_from_json(json_data.get('calc_volatility', True), True)
         collect_dividends_as_cash = parse_bool_from_json(json_data.get('collect_dividends_as_cash', False), False)
+        idle_cash_earns_treasury_yield = parse_bool_from_json(json_data.get('idle_cash_earns_treasury_yield', False), False)
         exclude_from_cashflow_sync = parse_bool_from_json(json_data.get('exclude_from_cashflow_sync', False), False)
         exclude_from_rebalancing_sync = parse_bool_from_json(json_data.get('exclude_from_rebalancing_sync', False), False)
         use_targeted_rebalancing = parse_bool_from_json(json_data.get('use_targeted_rebalancing', False), False)
@@ -9736,6 +9643,7 @@ def paste_json_callback():
             'vol_window_days': json_data.get('vol_window_days', 365),
             'exclude_days_vol': json_data.get('exclude_days_vol', 30),
             'collect_dividends_as_cash': collect_dividends_as_cash,
+            'idle_cash_earns_treasury_yield': idle_cash_earns_treasury_yield,
             # Preserve sync exclusion settings from imported JSON
             'exclude_from_cashflow_sync': exclude_from_cashflow_sync,
             'exclude_from_rebalancing_sync': exclude_from_rebalancing_sync,
@@ -10482,6 +10390,7 @@ if st.sidebar.button("🗑️ Clear All Portfolios", key="multi_backtest_clear_a
         'use_max_allocation': False,
         'max_allocation_percent': 20.0,
         'collect_dividends_as_cash': False,
+        'idle_cash_earns_treasury_yield': False,
         'start_date_user': None,
         'end_date_user': None,
         'fusion_portfolio': {'enabled': False, 'selected_portfolios': [], 'allocations': {}}
@@ -14133,6 +14042,17 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
         # Update portfolio with widget value (widget controls portfolio)
         actual_portfolio['ma_multiplier'] = ma_multiplier
         
+        _pid_ma = st.session_state.multi_backtest_active_portfolio_index
+        idle_cash_yield_key = f"multi_backtest_idle_cash_treasury_yield_{_pid_ma}"
+        if idle_cash_yield_key not in st.session_state:
+            st.session_state[idle_cash_yield_key] = active_portfolio.get('idle_cash_earns_treasury_yield', False)
+        st.checkbox(
+            "Earn Treasury yield on idle cash (short-term, ^IRX)",
+            key=idle_cash_yield_key,
+            help="When you hold cash (e.g. all tickers below the MA filter), that cash compounds daily using the same short Treasury rate as the risk-free charts (^IRX and fallbacks). This approximates T-bills / money-market income, not long-bond price risk.",
+        )
+        active_portfolio['idle_cash_earns_treasury_yield'] = bool(st.session_state.get(idle_cash_yield_key, False))
+        
         # New option for immediate rebalancing on MA cross
         ma_cross_rebalance_key = f"multi_backtest_active_ma_cross_rebalance_{st.session_state.multi_backtest_active_portfolio_index}"
         
@@ -16409,6 +16329,8 @@ def paste_all_json_callback():
                 # Add missing fields with default values
                 if 'collect_dividends_as_cash' not in portfolio:
                     portfolio['collect_dividends_as_cash'] = False
+                if 'idle_cash_earns_treasury_yield' not in portfolio:
+                    portfolio['idle_cash_earns_treasury_yield'] = False
                 if 'exclude_from_cashflow_sync' not in portfolio:
                     portfolio['exclude_from_cashflow_sync'] = False
                 if 'exclude_from_rebalancing_sync' not in portfolio:
@@ -16603,6 +16525,7 @@ def paste_all_json_callback():
                 calc_beta = parse_bool_from_json(cfg.get('calc_beta', False), False)
                 calc_volatility = parse_bool_from_json(cfg.get('calc_volatility', True), True)
                 collect_dividends_as_cash = parse_bool_from_json(cfg.get('collect_dividends_as_cash', False), False)
+                idle_cash_earns_treasury_yield = parse_bool_from_json(cfg.get('idle_cash_earns_treasury_yield', False), False)
                 exclude_from_cashflow_sync = parse_bool_from_json(cfg.get('exclude_from_cashflow_sync', False), False)
                 exclude_from_rebalancing_sync = parse_bool_from_json(cfg.get('exclude_from_rebalancing_sync', False), False)
                 use_targeted_rebalancing = parse_bool_from_json(cfg.get('use_targeted_rebalancing', False), False)
@@ -16638,6 +16561,7 @@ def paste_all_json_callback():
                     'vol_window_days': cfg.get('vol_window_days', 365),
                     'exclude_days_vol': cfg.get('exclude_days_vol', 30),
                     'collect_dividends_as_cash': collect_dividends_as_cash,
+                    'idle_cash_earns_treasury_yield': idle_cash_earns_treasury_yield,
                     # Preserve sync exclusion settings from imported JSON
                     'exclude_from_cashflow_sync': exclude_from_cashflow_sync,
                     'exclude_from_rebalancing_sync': exclude_from_rebalancing_sync,
@@ -16646,6 +16570,7 @@ def paste_all_json_callback():
                     'use_sma_filter': use_sma_filter,
                     'sma_window': cfg.get('sma_window', 200),
                     'ma_type': cfg.get('ma_type', 'SMA'),
+                    'ma_multiplier': cfg.get('ma_multiplier', 1.48),
                     'use_global_ma_reference': cfg.get('use_global_ma_reference', False),
                     'global_ma_reference_ticker': (cfg.get('global_ma_reference_ticker') or '').strip(),
                     'ma_cross_rebalance': ma_cross_rebalance,
