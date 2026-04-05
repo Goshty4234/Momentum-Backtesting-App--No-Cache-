@@ -10069,8 +10069,8 @@ def _sync_global_ma_reference_to_portfolio():
     portfolio['use_global_ma_reference'] = use_global
     portfolio['global_ma_reference_ticker'] = resolved_ref
     st.session_state.multi_backtest_rerun_flag = True
-    # Force immediate rerun so UI updates (per-row MA ref disappears, caption shows)
-    st.rerun()
+    # Do not call st.rerun() here: it stops the script before widgets below the checkbox
+    # (e.g. "Reference ticker for all") run on the same pass, so the field can fail to appear.
 
 def update_ma_reference_ticker(stock_index):
     """Callback function when MA reference ticker changes"""
@@ -10750,14 +10750,17 @@ if portfolio_count >= 2:
             if 'fusion_action' not in st.session_state:
                 st.session_state.fusion_action = "Create New Fusion"
             
+            # Stable dropdown: "Create" only when ≥2 regular portfolios; Edit/Delete always when fusions exist
+            dropdown_options = []
             if len(available_portfolios) >= 2:
-                # Create dropdown options
-                dropdown_options = ["Create New Fusion"]
-                if existing_fusion_portfolios:
-                    dropdown_options.extend([f"Edit: {fp['name']}" for fp in existing_fusion_portfolios])
-                    dropdown_options.extend([f"Delete: {fp['name']}" for fp in existing_fusion_portfolios])
-                
-                # Main dropdown
+                dropdown_options.append("Create New Fusion")
+            if existing_fusion_portfolios:
+                dropdown_options.extend([f"Edit: {fp['name']}" for fp in existing_fusion_portfolios])
+                dropdown_options.extend([f"Delete: {fp['name']}" for fp in existing_fusion_portfolios])
+            
+            if not dropdown_options:
+                st.info("You need at least **2 regular (non-fusion) portfolios** to create a fusion.")
+            else:
                 fusion_action = st.selectbox(
                     "Fusion Portfolio Actions",
                     dropdown_options,
@@ -10765,21 +10768,17 @@ if portfolio_count >= 2:
                     help="Select an action for fusion portfolios"
                 )
                 
-                # Handle the selected action
                 if fusion_action == "Create New Fusion":
-                    # FORCE REFRESH: Always recalculate available portfolios to ensure latest count
                     current_available_portfolios = [
                         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
                         if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
                     ]
-                    
-                    # Simple portfolio selection with forced refresh
+                    # Stable key: do NOT embed len() — adding a portfolio used to change the key and wipe the selection
                     selected_portfolios = st.multiselect(
                         "Select Portfolios",
                         current_available_portfolios,
-                        key=f"fusion_portfolios_select_{len(current_available_portfolios)}",
+                        key="fusion_create_portfolios_select",
                         help="Choose portfolios to combine",
-                        default=[]  # Always start with empty selection
                     )
                     
                     if selected_portfolios:
@@ -10916,6 +10915,8 @@ if portfolio_count >= 2:
                             }
                             
                             st.session_state.multi_backtest_portfolio_configs.append(new_fusion_portfolio)
+                            if "fusion_create_portfolios_select" in st.session_state:
+                                del st.session_state["fusion_create_portfolios_select"]
                             st.success(f"✅ Created: {fusion_name}")
                             st.toast(f"🎉 Fusion portfolio '{fusion_name}' created successfully!")
                             st.rerun()
@@ -10930,17 +10931,16 @@ if portfolio_count >= 2:
                     
                     st.markdown(f"**Editing: {fusion_name}**")
                     
-                    # Portfolio selection with dynamic refresh
                     current_available_portfolios = [
                         cfg['name'] for cfg in st.session_state.multi_backtest_portfolio_configs 
                         if not (cfg.get('fusion_portfolio', {}).get('enabled', False))
                     ]
-                    
+                    _edit_sel_slug = "".join(c if c.isalnum() else "_" for c in fusion_name)[:72] or "fusion"
                     selected_portfolios = st.multiselect(
                         "Select Portfolios",
                         current_available_portfolios,
                         default=current_portfolios,
-                        key=f"edit_fusion_portfolios_{len(current_available_portfolios)}",
+                        key=f"edit_fusion_portfolios_{_edit_sel_slug}",
                         help="Choose portfolios to combine"
                     )
                     
@@ -11063,8 +11063,6 @@ if portfolio_count >= 2:
                         st.success(f"✅ Deleted: {fusion_name}")
                         st.toast(f"🗑️ Fusion portfolio '{fusion_name}' deleted successfully!")
                         st.rerun()
-            else:
-                st.info("Create at least 2 regular portfolios to use fusion feature")
 
 # Start with option
 st.sidebar.markdown("---")
@@ -14071,7 +14069,12 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
                     key=use_global_ma_ref_key,
                     help="When enabled, every ticker will use the same reference for the MA filter (e.g. SPY). No need to enter the reference ticker for each ticker individually.",
                     on_change=_sync_global_ma_reference_to_portfolio)
-        if st.session_state.get(use_global_ma_ref_key, False):
+        # Session OR portfolio: avoids empty field when widget state and config briefly disagree
+        _show_global_ma_ref = (
+            st.session_state.get(use_global_ma_ref_key, False)
+            or active_portfolio.get('use_global_ma_reference', False)
+        )
+        if _show_global_ma_ref:
             st.text_input("Reference ticker for all",
                           key=global_ma_ref_key,
                           placeholder="e.g. SPY",
