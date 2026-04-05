@@ -671,7 +671,7 @@ if ticker_input:
                     else:
                         return 'background-color: #8b0000; color: #ffffff'
                 
-                styled_df = crossings_df.style.applymap(color_direction, subset=['direction'])
+                styled_df = crossings_df.style.map(color_direction, subset=['direction'])
                 st.dataframe(styled_df, use_container_width=True)
                 
                 # Show statistics
@@ -709,7 +709,7 @@ if ticker_input:
                     else:
                         return 'background-color: #8b0000; color: #ffffff'
                 
-                styled_df = crossings_df.style.applymap(color_direction, subset=['direction'])
+                styled_df = crossings_df.style.map(color_direction, subset=['direction'])
                 st.dataframe(styled_df, use_container_width=True)
                 
                 # Show statistics
@@ -959,3 +959,4 @@ st.markdown("""
     Made by Nicolas Cool
 </div>
 """, unsafe_allow_html=True)
+
