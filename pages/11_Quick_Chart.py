@@ -959,4 +959,3 @@ st.markdown("""
     Made by Nicolas Cool
 </div>
 """, unsafe_allow_html=True)
-
