@@ -14050,6 +14050,14 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
     st.session_state[ma_window_key] = active_portfolio.get('sma_window', 200)
     st.session_state[ma_type_key] = active_portfolio.get('ma_type', 'SMA')
 
+    # Mirror saved portfolio → session before global-MA widgets (same idea as ma_filter_key above).
+    # Stale session False must not persist after portfolio switch; portfolio is updated by callbacks + MA sync below.
+    _ma_idx = st.session_state.multi_backtest_active_portfolio_index
+    _use_gk = f"multi_backtest_use_global_ma_reference_{_ma_idx}"
+    _ref_gk = f"multi_backtest_global_ma_reference_ticker_{_ma_idx}"
+    st.session_state[_use_gk] = active_portfolio.get("use_global_ma_reference", False)
+    st.session_state[_ref_gk] = (active_portfolio.get("global_ma_reference_ticker") or "").strip()
+
     # MA Filter options - LEFT ALIGNED STYLE
     st.checkbox("Enable MA Filter", 
                 key=ma_filter_key,
@@ -14061,10 +14069,6 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
         # Option: Use same reference ticker for all (e.g. SPY for every ticker)
         use_global_ma_ref_key = f"multi_backtest_use_global_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}"
         global_ma_ref_key = f"multi_backtest_global_ma_reference_ticker_{st.session_state.multi_backtest_active_portfolio_index}"
-        if use_global_ma_ref_key not in st.session_state:
-            st.session_state[use_global_ma_ref_key] = active_portfolio.get('use_global_ma_reference', False)
-        if global_ma_ref_key not in st.session_state:
-            st.session_state[global_ma_ref_key] = active_portfolio.get('global_ma_reference_ticker', '') or ''
         st.checkbox("Use same reference ticker for all",
                     key=use_global_ma_ref_key,
                     help="When enabled, every ticker will use the same reference for the MA filter (e.g. SPY). No need to enter the reference ticker for each ticker individually.",
@@ -14188,14 +14192,22 @@ if not st.session_state.get("multi_backtest_active_use_targeted_rebalancing", Fa
     active_portfolio['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     active_portfolio['ma_type'] = st.session_state.get(ma_type_key, "SMA")
     active_portfolio['sma_window'] = st.session_state.get(ma_window_key, 200)
-    # Global MA reference (same reference for all tickers) - fallback to portfolio value if key not in session yet
+    # Only sync global MA reference from widgets while MA filter is ON; otherwise stale session keys
+    # would overwrite saved portfolio settings when the inner block is not rendered.
     use_global_ma_ref_key = f"multi_backtest_use_global_ma_reference_{st.session_state.multi_backtest_active_portfolio_index}"
     global_ma_ref_key = f"multi_backtest_global_ma_reference_ticker_{st.session_state.multi_backtest_active_portfolio_index}"
-    active_portfolio['use_global_ma_reference'] = st.session_state.get(use_global_ma_ref_key, active_portfolio.get('use_global_ma_reference', False))
-    raw_global_ref = (st.session_state.get(global_ma_ref_key, '') or '').strip() or (active_portfolio.get('global_ma_reference_ticker') or '').strip()
-    active_portfolio['global_ma_reference_ticker'] = raw_global_ref
-    if active_portfolio['global_ma_reference_ticker']:
-        active_portfolio['global_ma_reference_ticker'] = resolve_ticker_alias(active_portfolio['global_ma_reference_ticker'].replace(",", ".").upper())
+    if st.session_state.get(ma_filter_key, False):
+        active_portfolio['use_global_ma_reference'] = st.session_state.get(
+            use_global_ma_ref_key, active_portfolio.get('use_global_ma_reference', False)
+        )
+        raw_global_ref = (st.session_state.get(global_ma_ref_key, '') or '').strip() or (
+            active_portfolio.get('global_ma_reference_ticker') or ''
+        ).strip()
+        active_portfolio['global_ma_reference_ticker'] = raw_global_ref
+        if active_portfolio['global_ma_reference_ticker']:
+            active_portfolio['global_ma_reference_ticker'] = resolve_ticker_alias(
+                active_portfolio['global_ma_reference_ticker'].replace(",", ".").upper()
+            )
     # MA Multiplier - RECONSTRUCTED (no complex sync)
 else:
     # Hide MA filter when targeted rebalancing is enabled
@@ -14336,10 +14348,8 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     cleaned_config['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     cleaned_config['sma_window'] = st.session_state.get(ma_window_key, 200)
     cleaned_config['ma_type'] = st.session_state.get(ma_type_key, 'SMA')
-    use_global_ma_ref_key = f"multi_backtest_use_global_ma_reference_{portfolio_index}"
-    global_ma_ref_key = f"multi_backtest_global_ma_reference_ticker_{portfolio_index}"
-    cleaned_config['use_global_ma_reference'] = st.session_state.get(use_global_ma_ref_key, False)
-    cleaned_config['global_ma_reference_ticker'] = (st.session_state.get(global_ma_ref_key, '') or '').strip()
+    # use_global_ma_reference + global_ma_reference_ticker: keep active_portfolio only (MA section + callbacks).
+    # Do not read session here — a stale False in session was unchecking "same reference for all" after export block ran.
     # MA Multiplier is handled by the widget itself
     
     # Add MA cross rebalance setting
@@ -14357,8 +14367,9 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     active_portfolio['use_sma_filter'] = st.session_state.get(ma_filter_key, False)
     active_portfolio['sma_window'] = st.session_state.get(ma_window_key, 200)
     active_portfolio['ma_type'] = st.session_state.get(ma_type_key, 'SMA')
-    active_portfolio['use_global_ma_reference'] = st.session_state.get(use_global_ma_ref_key, False)
-    active_portfolio['global_ma_reference_ticker'] = (st.session_state.get(global_ma_ref_key, '') or '').strip()
+    # Do not overwrite use_global_ma_reference / global_ma_reference_ticker from session here (see above).
+    cleaned_config['use_global_ma_reference'] = active_portfolio.get('use_global_ma_reference', False)
+    cleaned_config['global_ma_reference_ticker'] = active_portfolio.get('global_ma_reference_ticker', '') or ''
     # MA Multiplier - RECONSTRUCTED (no complex sync)
     
     # Convert date objects to strings for JSON serialization
@@ -14572,17 +14583,18 @@ if st.sidebar.button("🚀 Run Backtest", type="primary", use_container_width=Tr
     # Reset kill request when starting new backtest
     st.session_state.hard_kill_requested = False
     
-    # CRITICAL: Sync global MA reference from session state to ALL portfolio configs before run
-    # (session state keys are per-portfolio; ensure each config has latest values)
+    # Sync global MA only when that portfolio's widget keys exist (avoid stale False wiping other portfolios)
     for idx, cfg in enumerate(st.session_state.multi_backtest_portfolio_configs):
         use_key = f"multi_backtest_use_global_ma_reference_{idx}"
         ref_key = f"multi_backtest_global_ma_reference_ticker_{idx}"
-        cfg['use_global_ma_reference'] = st.session_state.get(use_key, cfg.get('use_global_ma_reference', False))
-        raw_ref = (st.session_state.get(ref_key, '') or '').strip() or (cfg.get('global_ma_reference_ticker') or '').strip()
-        if raw_ref:
-            cfg['global_ma_reference_ticker'] = resolve_ticker_alias(raw_ref.replace(",", ".").upper())
-        else:
-            cfg['global_ma_reference_ticker'] = raw_ref
+        if use_key in st.session_state:
+            cfg['use_global_ma_reference'] = st.session_state[use_key]
+        if ref_key in st.session_state:
+            raw_ref = (st.session_state[ref_key] or '').strip() or (cfg.get('global_ma_reference_ticker') or '').strip()
+            if raw_ref:
+                cfg['global_ma_reference_ticker'] = resolve_ticker_alias(raw_ref.replace(",", ".").upper())
+            else:
+                cfg['global_ma_reference_ticker'] = ''
     
     # Pre-backtest validation check for all portfolios
     configs_to_run = st.session_state.multi_backtest_portfolio_configs
