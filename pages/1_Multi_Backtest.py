@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import os
+import copy
 import diskcache as dc
 
 # Initialize API call counter
@@ -8564,7 +8565,12 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     # Extract fusion portfolio details from the fusion_portfolio section
     fusion_config = fusion_portfolio_config.get('fusion_portfolio', {})
     selected_portfolios = fusion_config.get('selected_portfolios', [])
-    allocations = fusion_config.get('allocations', {})
+    allocations_raw = dict(fusion_config.get('allocations', {}))
+    alloc_sum = sum(float(v) for v in allocations_raw.values())
+    if alloc_sum <= 0:
+        return None, None, {}, {}, {}, {}
+    # Normalize to weights summing to 1 (handles 25/75 as well as 0.25/0.75)
+    allocations = {k: float(v) / alloc_sum for k, v in allocations_raw.items()}
     
     if not selected_portfolios or not allocations:
         return None, None, {}, {}, {}, {}
@@ -8656,11 +8662,18 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     
     for portfolio_name, portfolio_config in portfolio_configs.items():
         individual_freq = portfolio_config.get('rebalancing_frequency', 'Unknown')
-        print(f"   - Running {portfolio_name}: {individual_freq} (INDEPENDENT)")
+        w = allocations.get(portfolio_name, 0.0)
+        # Scale each sleeve so combined initial + additions = one wallet (not full capital per leg)
+        cfg_run = copy.deepcopy(portfolio_config)
+        iv = float(cfg_run.get('initial_value', 0) or 0)
+        aa = float(cfg_run.get('added_amount', 0) or 0)
+        cfg_run['initial_value'] = iv * w
+        cfg_run['added_amount'] = aa * w
+        print(f"   - Running {portfolio_name}: {individual_freq} (INDEPENDENT, fusion sleeve {w*100:.2f}% → init ${cfg_run['initial_value']:,.2f}, add ${cfg_run['added_amount']:,.2f})")
         
         # Run individual portfolio - this is completely separate from fusion
         total_series, total_series_no_additions, historical_allocations, historical_metrics = single_backtest(
-            portfolio_config, sim_index, reindexed_data
+            cfg_run, sim_index, reindexed_data
         )
         
         if total_series is not None and not total_series.empty:
@@ -8753,8 +8766,8 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
     print(f"🎯 COMPLETELY INDEPENDENT FUSION LOGIC:")
     print(f"   - Individual portfolios: Run independently at their own frequencies")
     print(f"   - Fusion portfolio: Rebalances between portfolios at '{fusion_rebalancing_frequency}'")
-    print(f"   - NO MODIFICATION: Individual portfolio time series remain unchanged")
-    print(f"   - PURE COMBINATION: Fusion = weighted combination of individual portfolios")
+    print(f"   - NO MODIFICATION: Individual portfolio time series remain unchanged (except rebalance scaling)")
+    print(f"   - PURE COMBINATION: Fusion NAV = sum of sleeve values (each sleeve already scaled by fusion %)")
     
     # Track fusion-level allocations (between portfolios)
     fusion_current_alloc = {}  # Actual drifted allocation between portfolios
@@ -8838,25 +8851,17 @@ def fusion_portfolio_backtest(fusion_portfolio_config, all_portfolio_configs, si
                 print(f"      - ✅ Fusion rebalanced to target allocations")
                 print(f"      - Current fusion weights: {[(name, f'{weight*100:.1f}%') for name, weight in fusion_current_alloc.items()]}")
         
-        # Calculate fusion portfolio value for this date
-        # Use current fusion allocation (which changes on rebalancing dates)
-        fusion_value = 0
+        # Fusion NAV = sum of sleeve dollar values (each backtest already uses scaled init/add for this leg)
+        fusion_value = 0.0
         for portfolio_name in selected_portfolios:
             if portfolio_name in portfolio_results:
-                portfolio_value = portfolio_results[portfolio_name]['with_additions'].iloc[date_idx]
-                current_weight = fusion_current_alloc.get(portfolio_name, 0)
-                fusion_value += portfolio_value * current_weight
-        
+                fusion_value += float(portfolio_results[portfolio_name]['with_additions'].iloc[date_idx])
         fusion_with_additions.iloc[date_idx] = fusion_value
         
-        # Same for no-additions series
-        fusion_value_no_additions = 0
+        fusion_value_no_additions = 0.0
         for portfolio_name in selected_portfolios:
             if portfolio_name in portfolio_results:
-                portfolio_value = portfolio_results[portfolio_name]['no_additions'].iloc[date_idx]
-                current_weight = fusion_current_alloc.get(portfolio_name, 0)
-                fusion_value_no_additions += portfolio_value * current_weight
-        
+                fusion_value_no_additions += float(portfolio_results[portfolio_name]['no_additions'].iloc[date_idx])
         fusion_no_additions.iloc[date_idx] = fusion_value_no_additions
     
     print(f"   ✅ PURE FUSION CALCULATION COMPLETED")
@@ -10718,15 +10723,15 @@ if portfolio_count >= 2:
         **⚠️ IMPORTANT: Only the Rebalance Frequency setting below affects the backtest!**
         
         **How it works:**
-        • Each individual portfolio runs with its own settings (initial value, additions, rebalancing frequency)
-        • The fusion portfolio takes the current value of each portfolio and multiplies by the allocation percentage
+        • Each underlying portfolio keeps its own **rebalancing frequency** and stock logic
+        • For the fusion run, **initial capital** and **added amount** of each portfolio are **multiplied by its fusion %** so the combined wallet matches *one* total (e.g. 25%/75% → sleeve A gets 25% of each deposit, sleeve B gets 75%)
+        • **Fusion NAV** = sum of those two sleeve values (not “% × full NAV” of two full-size accounts)
         • **Only the fusion portfolio's rebalancing frequency matters** for between-portfolio rebalancing
-        • The fusion portfolio's initial value, added amount, and added frequency are **NOT used**
-        • Final value = (Portfolio A value * A%) + (Portfolio B value * B%) + ...
+        • The fusion portfolio's initial value, added amount, and added frequency in the sidebar are **not** what drives the math (each leg uses its own frequency after scaling)
         
         **Example:**
         
-        If Portfolio A (60%) is worth 15k and Portfolio B (40%) is worth 12k, the fusion portfolio value = (15k * 0.60) + (12k * 0.40) = 13.8k
+        Two portfolios each configured with $10k start and $10k/month, fusion 40%/60%: sleeves run as $4k+$6k start and $4k+$6k per month; fusion line ≈ **$10k** then **+$10k**/month total, not two full $10k accounts.
         
         **Note:** This feature is in BETA - not all functionality is complete yet.
         """)
