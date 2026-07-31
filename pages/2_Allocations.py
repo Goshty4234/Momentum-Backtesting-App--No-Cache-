@@ -1,4 +1,5 @@
 # NO CACHE VERSION - ALL @st.cache_data decorators removed - ZERO CACHE ANYWHERE
+# STANDALONE (same bootstrap as 1_Multi_Backtest - no yahoo_finance_setup)
 import streamlit as st
 import datetime
 from datetime import timedelta, time
