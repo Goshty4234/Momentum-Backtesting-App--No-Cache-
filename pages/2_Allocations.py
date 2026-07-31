@@ -1,6 +1,3 @@
-import yahoo_finance_setup as _yahoo_finance_setup
-_yahoo_finance_setup.setup()
-
 # NO CACHE VERSION - ALL @st.cache_data decorators removed - ZERO CACHE ANYWHERE
 import streamlit as st
 import datetime
