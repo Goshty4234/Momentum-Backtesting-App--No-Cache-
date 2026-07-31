@@ -1,44 +1,132 @@
-# Core Streamlit and Data Science Libraries
-streamlit>=1.52.0
-pandas>=2.3.1
-numpy>=2.3.2
-yfinance>=0.2.66
-yahooquery>=2.4.0
-requests>=2.32.4
+# =============================================================================
+# REQUIREMENTS LOCK - momentum backtesting app (Streamlit Cloud + local venv)
+# Generated: 2026-07-30 | Python 3.13.5 | full pip freeze
+#
+# Install: pip install -r requirements.txt  (or uv pip install -r requirements.txt)
+# Policy: exact == only; redeploy should get the same dependency stack.
+# To upgrade: test locally, then: python -m pip freeze > requirements-new.txt
+# =============================================================================
 
-# Performance Optimization
+Brotli==1.1.0
+GitPython==3.1.45
+Jinja2==3.1.6
+MarkupSafe==3.0.2
+PyPDF2==3.0.1
+altair==5.5.0
+annotated-types==0.7.0
+anyio==4.14.2
+attrs==25.3.0
+beautifulsoup4==4.13.4
+blinker==1.9.0
+cachetools==6.1.0
+certifi==2025.8.3
+cffi==1.17.1
+charset-normalizer==3.4.3
+choreographer==1.0.10
+click==8.2.1
+colorama==0.4.6
+contourpy==1.3.3
+cryptography==45.0.6
+cssselect2==0.8.0
+curl_cffi==0.13.0
+cycler==0.12.1
+diskcache==5.6.3
+distro==1.9.0
+exchange_calendars==4.11.1
+fonttools==4.59.1
+frozendict==2.4.6
+gitdb==4.0.12
+google-ai-generativelanguage==0.6.15
+google-api-core==2.28.1
+google-api-python-client==2.186.0
+google-auth-httplib2==0.2.1
+google-auth==2.42.1
+google-generativeai==0.8.5
+googleapis-common-protos==1.71.0
+grpcio-status==1.71.2
+grpcio==1.76.0
+h11==0.16.0
+httpcore==1.0.9
+httplib2==0.31.0
+httpx==0.28.1
+idna==3.10
+jiter==0.16.0
+joblib==1.5.1
+jsonschema-specifications==2025.4.1
+jsonschema==4.25.1
+kaleido==1.0.0
+kiwisolver==1.4.9
+korean-lunar-calendar==0.3.1
+llvmlite==0.45.1
+logistro==1.1.0
+lxml==6.0.2
+matplotlib==3.10.7
+mplcursors==0.6
+multitasking==0.0.12
+narwhals==2.1.2
 numba==0.62.1
-diskcache>=5.6.3
-
-# Financial and Statistical Libraries
-scipy>=1.16.2
-pandas-market-calendars>=5.1.1
-
-# Visualization Libraries
-plotly>=6.3.1
-matplotlib>=3.10.6
-
-# Additional useful libraries for financial analysis
-scikit-learn>=1.7.2
-
-# PDF Generation and Image Processing
-reportlab>=4.4.3
-Pillow>=11.3.0
-kaleido>=1.0.0
-PyPDF2>=3.0.1
-pdfplumber>=0.11.7
-
-# Date and Time Handling
-python-dateutil>=2.9.0.post0
-
-# Excel and Data Import Support
-openpyxl>=3.1.5
-xlrd>=2.0.2
-
-# Arrow compatibility for Streamlit Cloud
-pyarrow>=10.0.0
-
-# AI Providers & Clients
-google-generativeai>=0.7.2
-openai>=1.51.2
-requests>=2.32.4
+numpy==2.3.3
+openai==1.51.2
+orjson==3.11.3
+packaging==25.0
+pandas==2.3.3
+pandas_market_calendars==5.1.1
+pdfminer.six==20250506
+pdfplumber==0.11.7
+peewee==3.18.2
+pillow==11.3.0
+platformdirs==4.3.8
+plotly==6.3.1
+proto-plus==1.26.1
+protobuf==5.29.5
+psutil==7.0.0
+pyarrow==21.0.0
+pyasn1==0.6.1
+pyasn1_modules==0.4.2
+pycparser==2.22
+pydantic==2.12.3
+pydantic_core==2.41.4
+pydeck==0.9.1
+pydyf==0.11.0
+pyluach==2.2.0
+pyparsing==3.2.3
+pypdfium2==4.30.0
+pyphen==0.17.2
+python-dateutil==2.9.0.post0
+pytz==2025.2
+referencing==0.36.2
+reportlab==4.4.3
+requests-futures==1.0.2
+requests==2.32.5
+rpds-py==0.27.0
+rsa==4.9.1
+scikit-learn==1.7.1
+scipy==1.16.2
+seaborn==0.13.2
+simplejson==3.20.1
+six==1.17.0
+smmap==5.0.2
+sniffio==1.3.1
+soupsieve==2.7
+streamlit-plotly-events==0.0.6
+streamlit==1.50.0
+tenacity==9.1.2
+threadpoolctl==3.6.0
+tinycss2==1.4.0
+tinyhtml5==2.0.0
+toml==0.10.2
+toolz==1.0.0
+tornado==6.5.2
+tqdm==4.67.1
+typing-inspection==0.4.2
+typing_extensions==4.14.1
+tzdata==2025.2
+uritemplate==4.2.0
+urllib3==2.5.0
+watchdog==6.0.0
+weasyprint==66.0
+webencodings==0.5.1
+websockets==15.0.1
+yahooquery==2.4.1
+yfinance==0.2.66
+zopfli==0.2.3.post1
