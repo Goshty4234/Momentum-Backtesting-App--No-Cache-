@@ -1,3 +1,6 @@
+import yahoo_finance_setup as _yahoo_finance_setup
+_yahoo_finance_setup.setup()
+
 # NO CACHE VERSION - ALL @st.cache_data decorators removed - ZERO CACHE ANYWHERE
 import streamlit as st
 import datetime
@@ -17,28 +20,12 @@ if 'api_call_count' not in st.session_state:
 
 # Yahoo Finance Cache Functions
 def get_ticker_with_cache(ticker_symbol: str):
-    """Get yf.Ticker object with 4-hour cache"""
-    try:
-        cache_key = f"ticker_obj_{ticker_symbol}"
-        cache_dir = '.streamlit/ticker_cache'
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir, exist_ok=True)
-        
-        disk_cache = dc.Cache(cache_dir)
-        cached_result = disk_cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
-        
-        ticker = yf.Ticker(ticker_symbol)
-        st.session_state.api_call_count += 1
-        disk_cache.set(cache_key, ticker, expire=14400)  # 4 hours
-        return ticker
-    except Exception:
-        return yf.Ticker(ticker_symbol)
+    """Return a fresh yf.Ticker (never disk-cache Ticker objects: pickle breaks sessions/curl_cffi)."""
+    return yf.Ticker(ticker_symbol)
 
 def get_ticker_history_with_cache(ticker_symbol: str, period: str = "max", auto_adjust: bool = False, 
                                  columns: list = None):
-    """Get ticker historical data with 4-hour cache"""
+    """Get ticker historical data with 4-hour disk cache (non-empty frames only)."""
     try:
         cache_key = f"history_{ticker_symbol}_{period}_{auto_adjust}_{columns}"
         cache_dir = '.streamlit/ticker_cache'
@@ -48,7 +35,16 @@ def get_ticker_history_with_cache(ticker_symbol: str, period: str = "max", auto_
         disk_cache = dc.Cache(cache_dir)
         cached_result = disk_cache.get(cache_key)
         if cached_result is not None:
-            return cached_result
+            try:
+                if isinstance(cached_result, pd.DataFrame) and cached_result.empty:
+                    try:
+                        disk_cache.delete(cache_key)
+                    except Exception:
+                        pass
+                elif isinstance(cached_result, pd.DataFrame) and not cached_result.empty:
+                    return cached_result.copy()
+            except Exception:
+                pass
         
         ticker = yf.Ticker(ticker_symbol)
         st.session_state.api_call_count += 1
@@ -59,7 +55,8 @@ def get_ticker_history_with_cache(ticker_symbol: str, period: str = "max", auto_
             if available_columns:
                 hist = hist[available_columns]
         
-        disk_cache.set(cache_key, hist, expire=14400)  # 4 hours
+        if isinstance(hist, pd.DataFrame) and not hist.empty:
+            disk_cache.set(cache_key, hist.copy(), expire=14400)  # 4 hours
         return hist
     except Exception:
         ticker = yf.Ticker(ticker_symbol)
@@ -93,7 +90,7 @@ def get_ticker_info_with_cache(ticker_symbol: str):
 
 def get_batch_download_with_cache(ticker_list: list, period: str = "max", 
                                  auto_adjust: bool = False, **kwargs):
-    """Get batch download data with 4-hour cache"""
+    """Get batch download data with 4-hour cache (do not cache empty failures)."""
     try:
         cache_key = f"batch_{sorted(ticker_list)}_{period}_{auto_adjust}_{kwargs}"
         cache_dir = '.streamlit/ticker_cache'
@@ -102,12 +99,18 @@ def get_batch_download_with_cache(ticker_list: list, period: str = "max",
         
         disk_cache = dc.Cache(cache_dir)
         cached_result = disk_cache.get(cache_key)
-        if cached_result is not None:
+        if cached_result is not None and isinstance(cached_result, pd.DataFrame) and not cached_result.empty:
             return cached_result
+        if cached_result is not None:
+            try:
+                disk_cache.delete(cache_key)
+            except Exception:
+                pass
         
         batch_data = yf.download(ticker_list, period=period, auto_adjust=auto_adjust, **kwargs)
         st.session_state.api_call_count += 1
-        disk_cache.set(cache_key, batch_data, expire=14400)  # 4 hours
+        if isinstance(batch_data, pd.DataFrame) and not batch_data.empty:
+            disk_cache.set(cache_key, batch_data, expire=14400)  # 4 hours
         return batch_data
     except Exception:
         return yf.download(ticker_list, period=period, auto_adjust=auto_adjust, **kwargs)
@@ -1650,10 +1653,16 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
         if cached_data is not None:
             # Data found in disk cache (4h TTL is handled by diskcache)
             try:
-                results[ticker_symbol] = cached_data.copy()
-                cache_hits += 1
-                continue
-            except:
+                if isinstance(cached_data, pd.DataFrame) and cached_data.empty:
+                    try:
+                        disk_cache.delete(cache_key)
+                    except Exception:
+                        pass
+                else:
+                    results[ticker_symbol] = cached_data.copy()
+                    cache_hits += 1
+                    continue
+            except Exception:
                 # If deserialization fails, mark as miss
                 pass
         
@@ -1712,7 +1721,9 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                 period=period,
                 auto_adjust=auto_adjust,
                 progress=False,
-                group_by='ticker'
+                group_by='ticker',
+                actions=True,
+                threads=False,
             )
             print(f"[BATCH DEBUG] Batch download result columns: {batch_data.columns.tolist() if not batch_data.empty else 'EMPTY'}")
             
@@ -1725,9 +1736,31 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                     
                     try:
                         if len(resolved_list) > 1:
-                            ticker_data = batch_data[resolved][['Close', 'Dividends']] if resolved in batch_data else pd.DataFrame()
+                            if (resolved, 'Close') in batch_data.columns:
+                                div = (
+                                    batch_data[(resolved, 'Dividends')]
+                                    if (resolved, 'Dividends') in batch_data.columns
+                                    else pd.Series(0.0, index=batch_data.index)
+                                )
+                                ticker_data = pd.DataFrame({
+                                    'Close': batch_data[(resolved, 'Close')],
+                                    'Dividends': div,
+                                })
+                            else:
+                                ticker_data = pd.DataFrame()
                         else:
-                            ticker_data = batch_data[['Close', 'Dividends']]
+                            if (resolved, 'Close') in batch_data.columns:
+                                div = (
+                                    batch_data[(resolved, 'Dividends')]
+                                    if (resolved, 'Dividends') in batch_data.columns
+                                    else pd.Series(0.0, index=batch_data.index)
+                                )
+                                ticker_data = pd.DataFrame({
+                                    'Close': batch_data[(resolved, 'Close')],
+                                    'Dividends': div,
+                                })
+                            else:
+                                ticker_data = pd.DataFrame()
                         
                         print(f"[BATCH DEBUG] Processing {ticker_symbol}: data_empty={ticker_data.empty}, shape={ticker_data.shape if not ticker_data.empty else 'N/A'}")
                         
@@ -1798,8 +1831,18 @@ def get_multiple_tickers_batch(ticker_list, period="max", auto_adjust=False):
                 results[ticker_symbol] = pd.DataFrame()
     
     if cache_misses and results:
-        downloaded_count = len([r for r in results.values() if r is not None and not r.empty])
-        st.write(f"📥 Downloaded {downloaded_count} new tickers (cached for 4h)")
+        downloaded_count = sum(
+            1
+            for sym in cache_misses
+            if sym in results
+            and results[sym] is not None
+            and isinstance(results[sym], pd.DataFrame)
+            and not results[sym].empty
+        )
+        st.write(
+            f"📥 Fetched {downloaded_count}/{len(cache_misses)} tickers that were not in disk cache "
+            f"({cache_hits} served from cache; new rows cached 4h where applicable)"
+        )
     
     return results
 
@@ -2424,9 +2467,9 @@ if 'alloc_portfolio_configs' not in st.session_state:
             'momentum_strategy': 'Classic',
             'negative_momentum_strategy': 'Cash',
             'momentum_windows': [
-                {"lookback": 365, "exclude": 30, "weight": 0.5},
-                {"lookback": 180, "exclude": 30, "weight": 0.3},
-                {"lookback": 120, "exclude": 30, "weight": 0.2},
+                {"lookback": 365, "exclude": 30, "weight": 0.5, "discard_if_negative": False},
+                {"lookback": 180, "exclude": 30, "weight": 0.3, "discard_if_negative": False},
+                {"lookback": 120, "exclude": 30, "weight": 0.2, "discard_if_negative": False},
             ],
             'calc_beta': False,
             'calc_volatility': False,
@@ -5331,6 +5374,40 @@ def filter_assets_by_ma(valid_assets, reindexed_data, date, ma_window, ma_type='
 # -----------------------
 # Single-backtest core (adapted from your code, robust)
 # -----------------------
+
+def parse_bool_from_json(value, default=False):
+    """Normalize JSON boolean-like values into real Python booleans."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"true", "1", "yes", "y", "on"}:
+            return True
+        if cleaned in {"false", "0", "no", "n", "off"}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    return default
+
+
+def normalize_momentum_windows_discard_flags(momentum_windows):
+    """Ensure discard_if_negative is a real bool on each window (JSON import / legacy configs)."""
+    if not isinstance(momentum_windows, list):
+        return
+    for window in momentum_windows:
+        if isinstance(window, dict):
+            window['discard_if_negative'] = parse_bool_from_json(window.get('discard_if_negative', False), False)
+
+
+def _momentum_window_discards_negative(window, window_return):
+    """Exclude asset when discard_if_negative is set and this window's return is below zero."""
+    if not isinstance(window, dict):
+        return False
+    discard_enabled = parse_bool_from_json(window.get("discard_if_negative", False), False)
+    return discard_enabled and window_return < 0
+
+
 def single_backtest(config, sim_index, reindexed_data):
     print(f"[THRESHOLD DEBUG] single_backtest called for portfolio: {config.get('name', 'Unknown')}")
     stocks_list = config.get('stocks', [])
@@ -5612,6 +5689,7 @@ def single_backtest(config, sim_index, reindexed_data):
     rebalancing_frequency = map_frequency_for_backtest(raw_rebalancing_frequency)
     use_momentum = config.get('use_momentum', True)
     momentum_windows = config.get('momentum_windows', [])
+    normalize_momentum_windows_discard_flags(momentum_windows)
     calc_beta = config.get('calc_beta', False)
     calc_volatility = config.get('calc_volatility', False)
     beta_window_days = config.get('beta_window_days', 365)
@@ -5722,6 +5800,9 @@ def single_backtest(config, sim_index, reindexed_data):
                     ret = ((price_end + divs_in_period) - price_start) / price_start
                 else:
                     ret = (price_end - price_start) / price_start
+                if _momentum_window_discards_negative(window, ret):
+                    is_valid = False
+                    break
                 asset_returns += ret * weight
             if is_valid:
                 cumulative_returns[t] = asset_returns
@@ -7280,9 +7361,9 @@ def reset_stock_selection_callback():
 
 def reset_momentum_windows_callback():
     st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['momentum_windows'] = [
-        {"lookback": 365, "exclude": 30, "weight": 0.5},
-        {"lookback": 180, "exclude": 30, "weight": 0.3},
-        {"lookback": 120, "exclude": 30, "weight": 0.2},
+        {"lookback": 365, "exclude": 30, "weight": 0.5, "discard_if_negative": False},
+        {"lookback": 180, "exclude": 30, "weight": 0.3, "discard_if_negative": False},
+        {"lookback": 120, "exclude": 30, "weight": 0.2, "discard_if_negative": False},
     ]
     st.session_state.alloc_rerun_flag = True
 
@@ -7312,7 +7393,7 @@ def add_momentum_window_callback():
     if 'momentum_windows' not in cfg:
         cfg['momentum_windows'] = []
     # default new window
-    cfg['momentum_windows'].append({"lookback": 90, "exclude": 30, "weight": 0.1})
+    cfg['momentum_windows'].append({"lookback": 90, "exclude": 30, "weight": 0.1, "discard_if_negative": False})
     st.session_state.alloc_portfolio_configs[idx] = cfg
     st.session_state.alloc_rerun_flag = True
 
@@ -7323,6 +7404,14 @@ def remove_momentum_window_callback():
         cfg['momentum_windows'].pop()
         st.session_state.alloc_portfolio_configs[idx] = cfg
         st.session_state.alloc_rerun_flag = True
+
+def update_momentum_discard_if_negative(index):
+    idx = st.session_state.alloc_active_portfolio_index
+    discard_key = f"alloc_discard_if_negative_{idx}_{index}"
+    st.session_state.alloc_portfolio_configs[idx]['momentum_windows'][index]['discard_if_negative'] = parse_bool_from_json(
+        st.session_state.get(discard_key, False), False
+    )
+
 
 def normalize_momentum_weights_callback():
     # Use page-scoped configs for allocations page
@@ -7496,6 +7585,7 @@ def paste_json_callback():
                     # Invalid weight, set to default
                     weight = 0.1
                 window['weight'] = weight
+        normalize_momentum_windows_discard_flags(momentum_windows)
         
         # Map frequency values from app.py format to Allocations format
         def map_frequency(freq):
@@ -7663,9 +7753,9 @@ def update_use_momentum():
             # When momentum is enabled, keep existing beta and volatility settings
             pass
             st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['momentum_windows'] = [
-                {"lookback": 365, "exclude": 30, "weight": 0.5},
-                {"lookback": 180, "exclude": 30, "weight": 0.3},
-                {"lookback": 120, "exclude": 30, "weight": 0.2},
+                {"lookback": 365, "exclude": 30, "weight": 0.5, "discard_if_negative": False},
+                {"lookback": 180, "exclude": 30, "weight": 0.3, "discard_if_negative": False},
+                {"lookback": 120, "exclude": 30, "weight": 0.2, "discard_if_negative": False},
             ]
         else:
             st.session_state.alloc_portfolio_configs[st.session_state.alloc_active_portfolio_index]['momentum_windows'] = []
@@ -9061,20 +9151,24 @@ if active_portfolio['use_momentum']:
     # If no windows exist, show an informational message and allow adding via the button.
     if len(active_portfolio.get('momentum_windows', [])) == 0:
         st.info("No momentum windows configured. Click 'Add Window' to create momentum lookback windows.")
-    col_headers = st.columns(3)
+    col_headers = st.columns(4)
     with col_headers[0]:
         st.markdown("**Lookback (days)**")
     with col_headers[1]:
         st.markdown("**Exclude (days)**")
     with col_headers[2]:
         st.markdown("**Weight %**")
+    with col_headers[3]:
+        st.markdown("**Discard if negative**")
 
     for j in range(len(active_portfolio.get('momentum_windows', []))):
         with st.container():
-            col_mw1, col_mw2, col_mw3 = st.columns(3)
-            lookback_key = f"alloc_lookback_active_{st.session_state.alloc_active_portfolio_index}_{j}"
-            exclude_key = f"alloc_exclude_active_{st.session_state.alloc_active_portfolio_index}_{j}"
-            weight_key = f"alloc_weight_input_active_{st.session_state.alloc_active_portfolio_index}_{j}"
+            col_mw1, col_mw2, col_mw3, col_mw4 = st.columns(4)
+            portfolio_index = st.session_state.alloc_active_portfolio_index
+            lookback_key = f"alloc_lookback_active_{portfolio_index}_{j}"
+            exclude_key = f"alloc_exclude_active_{portfolio_index}_{j}"
+            weight_key = f"alloc_weight_input_active_{portfolio_index}_{j}"
+            discard_key = f"alloc_discard_if_negative_{portfolio_index}_{j}"
             
             # Initialize session state values if not present
             if lookback_key not in st.session_state:
@@ -9097,12 +9191,25 @@ if active_portfolio['use_momentum']:
                     weight_percentage = 10.0
                 st.session_state[weight_key] = int(weight_percentage)
             
+            st.session_state[discard_key] = parse_bool_from_json(
+                active_portfolio['momentum_windows'][j].get('discard_if_negative', False), False
+            )
+            
             with col_mw1:
                 st.number_input(f"Lookback {j+1}", min_value=1, key=lookback_key, label_visibility="collapsed", on_change=update_momentum_lookback, args=(j,))
             with col_mw2:
                 st.number_input(f"Exclude {j+1}", min_value=0, key=exclude_key, label_visibility="collapsed", on_change=update_momentum_exclude, args=(j,))
             with col_mw3:
                 st.number_input(f"Weight {j+1}", min_value=0, max_value=100, step=1, format="%d", key=weight_key, label_visibility="collapsed", on_change=update_momentum_weight, args=(j,))
+            with col_mw4:
+                st.checkbox(
+                    f"Discard if negative {j+1}",
+                    key=discard_key,
+                    label_visibility="collapsed",
+                    on_change=update_momentum_discard_if_negative,
+                    args=(j,),
+                    help="If checked, exclude the stock at rebalance when this window's momentum return is negative.",
+                )
 else:
     # Don't clear momentum_windows - they should persist when momentum is disabled
     # so they're available when momentum is re-enabled or for variant generation
@@ -9443,6 +9550,8 @@ with st.expander("JSON Configuration (Copy & Paste)", expanded=False):
     active_portfolio['sma_window'] = st.session_state.get('alloc_active_sma_window', 200)
     active_portfolio['ma_type'] = st.session_state.get('alloc_active_ma_type', 'SMA')
     active_portfolio['ma_multiplier'] = st.session_state.get('alloc_active_ma_multiplier', 1.48)
+    
+    normalize_momentum_windows_discard_flags(cleaned_config.get('momentum_windows', []))
     
     config_json = json.dumps(cleaned_config, indent=4)
     st.code(config_json, language='json')
@@ -10639,6 +10748,7 @@ def paste_all_json_callback():
                             # Invalid weight, set to default
                             weight = 0.1
                         window['weight'] = weight
+                normalize_momentum_windows_discard_flags(momentum_windows)
                 
                 # Debug: Show what we received for this portfolio
                 if 'momentum_windows' in cfg:
